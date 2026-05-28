@@ -1,0 +1,838 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>莫罗女装展示挑选 H5</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #25201f;
+        --muted: #756c66;
+        --line: #e8ded7;
+        --paper: #fffaf6;
+        --panel: #ffffff;
+        --accent: #a54458;
+        --accent-strong: #823347;
+        --mint: #4f8a76;
+        --gold: #bc8845;
+        --shadow: 0 18px 50px rgba(84, 56, 42, 0.14);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(180deg, rgba(255, 250, 246, 0.92), rgba(250, 244, 238, 0.95)),
+          url("assets/look-02.png") center top / 130% auto fixed;
+        color: var(--ink);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      button,
+      input,
+      textarea {
+        font: inherit;
+      }
+
+      .app {
+        width: min(100%, 520px);
+        margin: 0 auto;
+        min-height: 100vh;
+        background: rgba(255, 250, 246, 0.94);
+      }
+
+      .hero {
+        position: relative;
+        min-height: 92vh;
+        padding: 18px 18px 22px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, rgba(37, 32, 31, 0.08), rgba(255, 250, 246, 0.24) 52%, var(--paper) 94%),
+          url("assets/look-01.png") center 54% / cover no-repeat;
+        z-index: 0;
+      }
+
+      .hero > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .topbar,
+      .hero-actions,
+      .filters,
+      .summary-actions,
+      .drawer-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .topbar {
+        justify-content: space-between;
+      }
+
+      .brand {
+        display: grid;
+        gap: 2px;
+      }
+
+      .brand strong {
+        font-size: 18px;
+      }
+
+      .brand span,
+      .stat span,
+      .meta,
+      .empty,
+      .upload-hint,
+      .field label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .cart-pill,
+      .upload-label,
+      .primary-btn,
+      .ghost-btn,
+      .icon-btn {
+        border: 0;
+        cursor: pointer;
+        min-height: 42px;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .cart-pill {
+        padding: 0 12px;
+        color: #fff;
+        background: var(--accent);
+        box-shadow: 0 10px 24px rgba(165, 68, 88, 0.24);
+      }
+
+      .hero-copy {
+        padding: 42vh 0 0;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        max-width: 10em;
+        font-size: 44px;
+        line-height: 1.05;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .hero-copy p {
+        width: min(100%, 20em);
+        margin-top: 12px;
+        color: #4f4540;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .hero-actions {
+        margin-top: 18px;
+        flex-wrap: wrap;
+      }
+
+      .primary-btn,
+      .upload-label {
+        padding: 0 15px;
+        color: #fff;
+        background: var(--accent);
+        box-shadow: 0 10px 28px rgba(165, 68, 88, 0.2);
+      }
+
+      .ghost-btn {
+        padding: 0 14px;
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(232, 222, 215, 0.92);
+        backdrop-filter: blur(10px);
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 18px;
+      }
+
+      .stat {
+        padding: 12px 10px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(232, 222, 215, 0.86);
+        border-radius: 8px;
+        backdrop-filter: blur(10px);
+      }
+
+      .stat strong {
+        display: block;
+        font-size: 18px;
+      }
+
+      main {
+        padding: 18px;
+      }
+
+      .section-title {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      h2 {
+        font-size: 21px;
+      }
+
+      .upload-panel {
+        padding: 14px;
+        margin-bottom: 18px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .upload-panel input[type="file"] {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .upload-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 0.7fr;
+        gap: 10px;
+        margin-top: 12px;
+      }
+
+      .field {
+        display: grid;
+        gap: 5px;
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        min-height: 40px;
+        padding: 0 10px;
+        color: var(--ink);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .filters {
+        padding-bottom: 14px;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .filter-btn {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 0 13px;
+        color: var(--muted);
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+      }
+
+      .filter-btn.active {
+        color: #fff;
+        background: var(--ink);
+        border-color: var(--ink);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .card {
+        overflow: hidden;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 10px 28px rgba(72, 49, 38, 0.1);
+      }
+
+      .photo {
+        position: relative;
+        aspect-ratio: 3 / 4;
+        background: #efe7df;
+      }
+
+      .photo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+
+      .badge {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        padding: 5px 8px;
+        color: #fff;
+        background: rgba(37, 32, 31, 0.72);
+        border-radius: 999px;
+        font-size: 11px;
+      }
+
+      .card-body {
+        padding: 10px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .title-line {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .title-line h3 {
+        font-size: 14px;
+        line-height: 1.35;
+      }
+
+      .price {
+        white-space: nowrap;
+        color: var(--accent-strong);
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      .meta {
+        min-height: 18px;
+      }
+
+      .pick-btn {
+        width: 100%;
+        min-height: 38px;
+        color: var(--accent);
+        background: #fff7f6;
+        border: 1px solid #efd0d5;
+        border-radius: 8px;
+      }
+
+      .pick-btn.selected {
+        color: #fff;
+        background: var(--mint);
+        border-color: var(--mint);
+      }
+
+      .drawer {
+        position: fixed;
+        inset: auto 0 0;
+        z-index: 20;
+        max-height: 76vh;
+        padding: 16px 18px calc(18px + env(safe-area-inset-bottom));
+        background: var(--panel);
+        border-radius: 18px 18px 0 0;
+        box-shadow: 0 -20px 60px rgba(37, 32, 31, 0.24);
+        transform: translateY(104%);
+        transition: transform 0.24s ease;
+      }
+
+      .drawer.open {
+        transform: translateY(0);
+      }
+
+      .drawer-head {
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .icon-btn {
+        width: 40px;
+        background: #f6eee8;
+        color: var(--ink);
+      }
+
+      .picked-list {
+        display: grid;
+        gap: 10px;
+        max-height: 42vh;
+        overflow: auto;
+        padding-right: 2px;
+      }
+
+      .picked-item {
+        display: grid;
+        grid-template-columns: 56px 1fr auto;
+        gap: 10px;
+        align-items: center;
+        min-height: 66px;
+      }
+
+      .picked-item img {
+        width: 56px;
+        height: 66px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #efe7df;
+      }
+
+      .remove-btn {
+        min-width: 36px;
+        height: 36px;
+        color: var(--accent);
+        background: #fff7f6;
+        border: 1px solid #efd0d5;
+        border-radius: 8px;
+      }
+
+      .summary-actions {
+        margin-top: 14px;
+      }
+
+      .summary-actions button {
+        flex: 1;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: calc(22px + env(safe-area-inset-bottom));
+        z-index: 30;
+        max-width: calc(100% - 36px);
+        padding: 10px 14px;
+        color: #fff;
+        background: rgba(37, 32, 31, 0.88);
+        border-radius: 999px;
+        transform: translate(-50%, 30px);
+        opacity: 0;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+        font-size: 13px;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      @media (min-width: 720px) {
+        body {
+          background-size: cover;
+        }
+
+        .app {
+          width: min(100%, 980px);
+        }
+
+        .hero {
+          min-height: 88vh;
+          padding: 26px 32px 30px;
+        }
+
+        .hero::before {
+          background:
+            linear-gradient(90deg, rgba(255, 250, 246, 0.98) 0%, rgba(255, 250, 246, 0.72) 42%, rgba(255, 250, 246, 0.08) 76%),
+            url("assets/look-01.png") right center / contain no-repeat,
+            #fffaf6;
+        }
+
+        .hero-copy {
+          padding-top: 28vh;
+        }
+
+        h1 {
+          font-size: 58px;
+        }
+
+        main {
+          padding: 26px 32px 42px;
+        }
+
+        .grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .drawer {
+          left: 50%;
+          right: auto;
+          width: min(520px, calc(100% - 32px));
+          transform: translate(-50%, 104%);
+          border-radius: 18px 18px 0 0;
+        }
+
+        .drawer.open {
+          transform: translate(-50%, 0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <section class="hero">
+        <div class="topbar">
+          <div class="brand">
+            <strong>莫罗女装</strong>
+            <span>女装展示挑选</span>
+          </div>
+          <button class="cart-pill" id="openCart" type="button">已选 <b id="cartCount">0</b></button>
+        </div>
+
+        <div class="hero-copy">
+          <h1>把新款摆到顾客手边</h1>
+          <p>上传服装照片，生成移动端展示卡片，顾客现场勾选喜欢的款式，最后复制清单发给店员确认。</p>
+          <div class="hero-actions">
+            <label class="upload-label" for="photoInput">上传照片</label>
+            <button class="ghost-btn" id="scrollCatalog" type="button">查看款式</button>
+          </div>
+          <div class="stats">
+            <div class="stat"><strong id="totalCount">0</strong><span>展示款</span></div>
+            <div class="stat"><strong id="selectedCount">0</strong><span>顾客已选</span></div>
+            <div class="stat"><strong>H5</strong><span>手机友好</span></div>
+          </div>
+        </div>
+      </section>
+
+      <main id="catalog">
+        <section class="upload-panel" aria-label="上传服装照片">
+          <div class="upload-row">
+            <div>
+              <h2>添加新款</h2>
+              <p class="upload-hint">可一次选择多张照片，名称和价格会自动编号，之后可继续上传。</p>
+            </div>
+            <label class="upload-label" for="photoInput">选择照片</label>
+          </div>
+          <input id="photoInput" type="file" accept="image/*" multiple />
+          <div class="form-grid">
+            <div class="field">
+              <label for="nameInput">款式前缀</label>
+              <input id="nameInput" type="text" value="莫罗女装夏季新款" />
+            </div>
+            <div class="field">
+              <label for="categoryInput">分类</label>
+              <select id="categoryInput">
+                <option value="连衣裙">连衣裙</option>
+                <option value="夏季款">夏季款</option>
+                <option value="上衣">上衣</option>
+                <option value="套装">套装</option>
+                <option value="外套">外套</option>
+                <option value="下装">下装</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <div class="section-title">
+          <h2>今日展示</h2>
+          <span class="meta">点击卡片下方按钮加入顾客清单</span>
+        </div>
+        <div class="filters" id="filters"></div>
+        <div class="grid" id="productGrid"></div>
+      </main>
+    </div>
+
+    <aside class="drawer" id="drawer" aria-label="顾客选择清单">
+      <div class="drawer-head">
+        <div>
+          <h2>顾客选择</h2>
+          <p class="meta" id="drawerMeta">还没有选择款式</p>
+        </div>
+        <button class="icon-btn" id="closeCart" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="picked-list" id="pickedList"></div>
+      <div class="summary-actions">
+        <button class="ghost-btn" id="clearSelection" type="button">清空</button>
+        <button class="primary-btn" id="copySelection" type="button">复制清单</button>
+      </div>
+    </aside>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+      const seedProducts = [
+        {
+          id: "summer-01",
+          name: "蓝调碎花无袖连衣裙",
+          category: "夏季款",
+          price: "¥299",
+          size: "S-L",
+          image: "assets/summer-01.png",
+        },
+        {
+          id: "summer-02",
+          name: "亚麻短袖衬衫短裤套装",
+          category: "夏季款",
+          price: "¥329",
+          size: "S-XL",
+          image: "assets/summer-02.png",
+        },
+        {
+          id: "summer-03",
+          name: "薄荷吊带白色半裙套装",
+          category: "夏季款",
+          price: "¥269",
+          size: "S-L",
+          image: "assets/summer-03.png",
+        },
+        {
+          id: "look-01",
+          name: "温柔通勤套装",
+          category: "套装",
+          price: "¥399",
+          size: "S-XL",
+          image: "assets/look-01.png",
+        },
+        {
+          id: "look-02",
+          name: "玫瑰缎面裹身裙",
+          category: "连衣裙",
+          price: "¥329",
+          size: "S-L",
+          image: "assets/look-02.png",
+        },
+        {
+          id: "look-03",
+          name: "利落西装阔腿套装",
+          category: "套装",
+          price: "¥469",
+          size: "M-XL",
+          image: "assets/look-03.png",
+        },
+      ];
+
+      let products = [...seedProducts];
+      const selected = new Set();
+      let activeCategory = "全部";
+
+      const productGrid = document.querySelector("#productGrid");
+      const filters = document.querySelector("#filters");
+      const photoInput = document.querySelector("#photoInput");
+      const nameInput = document.querySelector("#nameInput");
+      const categoryInput = document.querySelector("#categoryInput");
+      const cartCount = document.querySelector("#cartCount");
+      const selectedCount = document.querySelector("#selectedCount");
+      const totalCount = document.querySelector("#totalCount");
+      const drawer = document.querySelector("#drawer");
+      const pickedList = document.querySelector("#pickedList");
+      const drawerMeta = document.querySelector("#drawerMeta");
+      const toast = document.querySelector("#toast");
+
+      function moneyFor(index) {
+        return `¥${259 + ((index * 37) % 180)}`;
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("show");
+        window.clearTimeout(showToast.timer);
+        showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 1800);
+      }
+
+      function categories() {
+        return ["全部", ...Array.from(new Set(products.map((item) => item.category)))];
+      }
+
+      function visibleProducts() {
+        if (activeCategory === "全部") return products;
+        return products.filter((item) => item.category === activeCategory);
+      }
+
+      function renderFilters() {
+        filters.innerHTML = "";
+        categories().forEach((category) => {
+          const button = document.createElement("button");
+          button.className = `filter-btn${category === activeCategory ? " active" : ""}`;
+          button.type = "button";
+          button.textContent = category;
+          button.addEventListener("click", () => {
+            activeCategory = category;
+            render();
+          });
+          filters.appendChild(button);
+        });
+      }
+
+      function renderProducts() {
+        productGrid.innerHTML = "";
+        visibleProducts().forEach((item) => {
+          const card = document.createElement("article");
+          card.className = "card";
+          card.innerHTML = `
+            <div class="photo">
+              <img src="${item.image}" alt="${item.name}" />
+              <span class="badge">${item.category}</span>
+            </div>
+            <div class="card-body">
+              <div class="title-line">
+                <h3>${item.name}</h3>
+                <span class="price">${item.price}</span>
+              </div>
+              <p class="meta">尺码 ${item.size} · 可到店试穿</p>
+              <button class="pick-btn ${selected.has(item.id) ? "selected" : ""}" type="button">
+                ${selected.has(item.id) ? "已加入清单" : "顾客喜欢"}
+              </button>
+            </div>
+          `;
+          card.querySelector(".pick-btn").addEventListener("click", () => togglePick(item.id));
+          productGrid.appendChild(card);
+        });
+      }
+
+      function renderPicked() {
+        const items = products.filter((item) => selected.has(item.id));
+        pickedList.innerHTML = "";
+        drawerMeta.textContent = items.length ? `${items.length} 款待确认` : "还没有选择款式";
+
+        if (!items.length) {
+          pickedList.innerHTML = `<p class="empty">顾客挑选后，会在这里生成确认清单。</p>`;
+          return;
+        }
+
+        items.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "picked-item";
+          row.innerHTML = `
+            <img src="${item.image}" alt="${item.name}" />
+            <div>
+              <strong>${item.name}</strong>
+              <p class="meta">${item.category} · ${item.size} · ${item.price}</p>
+            </div>
+            <button class="remove-btn" type="button" aria-label="移除">×</button>
+          `;
+          row.querySelector(".remove-btn").addEventListener("click", () => togglePick(item.id));
+          pickedList.appendChild(row);
+        });
+      }
+
+      function renderStats() {
+        totalCount.textContent = products.length;
+        cartCount.textContent = selected.size;
+        selectedCount.textContent = selected.size;
+      }
+
+      function render() {
+        renderFilters();
+        renderProducts();
+        renderPicked();
+        renderStats();
+      }
+
+      function togglePick(id) {
+        if (selected.has(id)) {
+          selected.delete(id);
+        } else {
+          selected.add(id);
+          showToast("已加入顾客选择");
+        }
+        render();
+      }
+
+      function addUploadedFiles(files) {
+        Array.from(files).forEach((file, index) => {
+          const id = `upload-${Date.now()}-${index}`;
+          products.unshift({
+            id,
+            name: `${nameInput.value || "莫罗女装夏季新款"} ${products.length + index + 1}`,
+            category: categoryInput.value,
+            price: moneyFor(products.length + index),
+            size: "S-XL",
+            image: URL.createObjectURL(file),
+          });
+        });
+        activeCategory = categoryInput.value;
+        render();
+        showToast(`已上传 ${files.length} 张照片`);
+      }
+
+      function selectionText() {
+        const items = products.filter((item) => selected.has(item.id));
+        if (!items.length) return "";
+        return items
+          .map((item, index) => `${index + 1}. ${item.name}｜${item.category}｜${item.size}｜${item.price}`)
+          .join("\n");
+      }
+
+      photoInput.addEventListener("change", (event) => {
+        const files = event.target.files;
+        if (files && files.length) addUploadedFiles(files);
+        event.target.value = "";
+      });
+
+      document.querySelector("#scrollCatalog").addEventListener("click", () => {
+        document.querySelector("#catalog").scrollIntoView({ behavior: "smooth" });
+      });
+
+      document.querySelector("#openCart").addEventListener("click", () => drawer.classList.add("open"));
+      document.querySelector("#closeCart").addEventListener("click", () => drawer.classList.remove("open"));
+
+      document.querySelector("#clearSelection").addEventListener("click", () => {
+        selected.clear();
+        render();
+      });
+
+      document.querySelector("#copySelection").addEventListener("click", async () => {
+        const text = selectionText();
+        if (!text) {
+          showToast("还没有选择款式");
+          return;
+        }
+
+        const finalText = `顾客选择清单：\n${text}`;
+        try {
+          await navigator.clipboard.writeText(finalText);
+          showToast("清单已复制");
+        } catch {
+          const helper = document.createElement("textarea");
+          helper.value = finalText;
+          helper.setAttribute("readonly", "");
+          helper.style.position = "fixed";
+          helper.style.left = "-999px";
+          document.body.appendChild(helper);
+          helper.select();
+          const copied = document.execCommand("copy");
+          helper.remove();
+          showToast(copied ? "清单已复制" : "当前浏览器不支持自动复制");
+        }
+      });
+
+      render();
+    </script>
+  </body>
+</html>
