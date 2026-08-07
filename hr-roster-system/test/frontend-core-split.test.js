@@ -1,0 +1,44 @@
+const fs = require('fs');
+const path = require('path');
+const assert = require('assert');
+
+const root = path.join(__dirname, '..');
+const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+const index = read('public/index.html');
+const app = read('public/app.js');
+const state = read('public/js/core/state.js');
+const utils = read('public/js/core/utils.js');
+const api = read('public/js/core/api.js');
+const dashboard = read('public/js/views/dashboard.js');
+const rosterTable = read('public/js/views/roster-table.js');
+const roster = read('public/js/views/roster.js');
+const router = read('public/js/core/router.js');
+
+const stateIndex = index.indexOf('/js/core/state.js');
+const utilsIndex = index.indexOf('/js/core/utils.js');
+const apiIndex = index.indexOf('/js/core/api.js');
+const appIndex = index.indexOf('/app.js');
+const dashboardIndex = index.indexOf('/js/views/dashboard.js');
+const rosterTableIndex = index.indexOf('/js/views/roster-table.js');
+const rosterIndex = index.indexOf('/js/views/roster.js');
+const routerIndex = index.indexOf('/js/core/router.js');
+assert(stateIndex > 0 && stateIndex < utilsIndex && utilsIndex < apiIndex && apiIndex < dashboardIndex && dashboardIndex < rosterTableIndex && rosterTableIndex < rosterIndex && rosterIndex < routerIndex && routerIndex < appIndex, '核心脚本加载顺序不正确');
+assert(state.includes('const state = {'), '状态对象未迁移到 state.js');
+assert(state.includes('function showLoading('), '加载状态未迁移到 state.js');
+assert(api.includes('async function api('), 'API 请求未迁移到 api.js');
+assert(api.includes('function cachedApi('), 'API 缓存未迁移到 api.js');
+assert(utils.includes('function escapeHtml('), '通用转义工具未迁移到 utils.js');
+assert(utils.includes('function badge('), '通用状态标签未迁移到 utils.js');
+assert(router.includes('function switchView('), '视图切换未迁移到 router.js');
+assert(!app.includes('const state = {'), 'app.js 仍重复定义 state');
+assert(!app.includes('async function api('), 'app.js 仍重复定义 api');
+assert(!app.includes('function switchView('), 'app.js 仍重复定义视图路由');
+assert(dashboard.includes('async function loadDashboard('), '驾驶舱视图未迁移到独立文件');
+assert(!app.includes('async function loadDashboard('), 'app.js 仍重复定义驾驶舱视图');
+assert(rosterTable.includes('function getSortedRosterRows('), '花名册表格工具未迁移到独立文件');
+assert(roster.includes('async function loadEmployees('), '花名册列表加载未迁移到独立文件');
+assert(roster.includes('function renderEmployees('), '花名册列表渲染未迁移到独立文件');
+assert(!app.includes('async function loadEmployees('), 'app.js 仍重复定义花名册列表加载');
+assert(!app.includes('function renderEmployees('), 'app.js 仍重复定义花名册列表渲染');
+
+console.log('frontend-core-split-tests-ok');

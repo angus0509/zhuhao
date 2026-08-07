@@ -1,0 +1,30 @@
+const service = require('../services/operations.service');
+const { success, asyncHandler } = require('../utils/response');
+
+exports.listCustomers = asyncHandler(async (req, res) => success(res, await service.listCustomers(req.companyId, req.query, req.user)));
+exports.createCustomer = asyncHandler(async (req, res) => success(res, await service.createCustomer(req.companyId, req.body, req.operatorId), '客户及首个项目创建成功并已生效'));
+exports.getCustomerDetail = asyncHandler(async (req, res) => success(res, await service.getCustomerDetail(req.companyId, Number(req.params.id), req.user)));
+exports.updateCustomerPortfolio = asyncHandler(async (req, res) => success(res, await service.updateCustomerPortfolio(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '客户项目情况已更新'));
+exports.listProjects = asyncHandler(async (req, res) => success(res, await service.listProjects(req.companyId, req.query, req.user)));
+exports.createProject = asyncHandler(async (req, res) => success(res, await service.createProject(req.companyId, req.body, req.user), '项目创建成功'));
+exports.listFactoryStaff = asyncHandler(async (req, res) => success(res, await service.listFactoryStaff(req.companyId, req.query, req.user)));
+exports.createFactoryStaff = asyncHandler(async (req, res) => success(res, await service.createFactoryStaff(req.companyId, req.body, req.user), '驻厂人员登记成功'));
+exports.listBlacklist = asyncHandler(async (req, res) => success(res, await service.listBlacklist(req.companyId, req.query)));
+exports.createBlacklist = asyncHandler(async (req, res) => success(res, await service.createBlacklist(req.companyId, req.body, req.operatorId), '黑名单录入成功'));
+exports.batchCreateBlacklist = asyncHandler(async (req, res) => {
+  const data = await service.createBlacklistBatch(req.companyId, req.body.rows, req.operatorId);
+  success(res, data, `批量录入完成：成功${data.successCount}人，失败${data.failureCount}人`);
+});
+exports.listAdvances = asyncHandler(async (req, res) => success(res, await service.listAdvances(req.companyId, req.query, req.user)));
+exports.createAdvance = asyncHandler(async (req, res) => success(res, await service.createAdvance(req.companyId, req.body, req.operatorId, req.user), '预支申请提交成功'));
+exports.approveAdvance = asyncHandler(async (req, res) => success(res, await service.approveAdvance(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '审批完成'));
+exports.payAdvance = asyncHandler(async (req, res) => success(res, await service.payAdvance(req.companyId, Number(req.params.id), req.operatorId, req.user), '放款成功'));
+exports.payrollOverview = asyncHandler(async (req, res) => success(res, await service.payrollOverview(req.companyId, req.user)));
+exports.createPayrollBatch = asyncHandler(async (req, res) => success(res, await service.createPayrollBatch(req.companyId, req.body, req.operatorId, req.user), '工资批次创建成功'));
+exports.submitPayrollBatch = asyncHandler(async (req, res) => success(res, await service.submitPayrollBatch(req.companyId, Number(req.params.id), req.operatorId, req.user), '工资批次已提交复核'));
+exports.reviewPayrollBatch = asyncHandler(async (req, res) => success(res, await service.reviewPayrollBatch(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '工资批次复核完成'));
+exports.publishPayrollBatch = asyncHandler(async (req, res) => success(res, await service.publishPayrollBatch(req.companyId, Number(req.params.id), req.operatorId, req.user), '工资条已发布，进入待签收'));
+exports.operationsHome = asyncHandler(async (req, res) => success(res, await service.operationsHome(req.companyId, req.user)));
+exports.listNotices = asyncHandler(async (req, res) => success(res, await service.listNotices(req.companyId, req.user, req.query)));
+exports.permissionOverview = asyncHandler(async (req, res) => success(res, await service.permissionOverview(req.companyId)));
+exports.createSystemUser = asyncHandler(async (req, res) => success(res, await service.createSystemUser(req.companyId, req.body), '账号创建成功'));

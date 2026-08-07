@@ -1,0 +1,59 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: moluo-mysql-prod
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD未配置}
+      MYSQL_DATABASE: hr_roster
+      MYSQL_USER: hr_roster
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD未配置}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql/schema.mysql.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/seed.mysql.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  app:
+    build: .
+    container_name: moluo-hr-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      NODE_ENV: production
+      PORT: 3100
+      DEFAULT_COMPANY_ID: 1
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: hr_roster
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD未配置}
+      DB_NAME: hr_roster
+      DB_CONNECTION_LIMIT: 20
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET未配置}
+      JWT_EXPIRES_IN_SECONDS: 604800
+      DATA_ENCRYPT_KEY: ${DATA_ENCRYPT_KEY:?DATA_ENCRYPT_KEY未配置}
+      DATA_ENCRYPT_IV: ${DATA_ENCRYPT_IV:?DATA_ENCRYPT_IV未配置}
+    ports:
+      - "127.0.0.1:3120:3100"
+    volumes:
+      - ./uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:

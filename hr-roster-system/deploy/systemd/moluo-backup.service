@@ -1,0 +1,9 @@
+[Unit]
+Description=Moluo HR MySQL daily backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/moluo-hr/scripts/backup-mysql.sh
+User=root

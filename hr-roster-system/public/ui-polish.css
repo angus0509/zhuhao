@@ -1,0 +1,396 @@
+/*
+ * 优益数字化管理系统 · 工业数据中枢细节层
+ * 只增强信息层级、交互反馈和移动端触感，不改变业务布局与权限逻辑。
+ */
+
+:root {
+  --ui-rail: #19b7c4;
+  --ui-rail-soft: rgba(25, 183, 196, .14);
+  --ui-focus: rgba(25, 183, 196, .2);
+  --ui-ease: cubic-bezier(.16, 1, .3, 1);
+  --ui-fast: 160ms;
+  --ui-base: 260ms;
+  --ui-shadow-hover: 0 18px 44px rgba(7, 35, 61, .12);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: .16;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 140 140' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.055'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+
+.workspace {
+  position: relative;
+}
+
+.workspace::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 228px;
+  width: 1px;
+  pointer-events: none;
+  background: linear-gradient(transparent, rgba(25, 183, 196, .3) 14%, rgba(34, 110, 229, .15) 78%, transparent);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+  padding: 10px 0;
+  transition: padding var(--ui-fast) ease, background-color var(--ui-fast) ease, box-shadow var(--ui-fast) ease;
+}
+
+.topbar.is-scrolled {
+  padding: 8px 12px;
+  margin-inline: -12px;
+  border-bottom: 1px solid rgba(176, 201, 219, .58);
+  background: rgba(238, 244, 249, .88);
+  box-shadow: 0 12px 30px rgba(9, 39, 65, .08);
+  backdrop-filter: blur(18px) saturate(130%);
+}
+
+.topbar h1 {
+  transition: color var(--ui-fast) ease, transform var(--ui-fast) ease;
+}
+
+.topbar.ui-title-change h1 {
+  animation: ui-title-shift 320ms var(--ui-ease) both;
+}
+
+.system-status {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid #cce5e5;
+  border-radius: 999px;
+  color: #276474;
+  background: rgba(236, 251, 249, .86);
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.system-status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1ab18b;
+  box-shadow: 0 0 0 4px rgba(26, 177, 139, .12), 0 0 12px rgba(26, 177, 139, .55);
+}
+
+.module-view,
+.content-grid,
+.office-view,
+.dashboard-view,
+.risk-panel {
+  position: relative;
+}
+
+.module-view:not(.hidden)::before,
+.content-grid:not(.hidden)::before,
+.office-view:not(.hidden)::before,
+.dashboard-view:not(.hidden)::before {
+  content: "LIVE / 01";
+  position: absolute;
+  top: -6px;
+  right: 3px;
+  z-index: 4;
+  color: #6b879a;
+  font: 750 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .2em;
+  pointer-events: none;
+}
+
+.ui-view-enter {
+  animation: ui-view-enter 340ms var(--ui-ease) both;
+}
+
+.ui-reveal-pending {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.ui-reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 420ms var(--ui-ease), transform 420ms var(--ui-ease);
+}
+
+.operations-pulse,
+.office-section,
+.rail-panel,
+.business-panel,
+.chart-panel,
+.main-panel,
+.detail-panel,
+.risk-panel,
+.role-card,
+.customer-roster-card,
+.mobile-emp-card {
+  transition:
+    transform var(--ui-base) var(--ui-ease),
+    border-color var(--ui-base) ease,
+    box-shadow var(--ui-base) ease,
+    background-color var(--ui-base) ease;
+}
+
+.business-panel:hover,
+.chart-panel:hover,
+.rail-panel:hover,
+.role-card:hover {
+  border-color: #bedbe6;
+  box-shadow: var(--ui-shadow-hover);
+}
+
+.customer-roster-card:hover,
+.mobile-emp-card:hover {
+  transform: translateY(-2px);
+  border-color: #80c7d4;
+  box-shadow: 0 14px 30px rgba(14, 83, 112, .11);
+}
+
+.nav-item {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.nav-item::after {
+  transition: transform var(--ui-fast) var(--ui-ease), background-color var(--ui-fast) ease, box-shadow var(--ui-fast) ease;
+}
+
+.nav-item.active::after {
+  transform: translateY(-50%) scale(1.35);
+}
+
+.nav-item:focus-visible,
+.mobile-tabbar button:focus-visible,
+button:focus-visible,
+a:focus-visible,
+th[tabindex]:focus-visible {
+  outline: 2px solid #20adbc;
+  outline-offset: 3px;
+}
+
+.primary-button,
+.secondary-button,
+.danger-button,
+.table-button,
+.export-link,
+.quick-entry-card,
+.office-action,
+.mobile-tabbar button {
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.primary-button::after,
+.secondary-button::after,
+.danger-button::after,
+.table-button::after,
+.quick-entry-card::after,
+.office-action::after,
+.mobile-tabbar button::after {
+  content: "";
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  left: var(--press-x, 50%);
+  top: var(--press-y, 50%);
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: rgba(255, 255, 255, .48);
+  transform: translate(-50%, -50%) scale(0);
+}
+
+.secondary-button::after,
+.table-button::after,
+.quick-entry-card::after,
+.office-action::after {
+  background: rgba(24, 150, 170, .16);
+}
+
+.ui-press::after {
+  animation: ui-press-wave 460ms ease-out both;
+}
+
+button:disabled,
+.primary-button:disabled,
+.secondary-button:disabled {
+  cursor: not-allowed;
+  filter: saturate(.65);
+  opacity: .62;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+input,
+select,
+textarea {
+  transition: border-color var(--ui-fast) ease, box-shadow var(--ui-fast) ease, background-color var(--ui-fast) ease;
+}
+
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #9fc4d7;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  background: #fff;
+  box-shadow: 0 0 0 4px var(--ui-focus), 0 8px 22px rgba(18, 91, 121, .07);
+}
+
+input:required:user-invalid,
+select:required:user-invalid,
+textarea:required:user-invalid {
+  border-color: #d88d89;
+  background: #fffafa;
+}
+
+.data-table tbody tr {
+  transition: background-color var(--ui-fast) ease, box-shadow var(--ui-fast) ease;
+}
+
+.data-table tbody tr:hover {
+  box-shadow: inset 3px 0 0 var(--ui-rail);
+}
+
+.roster-table th[data-sort-key]:hover {
+  color: #0b768c;
+  background: #e8f4f7;
+}
+
+.status-pill {
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+
+.toast {
+  border: 1px solid rgba(90, 196, 207, .3);
+  box-shadow: 0 22px 60px rgba(4, 25, 45, .3);
+  backdrop-filter: blur(14px);
+}
+
+.modal[open] .modal-panel,
+dialog[open] .modal-panel {
+  animation: ui-modal-enter 300ms var(--ui-ease) both;
+}
+
+.modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: inherit;
+}
+
+.modal-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: inherit;
+}
+
+#socialModal .modal-panel {
+  width: min(440px, calc(100vw - 28px));
+}
+
+#socialModal .form-grid {
+  padding-block: 8px 18px;
+}
+
+#socialModal select[name="employerInsuranceAction"] {
+  min-height: 52px;
+  border-color: #80c7d4;
+  color: #0d5770;
+  background: linear-gradient(180deg, #fff, #eefafb);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.empty-state,
+.empty-detail,
+.mobile-emp-empty,
+.customer-roster-empty {
+  position: relative;
+  overflow: hidden;
+}
+
+.empty-detail::after,
+.mobile-emp-empty::after {
+  content: "";
+  position: absolute;
+  width: 160px;
+  height: 1px;
+  left: 50%;
+  bottom: 18px;
+  background: linear-gradient(90deg, transparent, rgba(25, 183, 196, .48), transparent);
+  transform: translateX(-50%);
+}
+
+@keyframes ui-view-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-title-shift {
+  from { opacity: .3; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ui-modal-enter {
+  from { opacity: 0; transform: translateY(18px) scale(.975); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes ui-press-wave {
+  0% { opacity: .7; transform: translate(-50%, -50%) scale(0); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(26); }
+}
+
+@media (max-width: 1180px) {
+  .workspace::before { left: 210px; }
+}
+
+@media (max-width: 760px) {
+  body::after { opacity: .1; }
+  .workspace::before { display: none; }
+  .topbar { position: relative; padding-top: 4px; }
+  .topbar.is-scrolled { margin-inline: 0; padding: 4px 0; border: 0; background: transparent; box-shadow: none; backdrop-filter: none; }
+  .system-status { min-height: 32px; }
+  .module-view:not(.hidden)::before,
+  .content-grid:not(.hidden)::before,
+  .office-view:not(.hidden)::before,
+  .dashboard-view:not(.hidden)::before { top: -3px; right: 6px; }
+  .business-panel:hover,
+  .chart-panel:hover,
+  .rail-panel:hover,
+  .role-card:hover,
+  .customer-roster-card:hover,
+  .mobile-emp-card:hover { transform: none; box-shadow: inherit; }
+  .modal[open] .modal-panel,
+  dialog[open] .modal-panel { animation-duration: 220ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-view-enter,
+  .topbar.ui-title-change h1,
+  .modal[open] .modal-panel,
+  dialog[open] .modal-panel,
+  .ui-press::after { animation: none !important; }
+  .ui-reveal-pending,
+  .ui-reveal-visible { opacity: 1; transform: none; transition: none; }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "hr-roster-system",
+  "version": "1.0.0",
+  "private": true,
+  "description": "员工花名册系统，包含生产版 Express + MySQL 后端和零依赖原型。",
+  "scripts": {
+    "start": "node src/app.js",
+    "prototype": "node server.js",
+    "lint": "find public src test wechat-miniprogram/miniprogram -name '*.js' ! -name '._*' -print0 | xargs -0 -n1 node --check",
+    "check": "find public src test -name '*.js' ! -name '._*' -print0 | xargs -0 -n1 node --check && node test/cross-client-data-alignment.test.js && node test/data-scope.test.js && node test/employment-type.test.js && node test/recruitment-channel.test.js && node test/recruitment-channel-management.test.js && node test/roster-customer-grouping.test.js && node test/employer-insurance-only.test.js && node test/roster-edit-scope.test.js && node test/roster-advance-contract.test.js && node test/role-catalog.test.js && node test/onsite-lifecycle-v1.test.js && node test/client-project-unified.test.js && node test/client-delivery-removed.test.js && node test/miniprogram-employee-core.test.js && node test/security-hardening.test.js && node test/high-risk-security.test.js && node test/p1-security-hardening.test.js && node test/role-permission-matrix.test.js && node test/dynamic-notices.test.js && node test/scheduler.test.js && node test/attachment-contract.test.js && node test/motion-theme.test.js && node test/ui-polish.test.js && node test/excel-export.test.js && node test/excel-export-workbook.test.js && node test/frontend-core-split.test.js && node test/dashboard-chart.test.js && node test/operational-monitoring.test.js && node test/roster-table-tools.test.js && node test/mysql-pagination-protocol.test.js && node test/pagination.test.js && node test/employee-pagination-contract.test.js && node test/error-handling.test.js && node test/login-feedback.test.js && node -e \"require('./src/app'); console.log('express-route-load-ok')\"",
+    "check:web": "find public src test -name '*.js' ! -name '._*' -print0 | xargs -0 -n1 node --check && node test/cross-client-data-alignment.test.js && node test/data-scope.test.js && node test/employment-type.test.js && node test/recruitment-channel-management.test.js && node test/employer-insurance-only.test.js && node test/roster-edit-scope.test.js && node test/roster-advance-contract.test.js && node test/role-catalog.test.js && node test/onsite-lifecycle-v1.test.js && node test/client-project-unified.test.js && node test/security-hardening.test.js && node test/p1-security-hardening.test.js && node test/role-permission-matrix.test.js && node test/dynamic-notices.test.js && node test/scheduler.test.js && node test/motion-theme.test.js && node test/ui-polish.test.js && node test/excel-export.test.js && node test/excel-export-workbook.test.js && node test/frontend-core-split.test.js && node test/dashboard-chart.test.js && node test/operational-monitoring.test.js && node test/roster-table-tools.test.js && node test/mysql-pagination-protocol.test.js && node test/pagination.test.js && node test/employee-pagination-contract.test.js && node test/error-handling.test.js && node test/login-feedback.test.js && node -e \"require('./src/app'); console.log('express-route-load-ok')\"",
+    "smoke": "node test/api-smoke.js",
+    "smoke:onsite": "node test/onsite-role-smoke.js",
+    "uat:onsite": "node test/onsite-lifecycle-uat.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.6.1",
+    "multer": "^2.2.0",
+    "mysql2": "^3.12.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
