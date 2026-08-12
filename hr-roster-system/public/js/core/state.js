@@ -18,6 +18,10 @@ const state = {
   recruiters: [],
   recruitmentSuppliers: [],
   recruitmentChannels: [],
+  risks: [],
+  riskCases: [],
+  selectedRiskId: null,
+  selectedRiskProjectId: null,
   rosterViewMode: 'grouped',
   activeView: 'office'
 };

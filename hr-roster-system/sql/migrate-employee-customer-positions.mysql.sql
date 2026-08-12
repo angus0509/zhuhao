@@ -45,7 +45,8 @@ INSERT INTO hr_position (company_id, position_name, position_code, risk_level, i
 SELECT c.id, p.position_name, p.position_code, p.risk_level, p.is_special_work, 1
 FROM hr_company c
 JOIN (
-  SELECT '装配工' position_name, 'ASSEMBLY' position_code, 1 risk_level, 0 is_special_work
+  SELECT '普工' position_name, 'OP' position_code, 1 risk_level, 0 is_special_work
+  UNION ALL SELECT '装配工', 'ASSEMBLY', 1, 0
   UNION ALL SELECT '包装工', 'PACKING', 1, 0
   UNION ALL SELECT '机台操作工', 'MACHINE-OP', 2, 0
   UNION ALL SELECT '冲压工', 'STAMPING', 3, 1
@@ -69,6 +70,7 @@ WHERE NOT EXISTS (
 
 -- 按稳定岗位编码纠正旧客户端字符集可能造成的中文乱码
 UPDATE hr_position SET position_name = CASE position_code
+  WHEN 'OP' THEN '普工'
   WHEN 'ASSEMBLY' THEN '装配工'
   WHEN 'PACKING' THEN '包装工'
   WHEN 'MACHINE-OP' THEN '机台操作工'
@@ -87,7 +89,7 @@ UPDATE hr_position SET position_name = CASE position_code
   WHEN 'CUSTOMER-SERVICE' THEN '客服专员'
   WHEN 'DATA-ENTRY' THEN '数据录入员'
   ELSE position_name END
-WHERE position_code IN ('ASSEMBLY','PACKING','MACHINE-OP','STAMPING','INJECTION','CNC-OP','WAREHOUSE','FORKLIFT','MATERIAL','MAINTENANCE','MFG-CLERK','ADMIN-CLERK','RECRUITER','ONSITE-HR','PAYROLL-HR','CUSTOMER-SERVICE','DATA-ENTRY');
+WHERE position_code IN ('OP','ASSEMBLY','PACKING','MACHINE-OP','STAMPING','INJECTION','CNC-OP','WAREHOUSE','FORKLIFT','MATERIAL','MAINTENANCE','MFG-CLERK','ADMIN-CLERK','RECRUITER','ONSITE-HR','PAYROLL-HR','CUSTOMER-SERVICE','DATA-ENTRY');
 
 -- ============================================================
 -- 迁移后验证（预期结果：0 行）

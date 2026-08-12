@@ -1,6 +1,6 @@
 const db = require('../db');
 const { createError } = require('../utils/response');
-const { employeeScope } = require('../utils/data-scope');
+const { workTaskScope } = require('../utils/data-scope');
 
 const TASK_TYPE_NAMES = {
   ARRIVAL: '待确认到岗',
@@ -9,7 +9,6 @@ const TASK_TYPE_NAMES = {
   DOCUMENT: '待补员工资料',
   OFFBOARD: '待完成离职交接',
   INSURANCE_TERMINATION: '离职待雇主险减保',
-  PAYROLL_SETTLEMENT: '离职工资待结算',
   TRANSFER_ACCEPTANCE: '跨项目转岗待接收'
 };
 
@@ -20,6 +19,8 @@ function formatTask(row) {
     employeeName: row.employee_name || '',
     employeeNo: row.employee_no || '',
     customerName: row.customer_name || '',
+    targetCustomerName: row.target_customer_name || '',
+    targetProjectName: row.target_project_name || '',
     positionName: row.position_name || '',
     taskType: row.task_type,
     sourceId: row.source_id || null,
@@ -43,16 +44,20 @@ async function listTasks(companyId, query, user) {
     taskType: query.taskType || null,
     riskLevel: query.riskLevel ? Number(query.riskLevel) : null
   };
-  const scope = employeeScope(user, params, 'e', 'j');
+  const scope = workTaskScope(user, params, 't', 'e', 'j');
   const rows = await db.query(
-    `SELECT t.*,e.name employee_name,e.employee_no,cu.customer_name,p.position_name,u.real_name assigned_user_name
+    `SELECT t.*,e.name employee_name,e.employee_no,cu.customer_name,p.position_name,u.real_name assigned_user_name,
+            target_project.project_name target_project_name,target_customer.customer_name target_customer_name
      FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
      LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
      LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
      LEFT JOIN hr_position p ON p.id=j.position_id AND p.company_id=e.company_id
      LEFT JOIN sys_user u ON u.id=t.assigned_user_id
+     LEFT JOIN labor_project target_project ON target_project.id=t.project_id AND target_project.company_id=t.company_id
+     LEFT JOIN crm_customer target_customer ON target_customer.id=target_project.customer_id AND target_customer.company_id=t.company_id
      WHERE t.company_id=:companyId
+       AND t.task_type<>'PAYROLL_SETTLEMENT'
        AND (:taskStatus IS NULL OR t.task_status=:taskStatus)
        AND (:taskType IS NULL OR t.task_type=:taskType)
        AND (:riskLevel IS NULL OR t.risk_level=:riskLevel)
@@ -66,7 +71,7 @@ async function listTasks(companyId, query, user) {
 
 async function getScopedTask(companyId, taskId, user) {
   const params = { companyId, taskId };
-  const scope = employeeScope(user, params, 'e', 'j');
+  const scope = workTaskScope(user, params, 't', 'e', 'j');
   const task = await db.first(
     `SELECT t.* FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
@@ -92,7 +97,7 @@ async function startTask(companyId, taskId, operatorId, user) {
 async function completeTask(companyId, taskId, body, operatorId, user) {
   const task = await getScopedTask(companyId, taskId, user);
   if (Number(task.task_status) >= 2) throw createError('待办已结束，不能重复完成');
-  if (['OFFBOARD', 'PAYROLL_SETTLEMENT', 'TRANSFER_ACCEPTANCE'].includes(task.task_type)) {
+  if (['OFFBOARD', 'TRANSFER_ACCEPTANCE'].includes(task.task_type)) {
     throw createError('该待办必须通过对应业务操作完成，不能直接勾选完成');
   }
   if (Number(task.risk_level) === 3) {

@@ -1,4 +1,5 @@
 const { signToken } = require('../src/utils/token');
+const db = require('../src/db');
 
 const baseUrl = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:3100/api';
 const userId = Number(process.env.ONSITE_SMOKE_USER_ID || 0);
@@ -9,7 +10,7 @@ if (!userId) {
   process.exit(1);
 }
 
-const token = signToken({ userId, companyId, username: 'onsite-role-smoke', employeeId: null });
+let token = '';
 const paths = [
   '/auth/me',
   '/bootstrap',
@@ -32,6 +33,18 @@ async function request(path) {
 }
 
 async function main() {
+  const user = await db.first(
+    'SELECT id,company_id companyId,username,employee_id employeeId,token_version tokenVersion FROM sys_user WHERE id=:userId AND company_id=:companyId AND status=1',
+    { userId, companyId }
+  );
+  if (!user) throw new Error('驻厂 smoke 用户不存在或已停用');
+  token = signToken({
+    userId: user.id,
+    companyId: user.companyId,
+    username: user.username,
+    employeeId: user.employeeId || null,
+    tokenVersion: Number(user.tokenVersion || 0)
+  });
   const me = await request('/auth/me');
   if (!me.roles?.some(role => role.roleCode === 'onsite_staff')) {
     throw new Error('测试账号未绑定驻厂专员角色');
@@ -43,7 +56,9 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exit(1);
-});
+main()
+  .catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  })
+  .finally(() => db.pool.end());

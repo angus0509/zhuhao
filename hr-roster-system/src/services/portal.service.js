@@ -134,18 +134,58 @@ async function updateClientServiceStatus(companyId, requestId, body) {
 
 async function listTalents(companyId, user) {
   const params = { companyId, scopeUserId: Number(user?.id || 0) };
+  const linkedEmployeeScope = !user || Number(user.dataScope) === 1
+    ? ''
+    : employeeScope(user, params, 'e', 'j').replace(/^\s*AND\s+/i, '');
+  const scopeCondition = linkedEmployeeScope
+    ? `AND (t.owner_user_id=:scopeUserId OR (t.employee_id IS NOT NULL AND ${linkedEmployeeScope}))`
+    : '';
   const rows = await db.query(
-    `SELECT t.*, u.real_name owner_name FROM talent_candidate t
+    `SELECT t.*,u.real_name owner_name,e.employee_status,e.lifecycle_status,
+            j.fee_mode,j.employment_type,j.hire_date,
+            c.customer_name,pj.project_name,pos.position_name,
+            COALESCE(rc.channel_name,t.source_channel) recruitment_channel_name
+     FROM talent_candidate t
      LEFT JOIN sys_user u ON u.id = t.owner_user_id
+     LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id AND e.deleted_at IS NULL
+     LEFT JOIN hr_employee_job j ON j.id=(
+       SELECT j2.id FROM hr_employee_job j2
+       WHERE j2.company_id=t.company_id AND j2.employee_id=t.employee_id
+       ORDER BY j2.id DESC LIMIT 1
+     )
+     LEFT JOIN crm_customer c ON c.id=COALESCE(t.customer_id,j.customer_id) AND c.company_id=t.company_id
+     LEFT JOIN labor_project pj ON pj.id=COALESCE(t.project_id,j.project_id) AND pj.company_id=t.company_id
+     LEFT JOIN hr_position pos ON pos.id=COALESCE(t.position_id,j.position_id) AND pos.company_id=t.company_id
+     LEFT JOIN hr_recruitment_channel rc ON rc.id=COALESCE(t.recruitment_channel_id,e.recruitment_channel_id) AND rc.company_id=t.company_id
      WHERE t.company_id = :companyId
-       ${!user || Number(user.dataScope) === 1 ? '' : 'AND t.owner_user_id = :scopeUserId'}
+       ${scopeCondition}
      ORDER BY t.id DESC`, params
   );
   const statusNames = { 1: '待联系', 2: '跟进中', 3: '待入职', 4: '已入职', 5: '已淘汰' };
+  const sourceTypeNames = { MANUAL: '手工录入', UNJOINED: '未入职回流', RESIGNED: '离职回流' };
+  const employeeStatusNames = { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' };
+  const availableStatusNames = { 1: '可联系', 2: '暂不考虑', 3: '已重新入职' };
   return rows.map(row => ({
     id: row.id, name: row.name, phone: maskPhone(row.phone), source: row.source_channel || '',
     intentionJob: row.intended_position || '', tags: row.remark ? row.remark.split(/[，,]/).filter(Boolean) : [],
-    followStatus: statusNames[row.candidate_status] || '待联系', ownerName: row.owner_name || '企业管理员'
+    followStatus: statusNames[row.candidate_status] || '待联系', ownerName: row.owner_name || '企业管理员',
+    employeeId: row.employee_id || null,
+    talentSourceType: row.talent_source_type || 'MANUAL',
+    talentSourceTypeName: sourceTypeNames[row.talent_source_type] || '手工录入',
+    customerName: row.customer_name || '未关联客户',
+    projectName: row.project_name || '未关联项目',
+    positionName: row.position_name || row.intended_position || '未填写岗位',
+    recruitmentChannelName: row.recruitment_channel_name || row.source_channel || '未填写渠道',
+    employeeStatus: row.employee_status ?? row.employee_status_snapshot ?? null,
+    employeeStatusName: employeeStatusNames[row.employee_status ?? row.employee_status_snapshot] || '未转员工',
+    availableStatus: Number(row.available_status || 1),
+    availableStatusName: availableStatusNames[row.available_status] || '可联系',
+    feeMode: row.fee_mode || '',
+    employmentTypeName: employmentTypeNames[row.employment_type] || '',
+    hireDate: row.hire_date || '',
+    resignedAt: row.resigned_at || '',
+    resignationReason: row.resignation_reason || '',
+    flowedAt: row.flowed_at || row.updated_at || row.created_at
   }));
 }
 
@@ -159,8 +199,10 @@ async function createTalent(companyId, body, operatorId) {
   const statusMap = { 待联系: 1, 跟进中: 2, 已面试: 2, 待入职: 3, 已入职: 4, 已淘汰: 5 };
   const result = await db.query(
     `INSERT INTO talent_candidate
-     (company_id,name,id_card_no,id_card_hash,phone,intended_position,source_channel,candidate_status,owner_user_id,remark)
-     VALUES (:companyId,:name,:idCardNo,:idCardHash,:phone,:position,:source,:status,:ownerId,:remark)`,
+     (company_id,name,id_card_no,id_card_hash,phone,intended_position,source_channel,candidate_status,
+      talent_source_type,available_status,flowed_at,owner_user_id,remark)
+     VALUES (:companyId,:name,:idCardNo,:idCardHash,:phone,:position,:source,:status,
+      'MANUAL',1,NOW(),:ownerId,:remark)`,
     {
       companyId, name: body.name, idCardNo: body.idCardNo ? encrypt(body.idCardNo) : null,
       idCardHash: body.idCardNo ? sha256(body.idCardNo) : null, phone: body.phone,

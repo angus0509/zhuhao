@@ -18,3 +18,5 @@ exports.updateRoleDepartments = asyncHandler(async (req, res) => success(res, aw
 exports.listDepartments = asyncHandler(async (req, res) => success(res, await systemService.listDepartments(req.companyId)));
 exports.listPermissions = asyncHandler(async (req, res) => success(res, await systemService.listPermissions()));
 exports.listProjects = asyncHandler(async (req, res) => success(res, await systemService.listProjects(req.companyId)));
+exports.getProjectOnsiteAssignees = asyncHandler(async (req, res) => success(res, await systemService.getProjectOnsiteAssignees(req.companyId, Number(req.params.id))));
+exports.updateProjectOnsiteAssignees = asyncHandler(async (req, res) => success(res, await systemService.updateProjectOnsiteAssignees(req.companyId, Number(req.params.id), req.body.userIds, req.operatorId), '驻厂专员派遣成功'));

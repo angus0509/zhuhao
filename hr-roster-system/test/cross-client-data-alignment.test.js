@@ -18,15 +18,24 @@ assertIncludes(roster, "apiAllPages('/api/employees', query)", '桌面 Web 花�
 assertIncludes(app, "apiAllPages('/api/employees', query)", '手机 Web 未使用与桌面端一致的员工接口');
 if (app.includes('/api/employees/mine')) throw new Error('手机 Web 仍只显示自己创建的员工');
 assertIncludes(app, "apiAllPages('/api/advances')", 'Web 工资预支未读取完整权限范围数据');
+assertIncludes(app, "form.elements.advanceAt.value = localDateTimeInputValue()", 'Web 驻厂预支未默认当前登记时间');
 assertIncludes(app, "emp.lifecycleStatus === 'OFFBOARDING'", '手机 Web 未识别离职交接中状态');
 assertIncludes(html, 'id="employeeStatusField"', '桌面 Web 新增员工缺少录入状态');
 assertIncludes(html, 'id="mobileEmployeeStatusField"', '手机 Web 新增员工缺少录入状态');
-assertIncludes(html, '<option value="1" selected>待入职</option>', 'Web 新增员工未默认待入职');
+assertIncludes(html, '<option value="6" selected>面试（先简单登记）</option>', 'Web 新增员工未默认面试');
+assertIncludes(html, '<option value="5">未入职（自动进入人才库）</option>', 'Web 新增员工缺少未入职状态');
 assertIncludes(app, 'delete body.employeeStatus', 'Web 编辑员工仍可能覆盖生命周期状态');
+assertIncludes(app, 'function applyEmployeeFormDefaults(form)', 'Web 新增员工缺少跨端统一默认值');
+assertIncludes(app, "item.positionCode === 'OP' || item.positionName === '普工'", 'Web 新增员工未默认定位普工岗位');
 assertIncludes(
   employeeService,
-  'const employeeStatus = [1, 2].includes(Number(body.employeeStatus)) ? Number(body.employeeStatus) : 1;',
+  'const employeeStatus = [1, 2, 5, 6].includes(Number(body.employeeStatus)) ? Number(body.employeeStatus) : 1;',
   '后端新增员工缺省状态不是待入职'
+);
+assertIncludes(
+  employeeService,
+  "ORDER BY CASE WHEN position_code = 'OP' OR position_name = '普工' THEN 0 ELSE 1 END",
+  '共享岗位字典未保证普工排在第一位'
 );
 
 for (const endpoint of ['/api/bootstrap', '/api/summary', '/api/operations/home', '/api/work-tasks', '/api/recruitment-channels', '/api/payroll/overview']) {
@@ -45,12 +54,18 @@ if (fs.existsSync(miniRoot)) {
   const miniPayroll = read('wechat-miniprogram/miniprogram/pages/payroll/index.js');
   const miniInsurance = read('wechat-miniprogram/miniprogram/pages/employees/insurance/index.js');
 
-  assertIncludes(miniEmployees, 'async loadAllEmployeePages(keyword)', '小程序员工列表未读取完整分页');
+  assertIncludes(miniEmployees, 'async loadAllEmployeePages(keyword, customerId', '小程序员工列表未读取完整分页');
   assertIncludes(miniEmployees, 'url: `/employees?page=1&pageSize=200', '小程序员工未使用共享员工接口');
   assertIncludes(miniEmployees, "item.lifecycleStatus === 'OFFBOARDING'", '小程序未识别离职交接状态');
   assertIncludes(miniAdvances, 'async loadAllAdvancePages()', '小程序预支未读取完整分页');
   assertIncludes(miniAdvances, "url: '/advances?page=1&pageSize=200'", '小程序预支未使用共享预支接口');
-  assertIncludes(miniAdd, 'employeeStatusIndex: 0', '小程序新增员工未默认待入职');
+  assertIncludes(miniAdvances, "recordMode: 'onsite'", '小程序预支未使用共享驻厂登记模式');
+  assertIncludes(miniAdvances, "url: '/employees?page=1&pageSize=200'", '小程序预支员工选择未关联共享花名册');
+  assertIncludes(miniAdd, 'employeeStatusIndex: 0', '小程序新增员工未默认第一项状态');
+  assertIncludes(miniAdd, 'const EMPLOYEE_STATUS_VALUES = [6, 1, 2, 5];', '小程序未将面试放在状态第一位');
+  assertIncludes(miniAdd, 'workTypeIndex: 0', '小程序新增员工工资类型未与 Web 一致默认计时');
+  assertIncludes(miniAdd, 'sortPositionsForEmployeeForm', '小程序岗位列表缺少普工优先排序保护');
+  assertIncludes(miniAdd, 'positionIndex: defaultPositionIndex >= 0', '小程序新增员工未默认选择普工岗位');
   assertIncludes(miniAdd, 'delete payload.employeeStatus', '小程序编辑员工仍可能覆盖生命周期状态');
   assertIncludes(miniAdd, 'channelSource: f.channelSource.trim()', '小程序新增员工未提交招聘渠道');
   assertIncludes(miniInsurance, 'employerInsuranceAction', '小程序未提交雇主险增减动作');

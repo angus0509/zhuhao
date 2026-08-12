@@ -123,6 +123,8 @@ run_migration "$STAGE_DIR/sql/migrate-recruitment-channel-20260806.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-payslip-receipt-audit-20260806.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-token-version-20260806.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-remove-insurance-menu-20260807.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onsite-contract-permission-20260811.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-employee-address-interview-20260811.mysql.sql"
 
 # 驻厂生命周期迁移为一次性结构升级。若核心待办表已存在则不重复执行，随后统一核对完整性。
 ONSITE_MIGRATED="$(docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
@@ -132,6 +134,12 @@ if [ "$ONSITE_MIGRATED" = "0" ]; then
 else
   echo "驻厂生命周期核心表已存在，跳过一次性迁移并执行完整性核对"
 fi
+run_migration "$STAGE_DIR/sql/migrate-simplified-resignation-20260811.mysql.sql"
+
+# 人才库回流依赖离职闭环字段，必须在驻厂生命周期迁移之后执行。
+run_migration "$STAGE_DIR/sql/migrate-talent-employee-flow-20260810.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-unified-risk-center-20260810.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -145,8 +153,14 @@ test "$UNASSIGNED_COUNT" = "0" || { echo "仍有 $UNASSIGNED_COUNT 条员工岗�
 AUDIT_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='hr_employee' AND COLUMN_NAME IN ('channel_source','created_by')")"
 test "$AUDIT_COLUMN_COUNT" = "2" || { echo "员工审计字段迁移不完整" >&2; exit 1; }
 
-PERMISSION_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_permission WHERE permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','riskCase:menu','audit:menu','audit:view','permission:menu') AND status=1")"
+PERMISSION_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_permission WHERE permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view','permission:menu') AND status=1")"
 test "$PERMISSION_COUNT" = "10" || { echo "菜单及查看权限迁移不完整: $PERMISSION_COUNT/10" >&2; exit 1; }
+
+LEGACY_RISK_MENU_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_permission WHERE permission_code='riskCase:menu' AND status=0")"
+test "$LEGACY_RISK_MENU_COUNT" = "1" || { echo "旧风险整改菜单未停用" >&2; exit 1; }
+
+LEGACY_OPEN_RISK_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM hr_risk_alert WHERE risk_type NOT IN (1,7) AND handle_status IN (0,1)")"
+test "$LEGACY_OPEN_RISK_COUNT" = "0" || { echo "仍有 $LEGACY_OPEN_RISK_COUNT 条非核心风险处于待处理状态" >&2; exit 1; }
 
 REMOVED_INSURANCE_PERMISSION_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_permission WHERE permission_code IN ('insurance:menu','insurance:view') AND status=0")"
 test "$REMOVED_INSURANCE_PERMISSION_COUNT" = "2" || { echo "保险提示旧权限未完全停用" >&2; exit 1; }
@@ -169,6 +183,9 @@ test "$PAYSLIP_RECEIPT_LOG_READY" = "1" || { echo "工资条签收证据表迁�
 TOKEN_VERSION_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='sys_user' AND COLUMN_NAME='token_version'")"
 test "$TOKEN_VERSION_READY" = "1" || { echo "账号Token版本字段迁移不完整" >&2; exit 1; }
 
+TALENT_FLOW_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='talent_candidate' AND COLUMN_NAME IN ('employee_id','customer_id','project_id','position_id','recruitment_channel_id','talent_source_type','employee_status_snapshot','available_status','resigned_at','resignation_reason','flowed_at')")"
+test "$TALENT_FLOW_COLUMN_COUNT" = "11" || { echo "人才库员工流转字段迁移不完整: $TALENT_FLOW_COLUMN_COUNT/11" >&2; exit 1; }
+
 ONSITE_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('hr_employee_change','hr_recruiter','hr_recruitment_supplier','hr_work_task')")"
 test "$ONSITE_TABLE_COUNT" = "4" || { echo "驻厂生命周期数据表迁移不完整: $ONSITE_TABLE_COUNT/4" >&2; exit 1; }
 
@@ -184,7 +201,10 @@ test "$ONSITE_ROLE_COUNT" = "1" || { echo "驻厂人员角色迁移不完整" >&
 ONSITE_EDIT_BROKEN="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.role_code='onsite_staff' AND r.status=1 AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code='employee:update')")"
 test "$ONSITE_EDIT_BROKEN" = "0" || { echo "驻厂人员员工编辑权限迁移不完整" >&2; exit 1; }
 
-BROKEN_ROLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.status=1 AND r.role_code IN ('company_admin','hr_manager','onsite_staff','payroll_staff') AND ((r.role_code='company_admin' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','riskCase:menu','audit:menu','audit:view','permission:menu'))<10) OR (r.role_code='hr_manager' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','riskCase:menu','audit:menu','audit:view'))<9) OR (r.role_code='onsite_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','blacklist:menu'))<2) OR (r.role_code='payroll_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','advance:menu','payroll:menu'))<3))")"
+ONSITE_CONTRACT_BROKEN="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.role_code='onsite_staff' AND r.status=1 AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code='contract:manage')")"
+test "$ONSITE_CONTRACT_BROKEN" = "0" || { echo "驻厂人员合同登记权限迁移不完整" >&2; exit 1; }
+
+BROKEN_ROLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.status=1 AND r.role_code IN ('company_admin','hr_manager','onsite_staff','payroll_staff') AND ((r.role_code='company_admin' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view','permission:menu'))<10) OR (r.role_code='hr_manager' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view'))<9) OR (r.role_code='onsite_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','blacklist:menu'))<2) OR (r.role_code='payroll_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','advance:menu','payroll:menu'))<3))")"
 test "$BROKEN_ROLE_COUNT" = "0" || { echo "有 $BROKEN_ROLE_COUNT 个角色权限迁移不完整" >&2; exit 1; }
 
 # 覆盖代码前再次确认生产配置，发布包本身不包含该文件。

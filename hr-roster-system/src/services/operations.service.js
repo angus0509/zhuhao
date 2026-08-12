@@ -180,6 +180,13 @@ async function listProjects(companyId, query, user) {
     `SELECT p.id, p.customer_id customerId, p.project_code projectCode, p.project_name projectName, p.service_type serviceType,
             p.factory_name factoryName, p.factory_address factoryAddress, p.start_date startDate,
             p.end_date endDate, p.status, c.customer_name customerName, u.real_name managerName,
+            (SELECT GROUP_CONCAT(DISTINCT onsite_user.real_name ORDER BY onsite_user.real_name SEPARATOR '、')
+             FROM sys_user_project onsite_up
+             JOIN sys_user onsite_user ON onsite_user.id=onsite_up.user_id AND onsite_user.company_id=p.company_id AND onsite_user.status=1
+             JOIN sys_user_role onsite_ur ON onsite_ur.user_id=onsite_user.id
+             JOIN sys_role onsite_role ON onsite_role.id=onsite_ur.role_id AND onsite_role.company_id=p.company_id
+               AND onsite_role.status=1 AND onsite_role.role_code='onsite_staff'
+             WHERE onsite_up.project_id=p.id) onsiteManagerNames,
             (SELECT COUNT(*) FROM factory_staff fs WHERE fs.project_id = p.id AND fs.onsite_status = 2) onsiteCount,
             (SELECT COUNT(DISTINCT fs.employee_id) FROM factory_staff fs
               WHERE fs.project_id = p.id AND fs.onsite_status = 2
@@ -364,14 +371,32 @@ async function listAdvances(companyId, query, user) {
     `SELECT a.id, a.apply_no applyNo, a.employee_id employeeId, e.name employeeName, e.employee_no employeeNo,
             a.apply_amount applyAmount, a.approved_amount approvedAmount, a.apply_reason applyReason,
             a.advance_status advanceStatus, a.outstanding_amount outstandingAmount, a.created_at createdAt,
+            a.paid_at paidAt, COALESCE(a.paid_at,a.created_at) advanceAt,
+            CASE WHEN a.advance_status IN (4,5) THEN a.approved_amount ELSE 0 END paidAmount,
+            creator.real_name recordedByName, creator.username recordedByUsername,
             c.customer_name customerName, p.project_name projectName
      FROM salary_advance a JOIN hr_employee e ON e.id = a.employee_id AND e.company_id=a.company_id
      LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
      LEFT JOIN crm_customer c ON c.id=j.customer_id AND c.company_id=e.company_id
-     LEFT JOIN labor_project p ON p.id=a.project_id AND p.company_id=a.company_id WHERE ${where}
+     LEFT JOIN labor_project p ON p.id=a.project_id AND p.company_id=a.company_id
+     LEFT JOIN sys_user creator ON creator.id=a.created_by AND (creator.company_id=a.company_id OR creator.company_id IS NULL)
+     WHERE ${where}
      ORDER BY a.id DESC LIMIT :pageSize OFFSET :offset`, params
   );
   return { page, pageSize, total: Number(total.total), list };
+}
+
+function normalizeAdvanceAt(value) {
+  const raw = String(value || '').trim();
+  const matched = raw.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?$/);
+  if (!matched) throw createError('请选择正确的预支时间');
+  const normalized = `${matched[1]} ${matched[2]}:${matched[3] || '00'}`;
+  const timestamp = new Date(`${matched[1]}T${matched[2]}:${matched[3] || '00'}+08:00`).getTime();
+  if (!Number.isFinite(timestamp)) throw createError('预支时间格式不正确');
+  const now = Date.now();
+  if (timestamp > now + 10 * 60 * 1000) throw createError('预支时间不能晚于当前时间');
+  if (timestamp < now - 366 * 24 * 60 * 60 * 1000) throw createError('只能补录最近一年内的预支记录');
+  return normalized;
 }
 
 async function createAdvance(companyId, body, operatorId, user) {
@@ -379,6 +404,9 @@ async function createAdvance(companyId, body, operatorId, user) {
   if (!body.employeeId || !body.applyAmount || !applyReason) throw createError('员工、预支金额和原因不能为空');
   const amount = Number(body.applyAmount);
   if (amount <= 0) throw createError('预支金额必须大于0');
+  if (amount > 2000) throw createError('单笔预支金额不能超过2000元');
+  const onsiteRecord = body.recordMode === 'onsite';
+  const advanceAt = onsiteRecord ? normalizeAdvanceAt(body.advanceAt) : null;
   await assertEmployeeScope(companyId, Number(body.employeeId), user);
   const employee = await db.first(
     `SELECT e.id, j.customer_id customerId FROM hr_employee e
@@ -410,11 +438,37 @@ async function createAdvance(companyId, body, operatorId, user) {
   const applyNo = `YZ${Date.now()}`;
   const result = await db.query(
     `INSERT INTO salary_advance
-     (company_id, project_id, employee_id, apply_no, apply_amount, apply_reason, advance_status, created_by)
-     VALUES (:companyId, :projectId, :employeeId, :applyNo, :amount, :reason, 1, :operatorId)`,
-    { companyId, projectId, employeeId: Number(body.employeeId), applyNo, amount, reason: applyReason, operatorId }
+     (company_id, project_id, employee_id, apply_no, apply_amount, approved_amount, apply_reason,
+      advance_status, approval_remark, paid_at, paid_by, outstanding_amount, created_by)
+     VALUES (:companyId, :projectId, :employeeId, :applyNo, :amount, :approvedAmount, :reason,
+             :advanceStatus, :approvalRemark, :paidAt, :paidBy, :outstandingAmount, :operatorId)`,
+    {
+      companyId,
+      projectId,
+      employeeId: Number(body.employeeId),
+      applyNo,
+      amount,
+      approvedAmount: onsiteRecord ? amount : null,
+      reason: String(applyReason).trim().slice(0, 255),
+      advanceStatus: onsiteRecord ? 4 : 1,
+      approvalRemark: onsiteRecord ? '驻厂现场登记' : null,
+      paidAt: advanceAt,
+      paidBy: onsiteRecord ? operatorId : null,
+      outstandingAmount: onsiteRecord ? amount : 0,
+      operatorId
+    }
   );
-  return { advanceId: result.insertId, applyNo };
+  if (onsiteRecord) {
+    // 财务敏感操作只记录对象、项目和状态，不在审计日志中写入金额与用途明文。
+    await db.query(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+       VALUES (:companyId,:operatorId,'驻厂预支','salary_advance',:advanceId,'create_onsite_record',
+               JSON_OBJECT('employeeId',:employeeId,'projectId',:projectId,'status','recorded'))`,
+      { companyId, operatorId, advanceId: result.insertId, employeeId: Number(body.employeeId), projectId }
+    );
+  }
+  return { advanceId: result.insertId, applyNo, recorded: onsiteRecord, advanceAt };
 }
 
 async function assertAdvanceScope(companyId, advanceId, user) {
@@ -767,15 +821,18 @@ async function operationsHome(companyId, user) {
     db.first(`SELECT COUNT(*) total FROM hr_employee e
       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
       WHERE e.company_id = :companyId AND e.employee_status = 2 AND e.deleted_at IS NULL
+      AND e.lifecycle_status <> 'OFFBOARDING'
       AND NOT EXISTS (SELECT 1 FROM hr_labor_contract c WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1)
       ${employeeFilter('e', 'j')}`, params),
     db.first(`SELECT COUNT(*) total FROM hr_employee e
       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
       WHERE e.company_id = :companyId AND e.employee_status = 2 AND e.deleted_at IS NULL
+      AND e.lifecycle_status <> 'OFFBOARDING'
       AND NOT EXISTS (
         SELECT 1 FROM hr_social_security es
         WHERE es.id=(SELECT es2.id FROM hr_social_security es2 WHERE es2.company_id=e.company_id AND es2.employee_id=e.id ORDER BY es2.id DESC LIMIT 1)
           AND es.employer_insurance_status=1
+          AND (es.employer_end_date IS NULL OR es.employer_end_date >= CURRENT_DATE())
       )
       ${employeeFilter('e', 'j')}`, params),
     db.first(`SELECT COUNT(*) total FROM salary_detail d JOIN salary_batch db_batch ON db_batch.id=d.batch_id AND db_batch.company_id=d.company_id
@@ -803,7 +860,7 @@ async function operationsHome(companyId, user) {
      FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
      LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
-     WHERE t.company_id=:companyId AND t.task_status IN (0,1)
+     WHERE t.company_id=:companyId AND t.task_status IN (0,1) AND t.task_type<>'PAYROLL_SETTLEMENT'
        ${employeeScope(user, taskParams, 'e', 'j')}
      GROUP BY t.task_type ORDER BY MAX(t.risk_level) DESC,COUNT(*) DESC`,
     taskParams
@@ -815,16 +872,17 @@ async function operationsHome(companyId, user) {
     DOCUMENT: ['员工资料待补', 'roster'],
     OFFBOARD: ['离职交接待办', 'roster'],
     INSURANCE_TERMINATION: ['离职待减雇主险', 'roster'],
-    PAYROLL_SETTLEMENT: ['离职工资待结算', 'payroll'],
     TRANSFER_ACCEPTANCE: ['跨项目转岗待接收', 'tasks']
   };
-  const lifecycleTodos = lifecycleTasks.map(item => ({
+  const lifecycleTodos = lifecycleTasks
+    .filter(item => !['CONTRACT', 'INSURANCE'].includes(item.taskType))
+    .map(item => ({
     id: `lifecycle-${item.taskType}`,
     title: taskConfig[item.taskType]?.[0] || item.taskType,
     count: Number(item.count || 0),
     view: taskConfig[item.taskType]?.[1] || 'roster',
     tone: Number(item.riskLevel) === 3 ? 'red' : Number(item.riskLevel) === 2 ? 'amber' : 'blue'
-  }));
+    }));
 
   return {
     workforce: {

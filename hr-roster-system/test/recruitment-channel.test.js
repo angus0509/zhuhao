@@ -25,7 +25,7 @@ try {
 if (!tooLongRejected) throw new Error('超长招聘渠道未被拦截');
 
 if ((page.match(/name="channelSource"/g) || []).length < 2) throw new Error('桌面端和手机Web必须使用自由填写招聘渠道');
-if ((page.match(/placeholder="请填写招聘渠道"/g) || []).length !== 2) throw new Error('招聘渠道输入框必须默认空白');
+if ((page.match(/name="channelSource"[^>]*required/g) || []).length) throw new Error('招聘渠道不应强制必填');
 if (page.includes('data-recruitment-channel') || page.includes('formRecruitmentChannelSelect')) throw new Error('员工表单仍存在招聘渠道下拉框');
 if (!app.includes('channelSource: row.recruitmentChannelName || row.channelSource')) throw new Error('编辑员工时未回填自由文本招聘渠道');
 if (!page.includes('class="col-channel"') || !page.includes('data-sort-key="recruitmentChannelName"') || !page.includes('>招聘渠道</th>')) {
@@ -37,7 +37,7 @@ if (hasMiniProgramSource) {
   const miniJs = fs.readFileSync(path.join(miniRoot, 'pages/employees/add/index.js'), 'utf8');
   const miniWxml = fs.readFileSync(path.join(miniRoot, 'pages/employees/add/index.wxml'), 'utf8');
   const miniDetailWxml = fs.readFileSync(path.join(miniRoot, 'pages/employees/detail/index.wxml'), 'utf8');
-  if (!miniJs.includes("if (!f.channelSource.trim())") || !miniWxml.includes('placeholder="请填写招聘渠道"')) throw new Error('小程序招聘渠道未改为自由填写');
+  if (miniJs.includes("if (!f.channelSource.trim())") || !miniWxml.includes('data-field="channelSource"')) throw new Error('小程序招聘渠道未改为选填');
   if (!miniDetailWxml.includes("basic.recruitmentChannelName || '-'")) throw new Error('小程序员工详情未统一显示招聘渠道');
 }
 

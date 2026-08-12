@@ -73,7 +73,7 @@ function canViewSensitiveEmployee() {
 
 function configureSensitiveEmployeeFields(form, editing) {
   const allowed = canViewSensitiveEmployee();
-  for (const name of ['idCardNo', 'phone', 'bankCardNo', 'emergencyPhone']) {
+  for (const name of ['idCardNo', 'address', 'phone', 'bankCardNo', 'emergencyPhone']) {
     const input = form?.elements?.[name];
     if (!input) continue;
     if (!input.dataset.defaultPlaceholder) input.dataset.defaultPlaceholder = input.placeholder || '';
@@ -91,7 +91,7 @@ function configureSensitiveEmployeeFields(form, editing) {
 
 function removeUnavailableSensitiveFields(form, body, editing) {
   if (!editing || form.dataset.canViewSensitiveEmployee === '1') return body;
-  for (const name of ['idCardNo', 'phone', 'bankCardNo', 'emergencyPhone']) delete body[name];
+  for (const name of ['idCardNo', 'address', 'phone', 'bankCardNo', 'emergencyPhone']) delete body[name];
   return body;
 }
 
@@ -307,7 +307,7 @@ function showBatchResult(element, result) {
 
 async function submitEmployeeBatch(event) {
   event.preventDefault();
-  const columns = ['name', 'gender', 'education', 'idCardNo', 'phone', 'customerName', 'projectName', 'positionName', 'workType', 'hireDate', 'employmentType', 'feeMode', 'channelSource', 'remark', 'bankName', 'bankCardNo', 'emergencyContact', 'emergencyPhone'];
+  const columns = ['name', 'gender', 'education', 'idCardNo', 'address', 'phone', 'customerName', 'projectName', 'positionName', 'workType', 'hireDate', 'employmentType', 'feeMode', 'channelSource', 'remark', 'bankName', 'bankCardNo', 'emergencyContact', 'emergencyPhone', 'employeeStatus'];
   const rows = parseBatchTable(event.currentTarget.elements.tableData.value, columns, '姓名');
   const result = await api('/api/employees/batch', { method: 'POST', body: JSON.stringify({ rows }) });
   showBatchResult($('#batchEmployeeResult'), result);
@@ -338,7 +338,8 @@ function updateEmployeeProjectOptions(form, selectedValue = '') {
   const projects = (state.bootstrap.projects || []).filter(item => Number(item.customerId) === customerId);
   const allowLegacyUnassigned = form.dataset.allowLegacyUnassigned === '1'
     && Number(form.dataset.legacyCustomerId || 0) === customerId;
-  const projectRequired = Number(state.user?.dataScope) === 5 && !allowLegacyUnassigned;
+  const employeeStatus = Number(form.elements.employeeStatus?.value || form.dataset.employeeStatus || 1);
+  const projectRequired = employeeStatus !== 6 && Number(state.user?.dataScope) === 5 && !allowLegacyUnassigned;
   select.required = projectRequired;
   select.innerHTML = `<option value="">${projectRequired ? '请选择所属项目' : '暂不关联项目'}</option>${optionHtml(projects, 'id', 'projectName')}`;
   if (selectedValue && projects.some(item => Number(item.id) === Number(selectedValue))) select.value = String(selectedValue);
@@ -378,30 +379,46 @@ function syncAdvanceCustomerFromEmployee() {
   populateAdvanceProjectOptions();
 }
 
+function localDateTimeInputValue(date = new Date()) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 async function prepareAdvanceForm() {
   await Promise.all([loadProjects(), loadEmployees()]);
   const form = $('#advanceForm');
   form.reset();
   $('#advanceEmployeeSelect').innerHTML = activeEmployeeOptionHtml();
   $('#advanceCustomerSelect').innerHTML = optionHtml(state.clients, 'id', 'clientName');
+  form.elements.advanceAt.value = localDateTimeInputValue();
   syncAdvanceCustomerFromEmployee();
   $('#advanceModal').showModal();
 }
 
 async function loadBootstrap() {
   state.bootstrap = await cachedApi('/api/bootstrap', 60000);
-  $('#customerSelect').innerHTML = `<option value="">全部</option>${optionHtml(state.bootstrap.customers, 'id', 'customerName')}`;
-  $('#formCustomerSelect').innerHTML = optionHtml(state.bootstrap.customers, 'id', 'customerName');
-  $('#transferCustomerSelect').innerHTML = optionHtml(state.bootstrap.customers, 'id', 'customerName');
-  $('#transferProjectSelect').innerHTML = `<option value="">仅调整客户/岗位</option>${optionHtml(state.bootstrap.projects || [], 'id', 'projectName')}`;
-  $('#formPositionSelect').innerHTML = optionHtml(state.bootstrap.positions, 'id', 'positionName');
-  $('#transferPositionSelect').innerHTML = optionHtml(state.bootstrap.positions, 'id', 'positionName');
+  const customers = state.bootstrap.customers || [];
+  const projects = state.bootstrap.projects || [];
+  const positions = [...(state.bootstrap.positions || [])].sort((left, right) => {
+    if (left.positionName === '普工') return -1;
+    if (right.positionName === '普工') return 1;
+    return Number(left.id || 0) - Number(right.id || 0);
+  });
+  state.bootstrap.customers = customers;
+  state.bootstrap.projects = projects;
+  state.bootstrap.positions = positions;
+  $('#customerSelect').innerHTML = `<option value="">全部</option>${optionHtml(customers, 'id', 'customerName')}`;
+  $('#formCustomerSelect').innerHTML = `<option value="">请选择工作单位</option>${optionHtml(customers, 'id', 'customerName')}`;
+  $('#transferCustomerSelect').innerHTML = optionHtml(customers, 'id', 'customerName');
+  $('#transferProjectSelect').innerHTML = `<option value="">仅调整客户/岗位</option>${optionHtml(projects, 'id', 'projectName')}`;
+  $('#formPositionSelect').innerHTML = `<option value="">请选择岗位</option>${optionHtml(positions, 'id', 'positionName')}`;
+  $('#transferPositionSelect').innerHTML = optionHtml(positions, 'id', 'positionName');
   updateTransferProjectOptions();
   /* 移动端表单下拉框 */
   const mCust = $('#mFormCustomerSelect');
   const mPos = $('#mFormPositionSelect');
-  if (mCust) mCust.innerHTML = optionHtml(state.bootstrap.customers, 'id', 'customerName');
-  if (mPos) mPos.innerHTML = optionHtml(state.bootstrap.positions, 'id', 'positionName');
+  if (mCust) mCust.innerHTML = `<option value="">请选择工作单位</option>${optionHtml(customers, 'id', 'customerName')}`;
+  if (mPos) mPos.innerHTML = `<option value="">请选择岗位</option>${optionHtml(positions, 'id', 'positionName')}`;
   updateEmployeeProjectOptions($('#employeeForm'));
   updateEmployeeProjectOptions($('#mobileEmployeeForm'));
 }
@@ -431,6 +448,8 @@ async function login(event) {
       body: JSON.stringify(body)
     });
 
+    // 仅保存在当前页面内存中；生产环境同时使用 HttpOnly Cookie，原型环境使用 Bearer Token。
+    state.token = data.token || '';
     state.user = data.user;
     showApp();
     toast('登录成功', 'success');
@@ -490,11 +509,24 @@ function applyNavVisibility() {
     const requiredPerms = String(item.dataset.actionPerm || '').split(',').filter(Boolean);
     item.style.display = isCompanyAdmin || requiredPerms.every(permission => perms.includes(permission)) ? '' : 'none';
   });
+  configureMetricRiskAccess();
+  applyTopbarActionVisibility(state.activeView);
   /* 移动端 tabbar 也按权限显隐 */
   $$('.mobile-tabbar button').forEach(item => {
     const view = item.dataset.view;
     const navItem = $(`.nav-item[data-view="${view}"]`);
     if (navItem) item.style.display = navItem.style.display;
+  });
+}
+
+function applyTopbarActionVisibility(view = state.activeView) {
+  const permissions = state.user?.permissions || [];
+  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+  $$('[data-topbar-views]').forEach(item => {
+    const views = String(item.dataset.topbarViews || '').split(',').map(value => value.trim()).filter(Boolean);
+    const requiredPermissions = String(item.dataset.actionPerm || '').split(',').filter(Boolean);
+    const hasPermission = isCompanyAdmin || requiredPermissions.every(permission => permissions.includes(permission));
+    item.style.display = views.includes(view) && hasPermission ? '' : 'none';
   });
 }
 
@@ -557,6 +589,7 @@ function renderDetail(detail) {
       <div class="info-grid">
         ${infoItem('手机号', basic.phone)}
         ${infoItem('身份证号', basic.idCardNo)}
+        ${infoItem('地址', basic.address || '-')}
         ${infoItem('学历', basic.education || '-')}
         ${infoItem('银行卡', basic.bankCardNo || '-')}
         ${infoItem('紧急联系人', basic.emergencyContact || '-')}
@@ -601,7 +634,7 @@ function renderDetail(detail) {
       <div class="timeline">
         ${
           riskRows.length
-            ? riskRows.map(risk => `<div class="timeline-item"><strong>${escapeHtml(risk.riskTitle)}</strong><span>${escapeHtml(risk.riskDesc)}</span></div>`).join('')
+            ? riskRows.map(risk => `<button type="button" class="timeline-item risk-link-item" data-risk-jump="${risk.id}"><strong>${escapeHtml(risk.riskTitle)}</strong><span>${escapeHtml(risk.riskDesc)}</span><small>查看风险详情 →</small></button>`).join('')
             : '<span class="muted">暂无风险</span>'
         }
       </div>
@@ -641,113 +674,129 @@ function renderCertificates(rows) {
     .join('');
 }
 
-async function loadRisks() {
-  setPanelLoading('#riskList');
-  try {
-  const risks = await api('/api/risk-alerts');
-  const categoryFilter = $('#riskCategoryFilter') ? $('#riskCategoryFilter').value : '';
-  const matchCat = (text, cat) => {
-    if (cat === '合同') return /合同/.test(text);
-    if (cat === '雇主险') return /雇主险|雇主责任险/.test(text);
-    if (cat === '证件') return /证件|工种|特种/.test(text);
-    if (cat === '其他') return !/合同|雇主险|雇主责任险|证件|工种|特种/.test(text);
-    return true;
-  };
-  const catOf = row => { const t = row.riskTitle + row.riskDesc; if (/合同/.test(t)) return '合同'; if (/雇主险|雇主责任险/.test(t)) return '雇主险'; if (/证件|工种|特种/.test(t)) return '证件'; return '其他'; };
-  const contractCount = risks.filter(r => matchCat(r.riskTitle + r.riskDesc, '合同')).length;
-  const insuranceCount = risks.filter(r => /雇主险|雇主责任险/.test(r.riskTitle + r.riskDesc)).length;
-  const certCount = risks.filter(r => matchCat(r.riskTitle + r.riskDesc, '证件')).length;
-  const otherCount = risks.length - contractCount - insuranceCount - certCount;
-  const highCount = risks.filter(r => r.riskLevel === 3 && r.handleStatus !== 2 && r.handleStatus !== 3).length;
-  if ($('#complianceKpis')) {
-    $('#complianceKpis').innerHTML = [
-      ['高风险未结', highCount, highCount ? 'danger' : 'good'],
-      ['合同类', contractCount, contractCount ? 'warning' : 'good'],
-      ['雇主险', insuranceCount, insuranceCount ? 'warning' : 'good'],
-      ['证件类', certCount, certCount ? 'warning' : 'good'],
-      ['其他', otherCount, otherCount ? 'neutral' : 'good']
-    ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
+function buildOnboardingComplianceRows(risks = state.risks || []) {
+  const employees = new Map();
+  for (const risk of risks) {
+    const employeeId = Number(risk.employeeId);
+    if (!employees.has(employeeId)) {
+      employees.set(employeeId, {
+        employeeId,
+        employeeName: risk.employeeName || risk.employeeNo,
+        employeeNo: risk.employeeNo || '',
+        customerName: risk.customerName || '',
+        projectId: risk.projectId || null,
+        projectName: risk.projectName || '',
+        positionName: risk.positionName || '',
+        hireDate: risk.hireDate || '',
+        contractSigned: Boolean(risk.contractSigned),
+        employerInsuranceActive: Boolean(risk.employerInsuranceActive),
+        alerts: []
+      });
+    }
+    const employee = employees.get(employeeId);
+    employee.contractSigned = employee.contractSigned || Boolean(risk.contractSigned);
+    employee.employerInsuranceActive = employee.employerInsuranceActive || Boolean(risk.employerInsuranceActive);
+    employee.alerts.push(risk);
   }
-  const filtered = categoryFilter ? risks.filter(r => matchCat(r.riskTitle + r.riskDesc, categoryFilter)) : risks;
-  const list = $('#riskList');
-  if (!filtered.length) {
-    list.innerHTML = '<div class="risk-item"><div><strong>暂无风险</strong><p>当前没有符合筛选条件的风险预警。</p></div></div>';
-    return;
-  }
-  list.innerHTML = filtered
-    .map(row => {
-      const high = row.riskLevel === 3 ? 'high' : '';
-      const done = row.handleStatus === 2 || row.handleStatus === 3;
-      const catLabel = catOf(row);
-      const catColor = catLabel === '雇主险' ? 'red' : catLabel === '合同' ? 'amber' : catLabel === '证件' ? 'amber' : 'blue';
-      return `
-        <article class="risk-item ${high}">
-          <div>
-            <div class="risk-item-head"><h3>${row.riskTitle}</h3>${badge(catLabel, catColor)}</div>
-            <p>${row.riskDesc}</p>
-            <div class="risk-meta">
-              ${badge(row.employeeName || row.employeeNo, 'blue')}
-              ${badge(row.riskLevelName, row.riskLevel === 3 ? 'red' : 'amber')}
-              ${badge(row.handleStatusName, done ? 'green' : 'red')}
-            </div>
-          </div>
-          <div class="risk-actions">
-            ${
-              done
-                ? ''
-                : `${row.riskCaseId ? `<button class="secondary-button" type="button" data-action="view-risk-case" data-id="${row.riskCaseId}">查看整改</button>` : `<button class="primary-button" type="button" data-action="create-risk-case" data-id="${row.id}">创建整改</button>`}
-                   <button class="secondary-button" type="button" data-action="handle-risk" data-id="${row.id}" data-status="2">直接处理</button>
-                   <button class="secondary-button" type="button" data-action="handle-risk" data-id="${row.id}" data-status="3">忽略</button>`
-            }
-          </div>
-        </article>
-      `;
-    })
-    .join('');
-  } finally { setPanelLoaded('#riskList'); }
+  return [...employees.values()].map(employee => ({
+    ...employee,
+    completed: employee.contractSigned && employee.employerInsuranceActive,
+    pendingCount: Number(!employee.contractSigned) + Number(!employee.employerInsuranceActive)
+  })).sort((left, right) => right.pendingCount - left.pendingCount || Number(right.employeeId) - Number(left.employeeId));
 }
 
-async function loadRiskCases() {
-  setPanelLoading('#riskCaseList');
-  try {
-  const status = $('#riskCaseStatusFilter').value;
-  const rows = await api(`/api/risk-cases${status === '' ? '' : `?status=${status}`}`);
-  const list = $('#riskCaseList');
-  const openCount = rows.filter(row => row.status !== 3).length;
-  const overdueCount = rows.filter(row => row.overdue).length;
-  const reviewCount = rows.filter(row => row.status === 2).length;
-  $('#riskCaseSummary').innerHTML = `
-    <div><span>当前列表</span><strong>${rows.length}</strong></div>
-    <div><span>未关闭</span><strong>${openCount}</strong></div>
-    <div class="${overdueCount ? 'danger' : ''}"><span>已逾期</span><strong>${overdueCount}</strong></div>
-    <div><span>待复核</span><strong>${reviewCount}</strong></div>
-  `;
-  if (!rows.length) {
-    list.innerHTML = '<div class="risk-item"><div><strong>暂无整改任务</strong><p>可在风险预警页面将风险纳入整改闭环。</p></div></div>';
+function applyRiskPreset(preset) {
+  const filter = $('#riskComplianceFilter');
+  if (!filter) return;
+  const mapped = { open: 'pending', high: 'pending', contract: 'contract', insurance: 'insurance', completed: 'completed' };
+  filter.value = mapped[preset] || 'all';
+  renderRiskCenter();
+}
+
+function renderRiskCenter() {
+  const filter = $('#riskComplianceFilter')?.value || 'pending';
+  const keyword = ($('#riskKeywordInput')?.value || '').trim().toLowerCase();
+  const all = buildOnboardingComplianceRows();
+  const contractPending = all.filter(row => !row.contractSigned);
+  const insurancePending = all.filter(row => !row.employerInsuranceActive);
+  const pending = all.filter(row => !row.completed);
+  const completed = all.filter(row => row.completed);
+  $('#complianceKpis').innerHTML = [
+    ['open', '待完善员工', pending.length, '查看名单'],
+    ['contract', '合同待签', contractPending.length, '登记合同'],
+    ['insurance', '雇主险待增', insurancePending.length, '办理增保'],
+    ['completed', '两项已完成', completed.length, '合规完成']
+  ].map(([preset, labelText, value, hint]) => `<button type="button" class="risk-command-kpi ${preset !== 'completed' && value ? 'danger' : ''}" data-risk-preset="${preset}"><span>${labelText}</span><strong>${value}</strong><small>${hint} →</small></button>`).join('');
+
+  const filtered = all.filter(row => {
+    if (filter === 'pending' && row.completed) return false;
+    if (filter === 'contract' && row.contractSigned) return false;
+    if (filter === 'insurance' && row.employerInsuranceActive) return false;
+    if (filter === 'completed' && !row.completed) return false;
+    if (state.selectedRiskProjectId && Number(row.projectId) !== Number(state.selectedRiskProjectId)) return false;
+    if (keyword && !`${row.employeeName} ${row.employeeNo} ${row.customerName} ${row.projectName} ${row.positionName}`.toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+  $('#riskQueueCount').textContent = `${filtered.length} 人`;
+  const list = $('#riskList');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="risk-command-empty"><strong>当前范围没有员工</strong><p>切换查看范围，或点击“重新检查”同步最新合同和雇主险状态。</p></div>';
+    $('#riskDetailPanel').innerHTML = '<div class="risk-detail-empty"><span>ONBOARDING FILE</span><strong>暂无待处理事项</strong><p>新员工入职后会自动进入这里。</p></div>';
     return;
   }
-  list.innerHTML = rows.map(row => `
-    <article class="risk-item risk-case-item ${row.overdue ? 'high' : ''}">
-      <div>
-        <h3>${row.riskTitle}</h3>
-        <p>${row.riskDesc}</p>
-        <div class="risk-meta">
-          ${badge(row.employeeName || row.employeeNo, 'blue')}
-          ${badge(row.riskLevelName, row.riskLevel === 3 ? 'red' : 'amber')}
-          ${badge(row.statusName, row.status === 3 ? 'green' : row.overdue ? 'red' : 'amber')}
-          ${row.overdue ? badge('已逾期', 'red') : ''}
-        </div>
-        <div class="case-detail-grid">
-          ${infoItem('责任人', `${row.ownerName}${row.ownerDept ? ` / ${row.ownerDept}` : ''}`)}
-          ${infoItem('整改期限', row.deadline)}
-          ${infoItem('整改措施', row.correctiveMeasure)}
-          ${infoItem('整改证据', row.evidenceNote || '待提交')}
-        </div>
-      </div>
-      <div class="risk-actions"><button class="secondary-button" type="button" data-action="edit-risk-case" data-id="${row.id}">更新整改</button></div>
-    </article>
-  `).join('');
-  } finally { setPanelLoaded('#riskCaseList'); }
+  if (!filtered.some(row => Number(row.employeeId) === Number(state.selectedRiskId))) state.selectedRiskId = filtered[0].employeeId;
+  list.innerHTML = filtered.map(row => `<article class="risk-command-card ${Number(row.employeeId) === Number(state.selectedRiskId) ? 'selected' : ''} ${row.completed ? 'completed' : 'high'}" data-risk-detail="${row.employeeId}" tabindex="0" role="button">
+    <div class="risk-command-card-top"><span class="risk-severity-code">${row.completed ? '✓' : row.pendingCount}</span><div><strong>${escapeHtml(row.employeeName)}</strong><small>${escapeHtml(row.customerName || '未分配客户')} · ${escapeHtml(row.projectName || row.positionName || '未关联项目')}</small></div>${badge(row.completed ? '合规完成' : `待完成 ${row.pendingCount} 项`, row.completed ? 'green' : 'amber')}</div>
+    <div class="onboarding-status-pair"><span class="${row.contractSigned ? 'done' : 'pending'}">合同 ${row.contractSigned ? '已签订' : '待签订'}</span><span class="${row.employerInsuranceActive ? 'done' : 'pending'}">雇主险 ${row.employerInsuranceActive ? '保障中' : '待增保'}</span></div>
+    <div class="risk-card-foot"><span>入职日期 ${escapeHtml(row.hireDate || '-')}</span><span>${escapeHtml(row.positionName || '未关联岗位')}</span></div>
+  </article>`).join('');
+  renderRiskDetail(filtered.find(row => Number(row.employeeId) === Number(state.selectedRiskId)));
+}
+
+function renderRiskDetail(row) {
+  const panel = $('#riskDetailPanel');
+  if (!row) return;
+  const permissions = state.user?.permissions || [];
+  const canContract = permissions.includes('contract:manage');
+  const canInsurance = permissions.includes('social:manage');
+  panel.innerHTML = `<div class="risk-detail-head"><div><span>EMPLOYEE #${row.employeeId}</span><h3>${escapeHtml(row.employeeName)}</h3></div>${badge(row.completed ? '入职合规完成' : '入职事项待完善', row.completed ? 'green' : 'amber')}</div>
+    <div class="risk-detail-context onboarding-person-context">
+      ${infoItem('客户单位', row.customerName || '未分配')}
+      ${infoItem('所属项目', row.projectName || '未关联')}
+      ${infoItem('岗位', row.positionName || '未关联')}
+      ${infoItem('入职日期', row.hireDate || '-')}
+    </div>
+    <section class="onboarding-check-list">
+      <article class="onboarding-check-card ${row.contractSigned ? 'done' : 'pending'}"><div><i>${row.contractSigned ? '✓' : '1'}</i><span><strong>劳动合同</strong><small>${row.contractSigned ? '已登记已签署合同' : '尚未登记已签署合同'}</small></span></div>${row.contractSigned ? badge('已签订', 'green') : canContract ? `<button class="primary-button" type="button" data-action="contract" data-id="${row.employeeId}">登记合同</button>` : badge('待签订', 'amber')}</article>
+      <article class="onboarding-check-card ${row.employerInsuranceActive ? 'done' : 'pending'}"><div><i>${row.employerInsuranceActive ? '✓' : '2'}</i><span><strong>雇主险</strong><small>${row.employerInsuranceActive ? '当前雇主险保障有效' : '尚未办理有效雇主险增保'}</small></span></div>${row.employerInsuranceActive ? badge('保障中', 'green') : canInsurance ? `<button class="primary-button" type="button" data-action="social" data-id="${row.employeeId}" data-insurance-action="ADD">办理增保</button>` : badge('待增保', 'amber')}</article>
+    </section>
+    <div class="onboarding-result ${row.completed ? 'done' : ''}"><strong>${row.completed ? '两项均已完成' : `还有 ${row.pendingCount} 项需要办理`}</strong><p>${row.completed ? '系统已自动完成入职合规闭环。' : '办理完成后系统会自动更新状态，无需建立整改任务。'}</p></div>
+    <div class="risk-detail-actions"><button class="secondary-button" type="button" data-risk-employee="${row.employeeId}">查看员工档案</button></div>`;
+}
+
+async function loadRiskCenter() {
+  setPanelLoading('#riskView');
+  try {
+    state.risks = await api('/api/risk-alerts');
+    state.riskCases = [];
+    renderRiskCenter();
+  } finally { setPanelLoaded('#riskView'); }
+}
+
+async function loadRisks() { return loadRiskCenter(); }
+async function loadRiskCases() { return loadRiskCenter(); }
+
+function configureRiskStatusOptions(select, currentStatus) {
+  const status = Number(currentStatus || 0);
+  const options = status === 0
+    ? [[0, '待整改：已指派，尚未开始'], [1, '整改中：责任人已开始处理']]
+    : status === 1
+      ? [[1, '整改中：继续处理'], [2, '提交复核：整改完成并已提供证据']]
+      : status === 2
+        ? [[2, '继续待复核：尚未作出决定'], [1, '退回整改：证据或结果不符合要求'], [3, '复核通过：关闭并归档风险']]
+        : [[3, '已关闭：风险已归档']];
+  select.innerHTML = options.map(([value, labelText]) => `<option value="${value}">${labelText}</option>`).join('');
+  select.value = String(status);
 }
 
 async function openRiskCaseModal(id, mode = 'create') {
@@ -755,23 +804,37 @@ async function openRiskCaseModal(id, mode = 'create') {
   form.reset();
   $$('.case-progress-field').forEach(item => item.classList.toggle('hidden', mode === 'create'));
   if (mode === 'create') {
-    const risks = await api('/api/risk-alerts');
-    const risk = risks.find(item => item.id === Number(id));
+    const risk = state.risks.find(item => item.id === Number(id));
     if (!risk) throw new Error('风险预警不存在');
     form.elements.sourceAlertId.value = risk.id;
     form.elements.deadline.value = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    $('#riskCaseModalTitle').textContent = '创建整改任务';
-    $('#riskCaseSource').innerHTML = `<strong>${risk.riskTitle}</strong><span>${risk.employeeName}：${risk.riskDesc}</span>`;
+    configureRiskStatusOptions(form.elements.status, 0);
+    $('#riskCaseModalTitle').textContent = '建立整改任务';
+    $('#riskCaseSubmitButton').textContent = '创建并指派整改';
+    $('#riskCaseSource').innerHTML = `<strong>${escapeHtml(risk.riskTitle)}</strong><span>${escapeHtml(risk.employeeName)} · ${escapeHtml(risk.customerName || '未分配客户')}：${escapeHtml(risk.riskDesc)}</span>`;
   } else {
-    const rows = await api('/api/risk-cases');
-    const row = rows.find(item => item.id === Number(id));
+    const row = state.riskCases.find(item => item.id === Number(id));
     if (!row) throw new Error('整改任务不存在');
-    const values = { caseId: row.id, ownerName: row.ownerName, ownerDept: row.ownerDept, deadline: row.deadline, correctiveMeasure: row.correctiveMeasure, status: row.status, evidenceNote: row.evidenceNote, reviewNote: row.reviewNote };
+    configureRiskStatusOptions(form.elements.status, row.status);
+    const values = { caseId: row.id, sourceAlertId: row.sourceAlertId, ownerName: row.ownerName, ownerDept: row.ownerDept, deadline: row.deadline, correctiveMeasure: row.correctiveMeasure, status: row.status, evidenceNote: row.evidenceNote, reviewNote: row.reviewNote };
     for (const [key, value] of Object.entries(values)) form.elements[key].value = value ?? '';
-    $('#riskCaseModalTitle').textContent = '更新整改任务';
-    $('#riskCaseSource').innerHTML = `<strong>${row.riskTitle}</strong><span>${row.employeeName}：${row.riskDesc}</span>`;
+    $('#riskCaseModalTitle').textContent = Number(row.status) === 2 ? '复核整改结果' : '更新整改进度';
+    $('#riskCaseSubmitButton').textContent = Number(row.status) === 2 ? '保存复核结果' : '保存整改进度';
+    $('#riskCaseSource').innerHTML = `<strong>${escapeHtml(row.riskTitle)}</strong><span>${escapeHtml(row.employeeName)} · ${escapeHtml(row.customerName || '未分配客户')}：${escapeHtml(row.riskDesc)}</span>`;
   }
+  updateRiskStatusHelp();
   $('#riskCaseModal').showModal();
+}
+
+function updateRiskStatusHelp() {
+  const status = Number($('#riskCaseForm')?.elements?.status?.value || 0);
+  const messages = {
+    0: '待整改：任务已指派，但责任人尚未开始处理。',
+    1: '整改中：正在处理风险问题，可持续补充整改措施。',
+    2: '待复核：必须填写整改结果或证据说明，等待有权限人员复核。',
+    3: '已关闭：必须填写整改证据和复核结论，保存后风险正式归档。'
+  };
+  $('#riskStatusHelp').textContent = messages[status];
 }
 
 async function saveRiskCase(event) {
@@ -779,11 +842,20 @@ async function saveRiskCase(event) {
   const attachment = selectedAttachment(event.currentTarget);
   const body = formToObject(event.currentTarget);
   const caseId = Number(body.caseId || 0);
+  const status = Number(body.status || 0);
+  if (status >= 2 && !String(body.evidenceNote || '').trim()) {
+    throw new Error('提交复核前，请填写整改结果或证据说明');
+  }
+  if (status === 3 && !String(body.reviewNote || '').trim()) {
+    throw new Error('关闭风险前，请填写复核结论');
+  }
+  if (caseId && status === 3 && !window.confirm('确认整改证据有效且风险已经消除？关闭后将进入归档状态。')) return;
   const result = await api(caseId ? `/api/risk-cases/${caseId}` : '/api/risk-cases', { method: caseId ? 'PUT' : 'POST', body: JSON.stringify(body) });
   const attachmentUploaded = await uploadSavedAttachment(attachment, 'risk_case', result.caseId);
   $('#riskCaseModal').close();
-  if (attachmentUploaded) toast(caseId ? '整改任务已更新' : '整改任务已创建');
-  await Promise.all([loadRisks(), loadRiskCases(), loadSummary()]);
+  if (attachmentUploaded) toast(caseId ? '整改进度已更新' : '整改任务已创建并指派');
+  state.selectedRiskId = Number(body.sourceAlertId || state.selectedRiskId);
+  await Promise.all([loadRiskCenter(), loadSummary()]);
 }
 
 const actionNames = {
@@ -833,6 +905,34 @@ async function changePassword(event) {
   toast('密码已修改，请使用新密码重新登录');
 }
 
+function applyEmployeeFormDefaults(form) {
+  if (!form || !state.bootstrap) return;
+  const generalWorker = (state.bootstrap.positions || []).find(item =>
+    item.positionCode === 'OP' || item.positionName === '普工'
+  );
+  if (form.elements.positionId && generalWorker) {
+    form.elements.positionId.value = String(generalWorker.id);
+  }
+  if (form.elements.workType) form.elements.workType.value = '1';
+  if (form.elements.employeeStatus) form.elements.employeeStatus.value = '6';
+  if (form.elements.hireDate) form.elements.hireDate.value = new Date().toISOString().slice(0, 10);
+}
+
+function syncEmployeeFormRequirements(form, statusValue = '') {
+  if (!form) return;
+  const employeeStatus = Number(statusValue || form.elements.employeeStatus?.value || form.dataset.employeeStatus || 1);
+  const interview = employeeStatus === 6;
+  for (const name of ['idCardNo', 'customerId', 'positionId']) {
+    if (form.elements[name]) form.elements[name].required = !interview;
+  }
+  // 用工与计费、招聘来源和备注均允许后续补齐。
+  for (const name of ['employmentType', 'feeMode', 'workType', 'hireDate', 'channelSource', 'remark']) {
+    if (form.elements[name]) form.elements[name].required = false;
+  }
+  updateEmployeeProjectOptions(form);
+  if (interview && form.elements.projectId) form.elements.projectId.required = false;
+}
+
 async function openEmployeeModal(id = null) {
   await ensureRecruitmentChannelOptions();
   state.editingEmployeeId = id;
@@ -840,11 +940,13 @@ async function openEmployeeModal(id = null) {
   form.reset();
   delete form.dataset.allowLegacyUnassigned;
   delete form.dataset.legacyCustomerId;
+  delete form.dataset.employeeStatus;
   updateEmployeeProjectOptions(form);
   $('#employeeModalTitle').textContent = id ? '编辑员工' : '新增员工';
   $('#employeeStatusField')?.classList.toggle('hidden', Boolean(id));
-  if (!id && form.elements.employeeStatus) form.elements.employeeStatus.value = '1';
+  if (!id) applyEmployeeFormDefaults(form);
   configureSensitiveEmployeeFields(form, Boolean(id));
+  syncEmployeeFormRequirements(form);
 
   if (id) {
     const detailUrl = canViewSensitiveEmployee()
@@ -860,6 +962,7 @@ async function openEmployeeModal(id = null) {
       gender: row.gender,
       education: row.education,
       idCardNo: canViewSensitiveEmployee() ? row.idCardNo : '',
+      address: canViewSensitiveEmployee() ? row.address : '',
       phone: canViewSensitiveEmployee() ? row.phone : '',
       customerId: row.customerId,
       projectId: row.projectId,
@@ -875,11 +978,13 @@ async function openEmployeeModal(id = null) {
       emergencyContact: row.emergencyContact,
       emergencyPhone: canViewSensitiveEmployee() ? row.emergencyPhone : ''
     };
+    form.dataset.employeeStatus = String(row.employeeStatus || '');
     for (const [key, value] of Object.entries(values)) {
       if (key === 'projectId') continue;
       if (form.elements[key]) form.elements[key].value = value || '';
     }
     updateEmployeeProjectOptions(form, values.projectId);
+    syncEmployeeFormRequirements(form, row.employeeStatus);
   }
 
   $('#employeeModal').showModal();
@@ -895,27 +1000,35 @@ function openResignModal(id) {
   state.resignEmployeeId = Number(id);
   const form = $('#resignForm');
   form.reset();
-  const canManageSettlement = (state.user?.permissions || []).includes('payroll:manage');
-  form.elements.settlementStatus.disabled = !canManageSettlement;
-  form.elements.settlementStatus.closest('label').title = canManageSettlement ? '' : '工资结算由薪资专员确认';
+  const now = new Date();
+  form.elements.leaveDate.value = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  const covered = Number(state.selectedDetail?.socialSecurity?.employerInsuranceStatus || 0) === 1;
+  form.elements.terminateEmployerInsurance.checked = false;
+  form.elements.terminateEmployerInsurance.disabled = !covered;
+  form.elements.terminateEmployerInsurance.required = covered;
+  $('#resignInsuranceHint').textContent = covered
+    ? '办理减保后勾选“已减保”，再确认员工离职'
+    : '当前未投保或已终止，无需办理减保';
   $('#resignModal').showModal();
 }
 
 function openContractModal(id) {
   state.selectedEmployeeId = Number(id);
-  $('#contractForm').reset();
-  const employee = state.employees.find(item => item.id === Number(id));
-  $('#contractForm').elements.contractNo.value = `HT${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(id).padStart(3, '0')}`;
-  $('#contractForm').elements.startDate.value = employee?.hireDate || '';
+  const form = $('#contractForm');
+  form.reset();
+  form.elements.signStatus.value = '1';
+  const now = new Date();
+  form.elements.contractDate.value = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   $('#contractModal').showModal();
 }
 
-function openSocialModal(id) {
+function openSocialModal(id, requestedAction = '') {
   state.selectedEmployeeId = Number(id);
   const form = $('#socialForm');
   form.reset();
-  const social = state.selectedDetail?.socialSecurity;
-  form.elements.employerInsuranceAction.value = Number(social?.employerInsuranceStatus) === 1 ? 'REMOVE' : 'ADD';
+  const social = Number(state.selectedDetail?.basic?.id) === Number(id) ? state.selectedDetail?.socialSecurity : null;
+  const explicitAction = ['ADD', 'REMOVE'].includes(requestedAction) ? requestedAction : '';
+  form.elements.employerInsuranceAction.value = explicitAction || (Number(social?.employerInsuranceStatus) === 1 ? 'REMOVE' : 'ADD');
   $('#socialModal').showModal();
 }
 
@@ -935,7 +1048,7 @@ async function saveEmployee(event) {
   const result = await api(path, { method, body: JSON.stringify(body) });
   $('#employeeModal').close();
   toast(id ? '员工信息已保存' : '员工已新增');
-  await refreshAll();
+  await refreshEmployeeWorkspace();
   await selectEmployee(result.employeeId);
 }
 
@@ -948,21 +1061,21 @@ async function submitTransfer(event) {
   });
   $('#transferModal').close();
   toast(result.changeStatus ? '转岗申请已提交，等待目标项目接收' : '调岗成功');
-  await refreshAll();
+  await refreshEmployeeWorkspace();
   await selectEmployee(state.transferEmployeeId);
 }
 
 async function submitResign(event) {
   event.preventDefault();
   const body = formToObject(event.currentTarget);
-  if (!(state.user?.permissions || []).includes('payroll:manage')) delete body.settlementStatus;
+  if (!window.confirm('确认完成离职？保存后员工将转入花名册“已离职”，并同步进入人才库。')) return;
   const result = await api(`/api/employees/${state.resignEmployeeId}/resign`, {
     method: 'POST',
     body: JSON.stringify(body)
   });
   $('#resignModal').close();
-  toast(result.completed ? '离职流程已全部完成' : '离职流程已发起，请继续完成交接、雇主险减保和工资结算');
-  await refreshAll();
+  toast(result.completed ? '离职已办结，员工已归档并同步人才库' : '离职信息已保存');
+  await refreshEmployeeWorkspace();
   await selectEmployee(state.resignEmployeeId);
 }
 
@@ -977,8 +1090,7 @@ async function submitContract(event) {
   const attachmentUploaded = await uploadSavedAttachment(attachment, 'contract', result.contractId);
   $('#contractModal').close();
   if (attachmentUploaded) toast('合同已登记');
-  await scanRisks();
-  await refreshAll();
+  await refreshEmployeeWorkspace();
   await selectEmployee(state.selectedEmployeeId);
 }
 
@@ -991,8 +1103,7 @@ async function submitSocial(event) {
   });
   $('#socialModal').close();
   toast(body.employerInsuranceAction === 'ADD' ? '雇主险增保已登记' : '雇主险减保已登记');
-  await scanRisks();
-  await refreshAll();
+  await refreshEmployeeWorkspace();
   await selectEmployee(state.selectedEmployeeId);
 }
 
@@ -1007,33 +1118,39 @@ async function submitCertificate(event) {
   const attachmentUploaded = await uploadSavedAttachment(attachment, 'certificate', result.certificateId);
   $('#certificateModal').close();
   if (attachmentUploaded) toast('证件已添加');
-  await scanRisks();
-  await refreshAll();
+  await refreshEmployeeWorkspace();
   await selectEmployee(state.selectedEmployeeId);
 }
 
 async function scanRisks() {
   const data = await api('/api/risk-alerts/scan', { method: 'POST' });
-  toast(`风险扫描完成，新增 ${data.created} 条`);
-  await refreshAll();
+  toast(`入职合规检查完成，新增 ${data.created} 项待办`);
+  await refreshEmployeeWorkspace();
 }
 
 async function handleRisk(id, status) {
+  if (Number(status) === 3 && !window.confirm('确认忽略该风险？忽略表示当前无需整改，但操作会被记录。')) return;
   await api(`/api/risk-alerts/${id}/handle`, {
     method: 'PUT',
     body: JSON.stringify({
       handleStatus: Number(status),
-      handleRemark: status === '2' ? '已线下处理' : '已确认忽略'
+      handleRemark: status === '2' ? '已完成处理并确认风险消除' : '经确认当前无需整改，已忽略'
     })
   });
   toast(status === '2' ? '风险已处理' : '风险已忽略');
-  await refreshAll();
+  await Promise.all([loadRiskCenter(), loadSummary()]);
 }
 
 async function loadProjects() {
   setPanelLoading('#projectCards');
   try {
-  const [clientResult, projectResult] = await Promise.all([api('/api/clients'), api('/api/projects')]);
+  const userPermissions = state.user?.permissions || [];
+  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+  const canViewCustomers = isCompanyAdmin || userPermissions.includes('customer:view');
+  const [clientResult, projectResult] = await Promise.all([
+    canViewCustomers ? api('/api/clients') : Promise.resolve({ list: [] }),
+    api('/api/projects')
+  ]);
   const clients = (clientResult.list || clientResult).map(item => ({
     ...item,
     clientName: item.clientName || item.customerName || ''
@@ -1043,14 +1160,17 @@ async function loadProjects() {
     clientName: item.clientName || item.customerName || '',
     worksiteName: item.worksiteName || item.factoryName || '-',
     serviceType: typeof item.serviceType === 'number' ? ({ 1: '劳务派遣', 2: '岗位外包', 3: '灵活用工', 4: 'RPO招聘' }[item.serviceType] || '其他') : item.serviceType,
-    managerName: item.managerName || '企业管理员',
+    managerName: item.onsiteManagerNames || item.managerName || '未派驻厂',
     activeCount: Number(item.activeCount || item.onsiteCount || 0)
   }));
   state.clients = clients;
   state.projects = projects;
-  const userPermissions = state.user?.permissions || [];
-  const canManageClientProjects = (state.user?.roles || []).some(role => role.roleCode === 'company_admin')
+  const canManageClientProjects = isCompanyAdmin
     || (userPermissions.includes('customer:manage') && userPermissions.includes('project:manage'));
+  const canAssignOnsite = isCompanyAdmin
+    || userPermissions.includes('system:role');
+  const canViewRisk = isCompanyAdmin
+    || userPermissions.includes('risk:view');
   const healthTotals = projects.reduce((summary, item) => ({
     onsite: summary.onsite + Number(item.activeCount || 0),
     contract: summary.contract + Number(item.unsignedContractCount || 0),
@@ -1094,8 +1214,8 @@ async function loadProjects() {
         <div class="project-money-row"><span>预支未结 ${money(item.advanceOutstanding)}</span><strong>累计实发 ${money(item.payrollNet)}</strong></div>
         <div class="entity-meta"><span>${escapeHtml(item.serviceType)}</span><strong>${escapeHtml(item.managerName)}</strong></div>
         <div class="project-quick-actions">
-          <button class="quick-btn" type="button" data-action="goto-factory" data-project="${item.id}">派驻员工</button>
-          <button class="quick-btn ${item.openRiskCount ? 'warn' : ''}" type="button" data-action="goto-risk" data-project="${item.id}">查看风险</button>
+          ${canAssignOnsite ? `<button class="quick-btn" type="button" data-action="assign-onsite" data-project="${item.id}">派遣驻厂</button>` : ''}
+          ${canViewRisk ? `<button class="quick-btn ${item.openRiskCount ? 'warn' : ''}" type="button" data-action="goto-risk" data-project="${item.id}">查看风险</button>` : ''}
         </div>
       </div>
     </article>
@@ -1105,6 +1225,45 @@ async function loadProjects() {
     populateAdvanceProjectOptions();
   }
   } finally { setPanelLoaded('#projectCards'); }
+}
+
+async function openProjectOnsiteModal(projectId) {
+  const project = state.projects.find(item => Number(item.id) === Number(projectId));
+  if (!project) throw new Error('未找到当前项目，请刷新后重试');
+  const form = $('#projectOnsiteForm');
+  form.reset();
+  form.elements.projectId.value = String(projectId);
+  $('#projectOnsiteTitle').textContent = `派遣驻厂 · ${project.projectName}`;
+  $('#projectOnsiteContext').textContent = `${project.clientName} / ${project.worksiteName || '未填写用工地点'}`;
+  $('#projectOnsiteAssigneeList').innerHTML = '<p class="muted">正在加载驻厂专员...</p>';
+  $('#projectOnsiteModal').showModal();
+
+  const result = await api(`/api/system/projects/${projectId}/onsite-assignees`);
+  const users = result.users || [];
+  $('#projectOnsiteAssigneeList').innerHTML = users.length
+    ? users.map(user => `
+      <label class="checkbox-item">
+        <input type="checkbox" name="userIds" value="${user.userId}" ${user.assigned ? 'checked' : ''} />
+        <span>${escapeHtml(user.realName)}</span>
+        <small>${escapeHtml(user.username)}${user.phone ? ` · ${escapeHtml(user.phone)}` : ''}</small>
+      </label>
+    `).join('')
+    : '<p class="empty-copy">暂无可派遣的驻厂专员，请先在权限管理中创建“驻厂专员”账号。</p>';
+}
+
+async function saveProjectOnsiteAssignment(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const projectId = Number(form.elements.projectId.value);
+  if (!projectId) throw new Error('项目参数无效，请关闭弹窗后重试');
+  const userIds = [...form.querySelectorAll('input[name="userIds"]:checked')].map(input => Number(input.value));
+  await api(`/api/system/projects/${projectId}/onsite-assignees`, {
+    method: 'PUT',
+    body: JSON.stringify({ userIds })
+  });
+  $('#projectOnsiteModal').close();
+  toast(userIds.length ? '驻厂专员已派遣，可查看该客户项目' : '已取消该项目的驻厂派遣', 'success');
+  await loadProjects();
 }
 
 function customerProjectEditorHtml(project = {}) {
@@ -1161,8 +1320,18 @@ async function loadTalents() {
   try {
   state.talents = await api('/api/talents');
   $('#talentTableBody').innerHTML = state.talents.map(item => `
-    <tr><td><strong>${item.name}</strong></td><td>${item.phone}</td><td>${item.source}</td><td>${item.intentionJob}</td><td>${(item.tags || []).map(tag => `<span class="tag-chip">${tag}</span>`).join('')}</td><td>${badge(item.followStatus, item.followStatus === '待入职' ? 'green' : 'blue')}</td><td>${item.ownerName}</td></tr>
-  `  ).join('') || emptyRow(7, '暂无人才数据', '点击"快速录入人才"添加招聘线索或离职回流人员');
+    <tr>
+      <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.phone)}</small></td>
+      <td>${badge(item.talentSourceTypeName, item.talentSourceType === 'RESIGNED' ? 'amber' : item.talentSourceType === 'UNJOINED' ? 'blue' : 'neutral')}</td>
+      <td>${escapeHtml(item.customerName)}<small>${escapeHtml(item.projectName)}</small></td>
+      <td>${escapeHtml(item.positionName)}<small>${escapeHtml(item.recruitmentChannelName)}</small></td>
+      <td>${badge(item.employeeStatusName, Number(item.employeeStatus) === 2 ? 'green' : Number(item.employeeStatus) === 3 ? 'amber' : Number(item.employeeStatus) === 5 ? 'blue' : 'neutral')}</td>
+      <td>${badge(item.followStatus, item.followStatus === '待入职' ? 'green' : 'blue')}</td>
+      <td>${badge(item.availableStatusName, Number(item.availableStatus) === 3 ? 'green' : 'neutral')}</td>
+      <td>${escapeHtml(item.flowedAt ? new Date(item.flowedAt).toLocaleString('zh-CN', { hour12: false }) : '-')}<small>${escapeHtml(item.resignationReason || '-')}</small></td>
+      <td>${escapeHtml(item.ownerName)}</td>
+    </tr>
+  `).join('') || emptyRow(9, '暂无人才数据', '未入职和完成离职的员工会自动流转到这里，也可快速录入招聘线索');
   } finally { setPanelLoaded('#talentTableBody'); }
 }
 
@@ -1182,27 +1351,36 @@ async function loadWorkTasks() {
   const statusNames = { 0: '待处理', 1: '处理中', 2: '已完成', 3: '已关闭' };
   const permissions = state.user?.permissions || [];
   const canManageOffboard = permissions.includes('employee:resign');
-  const canManageSettlement = permissions.includes('payroll:manage');
   const canHandleTransfer = permissions.includes('employee:transfer');
   const canUpdateTask = permissions.includes('employee:update');
-  const taskView = { INSURANCE: 'roster', INSURANCE_TERMINATION: 'roster', PAYROLL_SETTLEMENT: 'payroll', ARRIVAL: 'roster', CONTRACT: 'roster', DOCUMENT: 'roster', OFFBOARD: 'roster', TRANSFER_ACCEPTANCE: 'tasks' };
+  const canContract = permissions.includes('contract:manage');
+  const canInsurance = permissions.includes('social:manage');
+  const canCertificate = permissions.includes('cert:manage');
+  const taskView = { INSURANCE: 'roster', INSURANCE_TERMINATION: 'roster', ARRIVAL: 'roster', CONTRACT: 'roster', DOCUMENT: 'roster', OFFBOARD: 'roster', TRANSFER_ACCEPTANCE: 'tasks' };
   $('#taskTableBody').innerHTML = state.workTasks.map(item => {
     const tone = item.riskLevel === 3 ? 'red' : item.riskLevel === 2 ? 'amber' : 'blue';
     const transferAction = item.taskType === 'TRANSFER_ACCEPTANCE' && canHandleTransfer
       ? `<button class="table-button" data-handle-transfer="${item.sourceId}" data-approved="1">接收</button> <button class="table-button danger" data-handle-transfer="${item.sourceId}" data-approved="0">拒绝</button>`
       : '';
     const offboardAction = item.taskType === 'OFFBOARD' && canManageOffboard
-      ? `<button class="table-button" data-complete-offboard="${item.sourceId}">确认四项交接</button>`
-      : item.taskType === 'PAYROLL_SETTLEMENT' && canManageSettlement
-        ? `<button class="table-button" data-complete-settlement="${item.sourceId}">确认工资结算</button>`
-        : '';
+      ? `<button class="table-button" data-open-offboard="${item.employeeId}">打开离职办理</button>`
+      : '';
+    const businessAction = item.taskType === 'CONTRACT' && canContract
+      ? `<button class="table-button primary" data-action="contract" data-id="${item.employeeId}">直接登记合同</button>`
+      : item.taskType === 'INSURANCE' && canInsurance
+        ? `<button class="table-button primary" data-action="social" data-id="${item.employeeId}" data-insurance-action="ADD">直接办理增保</button>`
+        : item.taskType === 'INSURANCE_TERMINATION' && canManageOffboard
+          ? `<button class="table-button primary" data-open-offboard="${item.employeeId}">确认已减保并离职</button>`
+          : item.taskType === 'DOCUMENT' && canCertificate
+            ? `<button class="table-button primary" data-action="certificate" data-id="${item.employeeId}">直接补资料</button>`
+            : '';
     const genericAction = canUpdateTask
       ? (item.taskStatus === 0
           ? `<button class="table-button" data-start-task="${item.id}">开始处理</button>`
           : `<button class="table-button" data-view="${taskView[item.taskType] || 'roster'}">进入业务</button>${item.riskLevel < 3 ? ` <button class="table-button" data-complete-task="${item.id}">完成</button>` : ''}`)
       : '<span class="muted">等待有权限人员处理</span>';
     const action = item.taskStatus >= 2 ? '<span class="muted">已结束</span>'
-      : transferAction || offboardAction || genericAction;
+      : transferAction || offboardAction || businessAction || genericAction;
     return `<tr><td>${badge(item.riskLevel === 3 ? '高' : item.riskLevel === 2 ? '中' : '低', tone)}${item.overdue ? '<small class="money-risk">已逾期</small>' : ''}</td><td><strong>${escapeHtml(item.taskTitle)}</strong><small>${escapeHtml(item.taskContent || item.taskTypeName)}</small></td><td>${escapeHtml(item.employeeName || '-')}<small>${escapeHtml(item.customerName || '-')} · ${escapeHtml(item.positionName || '-')}</small></td><td>${escapeHtml(item.assignedUserName)}</td><td>${item.deadline ? new Date(item.deadline).toLocaleString('zh-CN', { hour12: false }) : '-'}</td><td>${badge(statusNames[item.taskStatus], item.taskStatus === 2 ? 'green' : item.taskStatus === 1 ? 'blue' : 'amber')}</td><td>${action}</td></tr>`;
   }).join('') || emptyRow(7, '暂无待办', '员工入职、雇主险、转岗或离职后会自动生成');
 }
@@ -1237,7 +1415,7 @@ async function openChannelEmployees(channelId) {
   const customers = new Set(data.rows.map(item => item.customerName).filter(Boolean)).size;
   const feeModes = new Set(data.rows.map(item => item.feeMode).filter(Boolean)).size;
   $('#channelEmployeesSummary').innerHTML = `<span>员工 <strong>${data.rows.length}</strong></span><span>在职 <strong>${active}</strong></span><span>客户单位 <strong>${customers}</strong></span><span>费用模式 <strong>${feeModes}</strong></span>`;
-  const statusNames = { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单' };
+  const statusNames = { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' };
   $('#channelEmployeesBody').innerHTML = data.rows.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.customerName || '未分配')}</td><td>${escapeHtml(item.positionName || '-')}</td><td>${escapeHtml(item.feeMode || '-')}</td><td>${escapeHtml(item.hireDate || '-')}</td><td>${badge(statusNames[item.employeeStatus] || '未知', Number(item.employeeStatus) === 2 ? 'green' : Number(item.employeeStatus) === 1 ? 'amber' : 'neutral')}</td><td><button class="table-button" data-channel-employee-detail="${item.id}">查看员工</button></td></tr>`).join('') || emptyRow(7, '该渠道暂无权限范围内的关联员工');
   $('#channelEmployeesModal').showModal();
 }
@@ -1297,26 +1475,31 @@ async function loadAdvances() {
   setPanelLoading('#advanceTableBody');
   try {
   const result = await apiAllPages('/api/advances');
-  const statusMap = { 1: ['PENDING_APPROVAL', '待审批'], 2: ['APPROVED', '已通过'], 3: ['REJECTED', '已驳回'], 4: ['PAID', '已放款'], 5: ['REPAID', '已扣回'], 6: ['CANCELLED', '已取消'] };
+  const statusMap = { 1: ['PENDING_APPROVAL', '历史待审批'], 2: ['APPROVED', '历史待放款'], 3: ['REJECTED', '已驳回'], 4: ['PAID', '已登记'], 5: ['REPAID', '已扣回'], 6: ['CANCELLED', '已取消'] };
   state.advances = (result.list || result).map(item => ({
     ...item,
     advanceNo: item.advanceNo || item.applyNo,
     status: item.status || statusMap[item.advanceStatus]?.[0] || 'UNKNOWN',
     statusName: item.statusName || statusMap[item.advanceStatus]?.[1] || '未知',
     paidAmount: Number(item.paidAmount || (item.advanceStatus === 4 ? item.approvedAmount : 0) || 0),
-    outstandingAmount: Number(item.outstandingAmount || 0)
+    outstandingAmount: Number(item.outstandingAmount || 0),
+    advanceAtText: String(item.advanceAt || '').replace('T', ' ').slice(0, 16) || '-',
+    recordedByName: item.recordedByName || item.recordedByUsername || '-'
   }));
   const outstanding = state.advances.reduce((sum, item) => sum + item.outstandingAmount, 0);
-  const pending = state.advances.filter(item => item.status === 'PENDING_APPROVAL').length;
+  const today = localDateTimeInputValue().slice(0, 10);
+  const todayRows = state.advances.filter(item => String(item.advanceAt || '').slice(0, 10) === today && [4, 5].includes(Number(item.advanceStatus)));
   const paid = state.advances.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
   $('#advanceKpis').innerHTML = [
-    ['待审批', pending, 'warning'], ['累计放款', money(paid), 'neutral'], ['未结余额', money(outstanding), 'danger']
+    ['今日登记', todayRows.length, 'neutral'], ['累计预支', money(paid), 'neutral'], ['未结余额', money(outstanding), 'danger']
   ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
+  const canApprove = (state.user?.permissions || []).includes('advance:approve');
+  const canPay = (state.user?.permissions || []).includes('advance:pay');
   $('#advanceTableBody').innerHTML = state.advances.map(item => {
-    const actions = item.status === 'PENDING_APPROVAL'
+    const actions = item.status === 'PENDING_APPROVAL' && canApprove
       ? `<button class="table-button" data-action="approve-advance" data-id="${item.id}">审批通过</button>`
-      : item.status === 'APPROVED' ? `<button class="table-button" data-action="pay-advance" data-id="${item.id}">登记放款</button>` : '-';
-    return `<tr><td>${item.advanceNo}</td><td><strong>${item.employeeName}</strong></td><td><strong>${item.customerName || '-'}</strong><small>${item.projectName || '暂未关联具体项目'}</small></td><td>${money(item.applyAmount)}</td><td>${money(item.paidAmount)}</td><td><strong class="money-risk">${money(item.outstandingAmount)}</strong></td><td>${badge(item.statusName, item.status === 'PENDING_APPROVAL' ? 'amber' : item.status === 'REJECTED' ? 'red' : 'green')}</td><td>${actions}</td></tr>`;
+      : item.status === 'APPROVED' && canPay ? `<button class="table-button" data-action="pay-advance" data-id="${item.id}">登记放款</button>` : '-';
+    return `<tr><td><strong>${escapeHtml(item.advanceAtText)}</strong><small>${escapeHtml(item.advanceNo)}</small></td><td><strong>${escapeHtml(item.employeeName)}</strong></td><td><strong>${escapeHtml(item.customerName || '-')}</strong><small>${escapeHtml(item.projectName || '暂未关联具体项目')}</small></td><td><strong>${money(item.applyAmount)}</strong></td><td>${escapeHtml(item.applyReason || '-')}</td><td>${escapeHtml(item.recordedByName)}</td><td><strong class="money-risk">${money(item.outstandingAmount)}</strong></td><td>${badge(item.statusName, item.status === 'PENDING_APPROVAL' ? 'amber' : item.status === 'REJECTED' ? 'red' : 'green')}</td><td>${actions}</td></tr>`;
   }).join('');
   $('#advanceEmployeeSelect').innerHTML = activeEmployeeOptionHtml();
   } finally { setPanelLoaded('#advanceTableBody'); }
@@ -1357,16 +1540,45 @@ const officeEmployeeActions = [
 ];
 
 const officeFinanceActions = [
-  ['申请预支', '提交员工预支申请', '申', 'blue', 'advance-create'],
-  ['审批预支', '处理待审批单据', '审', 'cyan', 'advances'],
-  ['预支列表', '查询放款与余额', '单', 'green', 'advances'],
+  ['登记预支', '记录时间、金额和用途', '记', 'blue', 'advance-create'],
+  ['预支台账', '按客户查看现场记录', '账', 'cyan', 'advances'],
+  ['未结查询', '核对待扣回余额', '余', 'green', 'advances'],
   ['还款管理', '工资扣回与还款', '还', 'blue', 'advances'],
   ['预支统计', '项目预支趋势', '统', 'gold', 'advances'],
   ['工资发放', '批次、工资条与签收', '薪', 'orange', 'payroll']
 ];
 
+const officeActionPermissions = {
+  'employee-create': ['employee:create'],
+  'employee-arrange': ['project:view'],
+  employees: ['employee:view'],
+  talents: ['talent:menu'],
+  blacklist: ['blacklist:view', 'blacklist:menu'],
+  dashboard: ['dashboard:menu'],
+  'employment-records': ['employee:view'],
+  offboarding: ['employee:resign'],
+  feedback: ['employee:view'],
+  'advance-create': ['advance:create'],
+  advances: ['advance:view'],
+  payroll: ['payroll:view'],
+  projects: ['project:view'],
+  risk: ['risk:view'],
+  'payroll-create': ['payroll:manage']
+};
+
+function canRunOfficeAction(action) {
+  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+  if (isCompanyAdmin) return true;
+  const required = officeActionPermissions[action];
+  if (!required?.length) return false;
+  const permissions = state.user?.permissions || [];
+  return required.some(permission => permissions.includes(permission));
+}
+
 function renderOfficeActions(target, rows) {
-  $(target).innerHTML = rows.map(([title, note, icon, tone, action]) => `
+  $(target).innerHTML = rows
+    .filter(([, , , , action]) => canRunOfficeAction(action))
+    .map(([title, note, icon, tone, action]) => `
     <button class="office-action" type="button" data-office-action="${action}"><span class="office-icon ${tone}">${icon}</span><span><strong>${title}</strong><small>${note}</small></span></button>
   `).join('');
 }
@@ -1374,10 +1586,20 @@ function renderOfficeActions(target, rows) {
 async function loadOffice() {
   setPanelLoading('#officeView');
   try {
-  const [data, notices] = await Promise.all([
-    api('/api/operations/home'),
-    api('/api/notices')
-  ]);
+  const data = await api('/api/operations/home');
+  let notices = Array.isArray(data.notices) ? data.notices : [];
+  try {
+    const noticeResult = await api('/api/notices');
+    notices = Array.isArray(noticeResult) ? noticeResult : (noticeResult?.list || notices);
+  } catch (error) {
+    // 兼容尚未提供独立公告接口的旧环境，办公中心仍可正常使用。
+    if (!/接口不存在|404/.test(String(error?.message || ''))) throw error;
+  }
+  const workforce = data.workforce || {};
+  const finance = data.finance || {};
+  const delivery = data.delivery || {};
+  const compliance = data.compliance || {};
+  const todos = Array.isArray(data.todos) ? data.todos.filter(item => Number(item.count || 0) > 0) : [];
   const hourPart = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour: '2-digit',
@@ -1393,38 +1615,40 @@ async function loadOffice() {
   $('#officeGreeting').textContent = `${greeting}，${displayName}`;
   $('#officeDate').textContent = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' });
   $('#officeStatline').innerHTML = [
-    ['用工总数', data.workforce.total], ['在职人数', data.workforce.active], ['离职人数', data.workforce.left], ['人才储备', data.workforce.talents], ['预支未结', money(data.finance.advanceOutstanding)]
+    ['用工总数', workforce.total || 0], ['在职人数', workforce.active || 0], ['离职人数', workforce.left || 0], ['人才储备', workforce.talents || 0], ['预支未结', money(finance.advanceOutstanding || 0)]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
   const pulseRows = (rows) => rows.map(([label, value, tone = '']) => `<span class="pulse-row ${tone}"><i>${label}</i><b>${value}</b></span>`).join('');
   const pulseCard = (heroLabel, heroValue, heroTone, rows) => `
     <div class="pulse-hero ${heroTone}"><span>${heroLabel}</span><strong>${heroValue}</strong></div>
     <div class="pulse-stats-list">${pulseRows(rows)}</div>
   `;
-  const complianceUrgent = (data.compliance.pendingContracts || 0) + (data.compliance.pendingInsurance || 0);
+  const complianceUrgent = (compliance.pendingContracts || 0) + (compliance.pendingInsurance || 0);
   $('#projectDeliveryPulse').innerHTML = pulseCard(
-    '在营项目', data.delivery.activeProjects, data.delivery.activeProjects ? 'good' : 'warning',
+    '在营项目', delivery.activeProjects || 0, delivery.activeProjects ? 'good' : 'warning',
     [
-      ['当前在岗', data.delivery.onsiteEmployees],
-      ['人才储备', data.workforce.talents],
-      ['预支未结', money(data.finance.advanceOutstanding)]
+      ['当前在岗', delivery.onsiteEmployees || 0],
+      ['人才储备', workforce.talents || 0],
+      ['预支未结', money(finance.advanceOutstanding || 0)]
     ]
   );
   $('#complianceQueuePulse').innerHTML = pulseCard(
     '合规紧急项', complianceUrgent, complianceUrgent ? 'danger' : 'good',
     [
-      ['合同待处理', data.compliance.pendingContracts, data.compliance.pendingContracts ? 'danger' : 'good'],
-      ['雇主险待增', data.compliance.pendingInsurance, data.compliance.pendingInsurance ? 'danger' : 'good'],
-      ['工资条待签', data.compliance.unsignedPayslips, data.compliance.unsignedPayslips ? 'warning' : 'good']
+      ['合同待处理', compliance.pendingContracts || 0, compliance.pendingContracts ? 'danger' : 'good'],
+      ['雇主险待增', compliance.pendingInsurance || 0, compliance.pendingInsurance ? 'danger' : 'good'],
+      ['工资条待签', compliance.unsignedPayslips || 0, compliance.unsignedPayslips ? 'warning' : 'good']
     ]
   );
   renderOfficeActions('#employeeOfficeGrid', officeEmployeeActions);
   renderOfficeActions('#financeOfficeGrid', officeFinanceActions);
-  $('#todoTotal').textContent = data.todos.reduce((sum, item) => sum + item.count, 0);
-  $('#officeTodos').innerHTML = data.todos.length
-    ? data.todos.map(item => `<button type="button" data-view="${item.view}" class="todo-item ${item.tone}"><span>${item.title}</span><strong>${item.count}</strong><small>立即处理 →</small></button>`).join('')
+  $('#todoTotal').textContent = todos.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  $('#officeTodos').innerHTML = todos.length
+    ? todos.map(item => `<button type="button" data-view="${item.view}" data-todo-id="${escapeHtml(item.id)}" class="todo-item ${item.tone}"><span>${item.title}</span><strong>${item.count}</strong><small>立即处理 →</small></button>`).join('')
     : '<div class="empty-state compact"><h3>今日待办已清空</h3><p>新增员工、到岗、转岗和离职后会自动生成事项。</p></div>';
   $('#officeNotices').innerHTML = notices.length
-    ? notices.map(item => `<article${item.targetView ? ` data-view="${item.targetView}"` : ''}><span>${item.category}</span><strong>${item.title}</strong><small>${item.time}</small></article>`).join('')
+    ? notices.map(item => item.targetView
+      ? `<button type="button" class="office-notice-item" data-notice-view="${escapeHtml(item.targetView)}"><span>${escapeHtml(item.category)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.time)}</small></button>`
+      : `<article><span>${escapeHtml(item.category)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.time)}</small></article>`).join('')
     : '<article><span>系统通知</span><strong>暂无新的业务消息</strong><small>业务操作后将自动生成</small></article>';
   } finally { setPanelLoaded('#officeView'); }
 }
@@ -1475,36 +1699,6 @@ async function submitPayrollBatch(event) {
     $('#payrollBatchModal').close();
     form.reset();
   }, 900);
-}
-
-async function loadFactoryStaff() {
-  setPanelLoading('#factoryStaffTableBody');
-  try {
-  if (!state.projects.length) await loadProjects();
-  const selectedProject = $('#factoryProjectFilter').value;
-  const params = new URLSearchParams();
-  if (selectedProject) params.set('projectId', selectedProject);
-  if ($('#factoryStatusFilter').value) params.set('residentStatus', $('#factoryStatusFilter').value);
-  const result = await api(`/api/factory-staff${params.toString() ? `?${params}` : ''}`);
-  const residentNames = { 1: '待进厂', 2: '在厂', 3: '请假', 4: '已离厂' };
-  const rows = (result.list || result).map(item => ({
-    ...item,
-    residentStatus: item.residentStatus || residentNames[item.onsiteStatus] || '在厂',
-    worksiteName: item.worksiteName || item.factoryArea || '-',
-    factoryArea: item.factoryArea || item.workshop || '-',
-    managerName: item.managerName || item.onsiteManagerName || '企业管理员',
-    positionName: item.positionName || '-'
-  }));
-  const inFactory = rows.filter(item => item.residentStatus === '在厂').length;
-  const nightShift = rows.filter(item => item.shiftName.includes('夜')).length;
-  const dormitory = rows.filter(item => item.dormitory && !item.dormitory.includes('厂外') && item.dormitory !== '未安排').length;
-  $('#factoryStaffKpis').innerHTML = [
-    ['当前驻厂', inFactory, 'good'], ['夜班人员', nightShift, 'warning'], ['宿舍入住', dormitory, 'neutral']
-  ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
-  $('#factoryProjectFilter').innerHTML = `<option value="">全部项目</option>${optionHtml(state.projects, 'id', 'projectName')}`;
-  $('#factoryProjectFilter').value = selectedProject;
-  $('#factoryStaffTableBody').innerHTML = rows.map(item => `<tr><td><strong>${escapeHtml(item.employeeName)}</strong><small>${escapeHtml(item.employeeNo)} · ${escapeHtml(item.phone)}</small></td><td>${escapeHtml(item.projectName)}</td><td><strong>${escapeHtml(item.worksiteName)}</strong><small>${escapeHtml(item.factoryArea)}</small></td><td>${escapeHtml(item.positionName)}<small>${escapeHtml(item.shiftName)}</small></td><td>${escapeHtml(item.dormitory)}</td><td>${escapeHtml(item.entryDate)}</td><td>${escapeHtml(item.managerName)}</td><td>${badge(item.residentStatus, item.residentStatus === '在厂' ? 'green' : 'amber')}</td></tr>`  ).join('') || emptyRow(8, '暂无驻厂人员', '点击"登记驻厂人员"添加进厂员工信息');
-  } finally { setPanelLoaded('#factoryStaffTableBody'); }
 }
 
 async function loadBlacklist() {
@@ -1590,6 +1784,10 @@ function renderPermTree(tree, selectedCodes = [], disabled = false) {
   }).join('');
 }
 
+function collectPermissionCodes(tree) {
+  return tree.flatMap(node => [node.permCode, ...collectPermissionCodes(node.children || [])]).filter(Boolean);
+}
+
 function syncPermissionTreeSelection(checkbox) {
   const node = checkbox.closest('.perm-tree-node');
   if (!node) return;
@@ -1604,6 +1802,29 @@ function syncPermissionTreeSelection(checkbox) {
       parentNode = parentNode.parentElement?.closest('.perm-tree-node');
     }
   }
+}
+
+function updateRolePermissionCount() {
+  const inputs = [...$('#rolePermissionTree').querySelectorAll('input[name="permId"]')];
+  const selectedCount = inputs.filter(input => input.checked).length;
+  $('#rolePermissionCount').textContent = `已选择 ${selectedCount} / ${inputs.length} 项`;
+}
+
+function filterRolePermissionTree(keyword) {
+  const normalized = String(keyword || '').trim().toLowerCase();
+  const visit = node => {
+    const directLabel = node.querySelector(':scope > .checkbox-item');
+    const ownMatch = !normalized || String(directLabel?.textContent || '').toLowerCase().includes(normalized);
+    const childContainer = node.querySelector(':scope > .perm-children');
+    const children = childContainer ? [...childContainer.children].filter(child => child.classList.contains('perm-tree-node')) : [];
+    const childMatch = children.map(visit).some(Boolean);
+    const visible = ownMatch || childMatch;
+    node.classList.toggle('permission-filter-hidden', !visible);
+    return visible;
+  };
+  [...$('#rolePermissionTree').children]
+    .filter(node => node.classList.contains('perm-tree-node'))
+    .forEach(visit);
 }
 
 /* 渲染项目按客户单位分组 */
@@ -1679,8 +1900,13 @@ function openRolePermissionModal(roleId) {
   const locked = role.roleCode === 'company_admin';
   $('#rolePermissionTitle').textContent = `${role.roleName} 权限配置`;
   $('#rolePermissionRoleId').value = roleId;
-  const selectedCodes = (role.permissions || []).map(p => p.permCode);
+  const selectedCodes = locked ? collectPermissionCodes(_permTree) : (role.permissions || []).map(p => p.permCode);
   $('#rolePermissionTree').innerHTML = renderPermTree(_permTree, selectedCodes, locked);
+  $('#rolePermissionSearch').value = '';
+  $('#rolePermissionSelectAll').disabled = locked;
+  $('#rolePermissionClearAll').disabled = locked;
+  filterRolePermissionTree('');
+  updateRolePermissionCount();
   $('#rolePermissionHint').textContent = locked
     ? '企业管理员固定拥有全部有效权限，为防止系统失去管理入口，不允许取消权限。'
     : '勾选功能权限时会自动包含对应菜单；保存后相关账号需重新登录才能加载新权限。';
@@ -1697,6 +1923,10 @@ function openRolePermissionModal(roleId) {
 }
 
 function runOfficeAction(action) {
+  if (!canRunOfficeAction(action)) {
+    toast('当前账号没有此功能权限', 'error');
+    return;
+  }
   if (action === 'employee-create') return openEmployeeModal().catch(error => toast(error.message));
   if (action === 'advance-create') {
     return prepareAdvanceForm().catch(error => toast(error.message));
@@ -1737,7 +1967,55 @@ function runOfficeAction(action) {
 }
 
 async function refreshAll() {
-  await Promise.all([loadSummary(), loadEmployees(), loadRisks()]);
+  const permissions = state.user?.permissions || [];
+  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+  const tasks = [loadSummary(), loadEmployees()];
+  if (isCompanyAdmin || permissions.includes('risk:view')) tasks.push(loadRisks());
+  await Promise.all(tasks);
+}
+
+async function refreshEmployeeWorkspace() {
+  await Promise.all([refreshAll(), loadOffice()]);
+}
+
+function bindMetricRiskNavigation() {
+  const unresolvedMetric = $('#unresolvedRiskTotal').closest('.metric-cell');
+  const unsignedMetric = $('#unsignedTotal').closest('.metric-cell');
+  const openRiskCenter = preset => {
+    if (!canRunOfficeAction('risk')) {
+      toast('当前账号没有查看用工风险的权限', 'error');
+      return;
+    }
+    state.selectedRiskProjectId = null;
+    $('#riskKeywordInput').value = '';
+    switchView('risk');
+    window.setTimeout(() => applyRiskPreset(preset), 0);
+  };
+  unresolvedMetric.addEventListener('click', () => openRiskCenter('open'));
+  unsignedMetric.addEventListener('click', () => openRiskCenter('contract'));
+  for (const metric of [unresolvedMetric, unsignedMetric]) {
+    metric.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      metric.click();
+    });
+  }
+}
+
+function configureMetricRiskAccess() {
+  const allowed = canRunOfficeAction('risk');
+  const metrics = [$('#unresolvedRiskTotal')?.closest('.metric-cell'), $('#unsignedTotal')?.closest('.metric-cell')].filter(Boolean);
+  for (const metric of metrics) {
+    metric.classList.toggle('metric-action', allowed);
+    metric.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+    if (allowed) {
+      metric.setAttribute('role', 'button');
+      metric.setAttribute('tabindex', '0');
+    } else {
+      metric.removeAttribute('role');
+      metric.removeAttribute('tabindex');
+    }
+  }
 }
 
 function bindEvents() {
@@ -1798,21 +2076,26 @@ function bindEvents() {
   });
   $('#employeeTemplateButton').addEventListener('click', () => downloadCsvTemplate(
     '员工批量录入模板.csv',
-    ['姓名', '性别', '学历', '身份证号码', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话'],
-    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000']
+    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态'],
+    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000', '待入职']
   ));
   $('#employeeXlsxTemplateButton').addEventListener('click', () => downloadXlsxTemplate(
     '员工批量录入模板.xlsx',
-    ['姓名', '性别', '学历', '身份证号码', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话'],
-    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000']
+    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态'],
+    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000', '待入职']
   ));
   bindBatchFileZone('employeeFileZone', 'employeeFileInput', 'batchEmployeeForm', 'employeeFileName',
-    ['姓名', '性别', '学历', '身份证号码', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话']);
+    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态']);
+  bindMetricRiskNavigation();
   $('#scanRiskButton').addEventListener('click', () => scanRisks().catch(error => toast(error.message)));
-  $('#riskRefreshButton').addEventListener('click', () => loadRisks().catch(error => toast(error.message)));
-  if ($('#riskCategoryFilter')) $('#riskCategoryFilter').addEventListener('change', () => loadRisks().catch(error => toast(error.message)));
-  $('#riskCasesRefreshButton').addEventListener('click', () => loadRiskCases().catch(error => toast(error.message)));
-  $('#riskCaseStatusFilter').addEventListener('change', () => loadRiskCases().catch(error => toast(error.message)));
+  $('#riskCenterScanButton').addEventListener('click', () => scanRisks().catch(error => toast(error.message)));
+  $('#riskRefreshButton').addEventListener('click', () => loadRiskCenter().catch(error => toast(error.message)));
+  $('#riskComplianceFilter').addEventListener('change', renderRiskCenter);
+  $('#riskKeywordInput').addEventListener('input', debounce(() => {
+    state.selectedRiskProjectId = null;
+    renderRiskCenter();
+  }, 250));
+  $('#riskCaseForm').elements.status.addEventListener('change', updateRiskStatusHelp);
   $('#auditRefreshButton').addEventListener('click', () => loadAuditLogs().catch(error => toast(error.message)));
   $('#createClientButton').addEventListener('click', () => {
     $('#clientForm').reset();
@@ -1915,7 +2198,19 @@ function bindEvents() {
       .catch(error => toast(error.message, 'error'));
   });
   $('#rolePermissionTree').addEventListener('change', event => {
-    if (event.target.matches('input[name="permId"]')) syncPermissionTreeSelection(event.target);
+    if (event.target.matches('input[name="permId"]')) {
+      syncPermissionTreeSelection(event.target);
+      updateRolePermissionCount();
+    }
+  });
+  $('#rolePermissionSearch').addEventListener('input', event => filterRolePermissionTree(event.currentTarget.value));
+  $('#rolePermissionSelectAll').addEventListener('click', () => {
+    $('#rolePermissionTree').querySelectorAll('input[name="permId"]:not(:disabled)').forEach(input => { input.checked = true; });
+    updateRolePermissionCount();
+  });
+  $('#rolePermissionClearAll').addEventListener('click', () => {
+    $('#rolePermissionTree').querySelectorAll('input[name="permId"]:not(:disabled)').forEach(input => { input.checked = false; });
+    updateRolePermissionCount();
   });
   /* 权限管理事件已在上方绑定 */
   $('#blacklistSearchForm').addEventListener('submit', event => {
@@ -1934,7 +2229,7 @@ function bindEvents() {
   $('#riskCaseForm').addEventListener('submit', event => saveRiskCase(event).catch(error => toast(error.message)));
   $('#clientForm').addEventListener('submit', event => {
     event.preventDefault();
-    submitSimpleForm(event.currentTarget, '/api/clients', '客户及首个项目已创建并立即生效', 'clientModal', loadProjects).catch(error => toast(error.message));
+    submitSimpleForm(event.currentTarget, '/api/clients', '客户及首个项目已创建并立即生效', 'clientModal', () => Promise.all([loadProjects(), loadOffice()])).catch(error => toast(error.message));
   });
   $('#clientManageForm').addEventListener('submit', event => {
     event.preventDefault();
@@ -1952,17 +2247,18 @@ function bindEvents() {
       .then(() => {
         toast('客户项目情况已更新', 'success');
         $('#clientManageModal').close();
-        return loadProjects();
+        return Promise.all([loadProjects(), loadOffice()]);
       })
       .catch(error => toast(error.message, 'error'));
   });
+  $('#projectOnsiteForm').addEventListener('submit', event => saveProjectOnsiteAssignment(event).catch(error => toast(error.message, 'error')));
   $('#talentForm').addEventListener('submit', event => {
     event.preventDefault();
-    submitSimpleForm(event.currentTarget, '/api/talents', '人才已录入', 'talentModal', loadTalents).catch(error => toast(error.message));
+    submitSimpleForm(event.currentTarget, '/api/talents', '人才已录入', 'talentModal', () => Promise.all([loadTalents(), loadOffice()])).catch(error => toast(error.message));
   });
   $('#advanceForm').addEventListener('submit', event => {
     event.preventDefault();
-    submitSimpleForm(event.currentTarget, '/api/advances', '预支申请已提交', 'advanceModal', loadAdvances).catch(error => toast(error.message));
+    submitSimpleForm(event.currentTarget, '/api/advances', '驻厂预支记录已保存', 'advanceModal', () => Promise.all([loadAdvances(), loadSummary(), loadOffice()])).catch(error => toast(error.message));
   });
   $('#blacklistForm').addEventListener('submit', event => {
     event.preventDefault();
@@ -1996,6 +2292,34 @@ function bindEvents() {
     const closeButton = event.target.closest('[data-close-modal]');
     if (closeButton) {
       $(`#${closeButton.dataset.closeModal}`).close();
+      return;
+    }
+
+    const riskPreset = event.target.closest('[data-risk-preset]');
+    if (riskPreset && !riskPreset.classList.contains('metric-cell')) {
+      applyRiskPreset(riskPreset.dataset.riskPreset || '');
+      return;
+    }
+
+    const riskDetail = event.target.closest('[data-risk-detail]');
+    if (riskDetail && !event.target.closest('button')) {
+      state.selectedRiskId = Number(riskDetail.dataset.riskDetail);
+      renderRiskCenter();
+      return;
+    }
+
+    const riskEmployee = event.target.closest('[data-risk-employee]');
+    if (riskEmployee) {
+      switchView('roster');
+      selectEmployee(Number(riskEmployee.dataset.riskEmployee)).catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const riskJump = event.target.closest('[data-risk-jump]');
+    if (riskJump) {
+      const risk = state.risks.find(item => Number(item.id) === Number(riskJump.dataset.riskJump));
+      state.selectedRiskId = Number(risk?.employeeId || riskJump.dataset.riskJump);
+      switchView('risk');
       return;
     }
 
@@ -2061,22 +2385,11 @@ function bindEvents() {
         .catch(error => toast(error.message, 'error'));
       return;
     }
-    const completeOffboard = event.target.closest('[data-complete-offboard]');
-    if (completeOffboard) {
-      if (!window.confirm('确认工牌、工服工具、宿舍、考勤均已交接完成？')) return;
-      api(`/api/resignations/${completeOffboard.dataset.completeOffboard}/progress`, {
-        method: 'PUT',
-        body: JSON.stringify({ badgeReturned: 1, toolsReturned: 1, dormCleared: 1, attendanceConfirmed: 1 })
-      }).then(() => Promise.all([loadWorkTasks(), loadEmployees(), loadOffice()]))
-        .catch(error => toast(error.message, 'error'));
-      return;
-    }
-    const completeSettlement = event.target.closest('[data-complete-settlement]');
-    if (completeSettlement) {
-      if (!window.confirm('确认该员工离职工资已核算并结清？')) return;
-      api(`/api/resignations/${completeSettlement.dataset.completeSettlement}/progress`, {
-        method: 'PUT', body: JSON.stringify({ settlementStatus: 1 })
-      }).then(() => Promise.all([loadWorkTasks(), loadEmployees(), loadOffice()]))
+    const openOffboard = event.target.closest('[data-open-offboard]');
+    if (openOffboard) {
+      const employeeId = Number(openOffboard.dataset.openOffboard);
+      selectEmployee(employeeId)
+        .then(() => openResignModal(employeeId))
         .catch(error => toast(error.message, 'error'));
       return;
     }
@@ -2121,7 +2434,19 @@ function bindEvents() {
 
     const todoButton = event.target.closest('.todo-item[data-view]');
     if (todoButton) {
-      switchView(todoButton.dataset.view);
+      const todoId = todoButton.dataset.todoId || '';
+      if (todoId === 'contract' || todoId === 'insurance') {
+        switchView('risk');
+        window.setTimeout(() => applyRiskPreset(todoId), 0);
+      } else {
+        switchView(todoButton.dataset.view);
+      }
+      return;
+    }
+
+    const noticeButton = event.target.closest('[data-notice-view]');
+    if (noticeButton) {
+      switchView(noticeButton.dataset.noticeView);
       return;
     }
 
@@ -2173,17 +2498,29 @@ function bindEvents() {
     if (action === 'transfer') openTransferModal(id);
     if (action === 'resign') openResignModal(id);
     if (action === 'contract') openContractModal(id);
-    if (action === 'social') openSocialModal(id);
+    if (action === 'social') openSocialModal(id, actionButton.dataset.insuranceAction);
     if (action === 'certificate') openCertificateModal(id);
     if (action === 'handle-risk') handleRisk(id, status).catch(error => toast(error.message));
     if (action === 'create-risk-case') openRiskCaseModal(id, 'create').catch(error => toast(error.message));
     if (action === 'edit-risk-case' || action === 'view-risk-case') {
-      switchView('riskCases');
       openRiskCaseModal(id, 'edit').catch(error => toast(error.message));
     }
     if (action === 'approve-advance') approveAdvance(id).catch(error => toast(error.message));
     if (action === 'pay-advance') payAdvance(id).catch(error => toast(error.message));
-    if (action === 'goto-risk') switchView('risk');
+    if (action === 'assign-onsite') openProjectOnsiteModal(Number(actionButton.dataset.project)).catch(error => toast(error.message, 'error'));
+    if (action === 'goto-risk') {
+      const project = state.projects.find(item => Number(item.id) === Number(actionButton.dataset.project));
+      state.selectedRiskProjectId = Number(project?.id || 0) || null;
+      $('#riskKeywordInput').value = project?.projectName || '';
+      switchView('risk');
+    }
+  });
+
+  document.addEventListener('keydown', event => {
+    const card = event.target.closest?.('[data-risk-detail]');
+    if (!card || (event.key !== 'Enter' && event.key !== ' ')) return;
+    event.preventDefault();
+    card.click();
   });
 
   /* ==================== 移动端员工管理事件 ==================== */
@@ -2204,6 +2541,8 @@ function bindEvents() {
   if (mobileEmpForm) mobileEmpForm.addEventListener('submit', e => submitMobileEmployee(e).catch(err => toast(err.message, 'error')));
   $('#formCustomerSelect')?.addEventListener('change', event => updateEmployeeProjectOptions(event.currentTarget.form));
   $('#mFormCustomerSelect')?.addEventListener('change', event => updateEmployeeProjectOptions(event.currentTarget.form));
+  $('#employeeForm')?.elements.employeeStatus?.addEventListener('change', event => syncEmployeeFormRequirements(event.currentTarget.form));
+  $('#mobileEmployeeForm')?.elements.employeeStatus?.addEventListener('change', event => syncEmployeeFormRequirements(event.currentTarget.form));
 
   const mobileSearch = $('#mobileEmpSearch');
   if (mobileSearch) {
@@ -2264,7 +2603,7 @@ function renderMobileEmpCards(list) {
     listEl.innerHTML = '<div class="mobile-emp-empty">暂无员工数据</div>';
     return;
   }
-  const statusMap = { 1: { text: '待入职', cls: 'pending' }, 2: { text: '在职', cls: 'active' }, 3: { text: '离职', cls: 'resigned' }, 4: { text: '黑名单', cls: 'resigned' } };
+  const statusMap = { 1: { text: '待入职', cls: 'pending' }, 2: { text: '在职', cls: 'active' }, 3: { text: '离职', cls: 'resigned' }, 4: { text: '黑名单', cls: 'resigned' }, 5: { text: '未入职', cls: 'pending' }, 6: { text: '面试', cls: 'pending' } };
   const empTypeMap = { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' };
   const canEditEmployee = (state.user?.permissions || []).includes('employee:update');
   listEl.innerHTML = list.map(emp => {
@@ -2298,16 +2637,19 @@ async function openMobileEmployeeModal(id = null) {
   form.reset();
   delete form.dataset.allowLegacyUnassigned;
   delete form.dataset.legacyCustomerId;
+  delete form.dataset.employeeStatus;
   $('#mobileEmployeeModalTitle').textContent = id ? '编辑员工' : '新增员工';
   $('#mobileEmployeeStatusField')?.classList.toggle('hidden', Boolean(id));
-  if (!id && form.elements.employeeStatus) form.elements.employeeStatus.value = '1';
+  if (!id && form.elements.employeeStatus) form.elements.employeeStatus.value = '6';
   configureSensitiveEmployeeFields(form, Boolean(id));
+  syncEmployeeFormRequirements(form);
   $('#ocrStatus')?.classList.add('hidden');
   /* 填充工作单位/岗位 */
   if (state.bootstrap) {
-    $('#mFormCustomerSelect').innerHTML = optionHtml(state.bootstrap.customers, 'id', 'customerName');
-    $('#mFormPositionSelect').innerHTML = optionHtml(state.bootstrap.positions, 'id', 'positionName');
+    $('#mFormCustomerSelect').innerHTML = `<option value="">请选择工作单位</option>${optionHtml(state.bootstrap.customers, 'id', 'customerName')}`;
+    $('#mFormPositionSelect').innerHTML = `<option value="">请选择岗位</option>${optionHtml(state.bootstrap.positions, 'id', 'positionName')}`;
   }
+  if (!id) applyEmployeeFormDefaults(form);
   updateEmployeeProjectOptions(form);
   if (id) {
     const detailUrl = canViewSensitiveEmployee()
@@ -2322,6 +2664,7 @@ async function openMobileEmployeeModal(id = null) {
       name: row.name,
       gender: row.gender,
       idCardNo: canViewSensitiveEmployee() ? row.idCardNo : '',
+      address: canViewSensitiveEmployee() ? row.address : '',
       phone: canViewSensitiveEmployee() ? row.phone : '',
       customerId: row.customerId,
       projectId: row.projectId,
@@ -2339,13 +2682,13 @@ async function openMobileEmployeeModal(id = null) {
       emergencyPhone: canViewSensitiveEmployee() ? row.emergencyPhone : '',
       remark: row.remark
     };
+    form.dataset.employeeStatus = String(row.employeeStatus || '');
     for (const [key, value] of Object.entries(values)) {
       if (key === 'projectId') continue;
       if (form.elements[key]) form.elements[key].value = value || '';
     }
     updateEmployeeProjectOptions(form, values.projectId);
-  } else {
-    form.querySelector('[name="hireDate"]').value = new Date().toISOString().slice(0, 10);
+    syncEmployeeFormRequirements(form, row.employeeStatus);
   }
   $('#mobileEmployeeModal').showModal();
 }
@@ -2381,10 +2724,11 @@ async function handleOcrScan(file) {
     if (result.name) $('#mEmpName').value = result.name;
     if (result.gender) $('#mEmpGender').value = String(result.gender);
     if (result.idCardNo) $('#mEmpIdCard').value = result.idCardNo;
+    if (result.address) $('#mEmpAddress').value = result.address;
     /* 从身份证号提取出生日期作为电话提示，但不自动填充电话 */
 
     statusEl.className = 'ocr-status success';
-    statusEl.textContent = `识别成功：${result.name}（${result.gender === 1 ? '男' : '女'}）${result.nation}族 身份证:${result.idCardNo.replace(/^(.{6}).+(.{4})$/, '$1******$2')}`;
+    statusEl.textContent = `识别成功：${result.name}（${result.gender === 1 ? '男' : '女'}）${result.nation}族，身份证号和地址已自动回填`;
     statusEl.classList.remove('hidden');
   } catch (err) {
     statusEl.className = 'ocr-status error';
@@ -2455,11 +2799,14 @@ async function submitMobileEmployee(event) {
 async function bootAuthedApp() {
   await loadBootstrap();
   clearCache();
-  await Promise.all([
-    refreshAll().catch(() => {}),
-    loadOffice().catch(() => {})
-  ]);
-  if (state.employees[0]) await selectEmployee(state.employees[0].id).catch(() => {});
+  const results = await Promise.allSettled([refreshAll(), loadOffice()]);
+  const failures = results.filter(result => result.status === 'rejected');
+  if (failures.length === results.length) throw failures[0].reason;
+  if (failures.length) {
+    const message = failures.map(result => result.reason?.message || '未知错误').join('；');
+    toast(`部分数据加载失败：${message}`, 'error');
+  }
+  if (state.employees[0]) await selectEmployee(state.employees[0].id).catch(error => toast(`员工详情加载失败：${error.message}`, 'error'));
   switchView('office');
 }
 

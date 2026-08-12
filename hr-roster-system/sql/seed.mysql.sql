@@ -92,7 +92,7 @@ VALUES
 (5, '员工调岗', 'employee:transfer', 2, 1, NULL, '/api/employees/:id/job-transfer', 14, 1),
 (6, '员工离职', 'employee:resign', 2, 1, NULL, '/api/employees/:id/resign', 15, 1),
 (7, '导出员工', 'employee:export', 2, 1, NULL, '/api/export/employees.csv', 16, 1),
-(8, '风险预警', 'risk:menu', 1, 0, '/hr/risk-alerts', NULL, 20, 1),
+(8, '用工风险中心', 'risk:menu', 1, 0, '/hr/risks', NULL, 20, 1),
 (9, '查看风险', 'risk:view', 2, 8, NULL, '/api/risk-alerts', 21, 1),
 (10, '扫描风险', 'risk:scan', 2, 8, NULL, '/api/risk-alerts/scan', 22, 1),
 (11, '处理风险', 'risk:handle', 2, 8, NULL, '/api/risk-alerts/:id/handle', 23, 1),
@@ -149,7 +149,7 @@ INSERT IGNORE INTO sys_role_permission (role_id, permission_id)
 SELECT 3, id FROM sys_permission
 WHERE permission_code IN (
   'employee:menu', 'employee:view', 'employee:create', 'employee:batch', 'employee:update',
-  'employee:transfer', 'employee:resign', 'social:manage',
+  'employee:transfer', 'employee:resign', 'contract:manage', 'social:manage',
   'customer:view', 'customer:manage', 'project:view', 'project:manage',
   'factory:view', 'factory:manage', 'blacklist:view',
   'advance:view', 'advance:create'

@@ -88,4 +88,28 @@ function employeeScope(user, params, employeeAlias = 'e', jobAlias = 'j') {
   return ' AND 1 = 0';
 }
 
-module.exports = { projectScope, customerScope, employeeScope };
+// 待办可能指向“目标项目”（如跨项目转岗），不能只按员工当前任职项目过滤。
+// 驻厂账号满足目标项目授权或当前任职项目授权任一条件即可看到对应待办。
+function workTaskScope(user, params, taskAlias = 't', employeeAlias = 'e', jobAlias = 'j') {
+  if (!user || Number(user.dataScope) === 1) return '';
+  scopeParams(user, params);
+  if (Number(user.dataScope) === 4) {
+    params.scopeEmployeeId = Number(user.employeeId || 0);
+    return ` AND ${employeeAlias}.id = :scopeEmployeeId`;
+  }
+  if (Number(user.dataScope) === 5) {
+    return ` AND (EXISTS (
+      SELECT 1 FROM sys_user_project task_up
+      WHERE task_up.user_id = :scopeUserId AND task_up.project_id = ${taskAlias}.project_id
+    ) OR EXISTS (
+      SELECT 1 FROM sys_user_project job_up
+      WHERE job_up.user_id = :scopeUserId AND job_up.project_id = ${jobAlias}.project_id
+    ) OR (${employeeAlias}.created_by = :scopeUserId AND ${jobAlias}.project_id IS NULL))`;
+  }
+  if ([2, 3].includes(Number(user.dataScope))) {
+    return ` AND ${departmentCondition(user, params, `${jobAlias}.dept_id`)}`;
+  }
+  return ' AND 1 = 0';
+}
+
+module.exports = { projectScope, customerScope, employeeScope, workTaskScope };

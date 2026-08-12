@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { requireAuth, requirePermission, requireAnyPermission } = require('../src/middlewares/auth.middleware');
+const { requireAuth, requirePermission } = require('../src/middlewares/auth.middleware');
 const { verifyToken } = require('../src/utils/token');
 const authService = require('../src/services/auth.service');
 const systemService = require('../src/services/system.service');
@@ -104,18 +104,18 @@ function captureNextError() {
 // 二、多权限要求（requirePermission 链式调用模拟）
 // -------------------------------------------------------------------
 
-// 离职进度允许驻厂离职权限或薪资管理权限进入，再由服务层校验可修改字段。
-for (const permission of ['employee:resign', 'payroll:manage']) {
-  const req = makeReq({ permissions: [permission] });
+// 离职由驻厂或HR一次办结，薪资权限不再进入离职流程。
+{
+  const req = makeReq({ permissions: ['employee:resign'] });
   const { next, getError } = captureNextError();
-  requireAnyPermission(['employee:resign', 'payroll:manage'])(req, makeRes(), next);
-  assert.equal(getError(), null, `${permission} 应可进入离职进度接口`);
+  requirePermission('employee:resign')(req, makeRes(), next);
+  assert.equal(getError(), null, '驻厂离职权限应可进入离职进度接口');
 }
 {
-  const req = makeReq({ permissions: ['employee:view'] });
+  const req = makeReq({ permissions: ['payroll:manage'] });
   const { next, getError } = captureNextError();
-  requireAnyPermission(['employee:resign', 'payroll:manage'])(req, makeRes(), next);
-  assert.equal(getError()?.statusCode || 403, 403, '普通查看权限不能进入离职进度接口');
+  requirePermission('employee:resign')(req, makeRes(), next);
+  assert.equal(getError()?.statusCode || 403, 403, '仅有薪资权限不能进入离职进度接口');
 }
 
 // 2.1 创建客户需要同时有 customer:manage 和 project:manage

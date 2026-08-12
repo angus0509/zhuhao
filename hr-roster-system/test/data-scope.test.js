@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { projectScope, customerScope, employeeScope } = require('../src/utils/data-scope');
+const { projectScope, customerScope, employeeScope, workTaskScope } = require('../src/utils/data-scope');
 
 function testDepartmentScope() {
   const user = { id: 8, companyId: 1, dataScope: 2, scopeDeptIds: [3, 4] };
@@ -26,6 +26,11 @@ function testProjectAndSelfScope() {
   assert.match(employeeProjectSql, /scope_project\.id = j\.project_id/, '驻厂员工范围必须按授权项目ID隔离');
   assert.doesNotMatch(employeeProjectSql, /scope_project\.customer_id = j\.customer_id/, '驻厂员工范围不得按客户单位放大');
   assert.match(employeeProjectSql, /e\.created_by = :scopeUserId AND j\.project_id IS NULL/, '驻厂人员应保留自己录入且未分配项目的历史员工');
+
+  const taskParams = { companyId: 1 };
+  const taskSql = workTaskScope({ id: 9, companyId: 1, dataScope: 5 }, taskParams, 't', 'e', 'j');
+  assert.match(taskSql, /task_up\.project_id = t\.project_id/, '驻厂待办必须允许目标项目授权账号查看');
+  assert.match(taskSql, /job_up\.project_id = j\.project_id/, '驻厂待办仍需允许当前项目授权账号查看');
 
   const selfSql = employeeScope({ id: 10, companyId: 1, employeeId: 88, dataScope: 4 }, params);
   assert.match(selfSql, /e\.id = :scopeEmployeeId/);

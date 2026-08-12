@@ -23,7 +23,7 @@ if (!service.includes('await assertNewEmployeeScope(companyId, normalizedBody, u
 if (!service.includes('project_id = :projectId')) throw new Error('编辑员工时无法保存所属项目');
 if (!service.includes("throw createError('授权项目范围账号必须选择所属项目'")) throw new Error('驻厂新增或编辑员工未强制关联授权项目');
 if (!service.includes("throw createError('该身份证号已存在员工档案')")) throw new Error('员工编辑缺少身份证重复校验');
-if (!service.includes('projectName ? projectMap.get')) throw new Error('批量录入未支持所属项目精确关联');
+if (!service.includes('projectMap.get(`${customerId}::${projectName}`)')) throw new Error('批量录入未支持所属项目精确关联');
 if (!migration.includes("p.permission_code='employee:update'") || !migration.includes("r.role_code='onsite_staff'")) throw new Error('缺少驻厂员工编辑权限迁移');
 if (!deploy.includes('migrate-onsite-employee-edit-permission-20260806.mysql.sql') || !deploy.includes('ONSITE_EDIT_BROKEN')) throw new Error('生产部署未执行或核对驻厂编辑权限迁移');
 

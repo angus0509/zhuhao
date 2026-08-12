@@ -80,6 +80,7 @@ function statusTone(status) {
   if (status === 2) return 'green';
   if (status === 1) return 'blue';
   if (status === 3) return 'amber';
+  if (status === 5) return 'blue';
   return 'red';
 }
 

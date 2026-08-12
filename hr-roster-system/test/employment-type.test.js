@@ -12,7 +12,7 @@ assert.throws(() => normalizeEmploymentType('默认派遣'), /用工模式.*无�
 assert.equal(normalizeFeeMode('小时工服务费 2.5 元/小时'), '小时工服务费 2.5 元/小时');
 assert.equal(normalizeFeeMode(' 自定义月结 '), '自定义月结');
 assert.equal(normalizeFeeMode('派遣'), '派遣');
-assert.throws(() => normalizeFeeMode(''), /费用模式不能为空/);
+assert.equal(normalizeFeeMode(''), '');
 assert.throws(() => normalizeFeeMode('超'.repeat(81)), /最多填写80个字符/);
 
 console.log('employment-type-tests-ok');

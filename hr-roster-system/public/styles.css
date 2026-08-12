@@ -625,8 +625,12 @@ button {
 .todo-item.red { border-left-color: var(--red); }
 .todo-item strong { font-size: 20px; }
 .todo-item small { grid-column: 1 / -1; color: var(--muted); }
-.notice-list article { padding: 11px 0; display: grid; gap: 4px; border-bottom: 1px solid var(--line); }
-.notice-list article:last-child { border-bottom: 0; }
+.notice-list article,
+.notice-list button { padding: 11px 0; display: grid; gap: 4px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: inherit; font: inherit; }
+.notice-list button { width: 100%; cursor: pointer; }
+.notice-list button:hover strong { color: var(--blue); }
+.notice-list article:last-child,
+.notice-list button:last-child { border-bottom: 0; }
 .notice-list span { color: var(--blue); font-size: 11px; }
 .notice-list small { color: var(--muted); }
 .payroll-hero { background: linear-gradient(118deg, #17365d, #087f8c 62%, #65c9b1); }
@@ -2828,6 +2832,83 @@ button:focus-visible, a:focus-visible {
 }
 .perm-tree-node > .checkbox-item { font-weight: 600; }
 .perm-children .checkbox-item { font-weight: 400; font-size: 12px; }
+.permission-filter-hidden { display: none; }
+
+.role-permission-modal {
+  width: min(580px, calc(100vw - 28px));
+}
+.role-permission-modal-panel {
+  width: 100%;
+  max-height: min(92dvh, 900px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.role-permission-modal-panel .modal-head,
+.role-permission-modal-panel .modal-actions {
+  flex: 0 0 auto;
+}
+.role-permission-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.permission-tree-toolbar {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.permission-tree-toolbar strong {
+  grid-column: 1 / -1;
+  color: var(--primary, #1a4d8c);
+  font-size: 13px;
+}
+.permission-tree-toolbar input {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.permission-tree-toolbar .secondary-button {
+  width: 100%;
+}
+.permission-tree-field {
+  min-height: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+#rolePermissionTree {
+  min-height: 280px;
+  max-height: none;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 10px;
+  background: var(--surface, #f9fafb);
+}
+
+@media (max-width: 760px) {
+  .role-permission-modal {
+    width: calc(100vw - 16px);
+  }
+  .role-permission-modal-panel {
+    max-height: 94dvh;
+    padding: 14px;
+  }
+  .permission-tree-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .permission-tree-toolbar input {
+    grid-column: 1 / -1;
+  }
+  #rolePermissionTree {
+    min-height: 240px;
+  }
+}
 
 /* 角色配置区域 */
 .role-config-area {

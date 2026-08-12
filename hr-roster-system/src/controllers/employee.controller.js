@@ -15,6 +15,11 @@ exports.summary = asyncHandler(async (req, res) => {
   success(res, data);
 });
 
+exports.onsiteOverview = asyncHandler(async (req, res) => {
+  const data = await employeeService.getOnsiteOverview(req.companyId, req.user);
+  success(res, data);
+});
+
 exports.precheck = asyncHandler(async (req, res) => {
   const data = await employeeService.precheckEmployee(req.companyId, req.body);
   success(res, data, data.allowOnboarding ? '预检查通过' : '存在入职限制');

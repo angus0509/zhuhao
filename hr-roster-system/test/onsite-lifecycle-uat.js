@@ -170,37 +170,25 @@ async function main() {
   detail = await api(`/employees/${employeeId}`);
   assert(Number(detail.basicInfo.projectId) === Number(targetProject.id), '转岗后目标项目未生效');
 
-  console.log('[7/9] 发起离职并完成现场交接、工资结算');
+  console.log('[7/9] 单页办理离职、现场交接和雇主险减保');
   const resignation = await api(`/employees/${employeeId}/resign`, {
     method: 'POST',
-    body: { leaveDate: today, leaveType: 1, leaveReason: 'UAT流程验证', riskRemark: '仅测试数据' }
-  });
-  assert(resignation.resignationId && resignation.completed === false, '离职发起状态不正确');
-  const progress = await api(`/resignations/${resignation.resignationId}/progress`, {
-    method: 'PUT',
-    body: { badgeReturned: 1, toolsReturned: 1, dormCleared: 1, attendanceConfirmed: 1, settlementStatus: 1 }
-  });
-  assert(progress.handoverDone && progress.settlementDone && !progress.completed, '退保前不应完成离职');
-
-  console.log('[8/9] 完成社保和雇主险退保');
-  await api(`/employees/${employeeId}/social-security`, {
-    method: 'PUT',
     body: {
-      socialStatus: 2,
-      socialCity: 'UAT测试城市',
-      socialBase: 5000,
-      fundStatus: 0,
-      fundBase: 0,
-      stopMonth: today.slice(0, 7),
-      employerInsuranceStatus: 2,
-      employerInsurer: 'UAT测试保险公司',
-      employerPolicyNo: `UATPOLICY${runId}`,
-      employerStartDate: today,
-      employerEndDate: today,
-      employerInsuredAmount: 1000000,
-      remark: 'UAT退保完成'
+      leaveDate: today,
+      leaveType: 1,
+      leaveReason: 'UAT流程验证',
+      badgeReturned: 1,
+      toolsReturned: 1,
+      dormCleared: 1,
+      attendanceConfirmed: 1,
+      terminateEmployerInsurance: 1
     }
   });
+  assert(resignation.resignationId && resignation.handoverDone && resignation.insuranceDone && resignation.completed, '离职未一次办结');
+
+  console.log('[8/9] 核对雇主险已同步减保');
+  detail = await api(`/employees/${employeeId}`);
+  assert(Number(detail.socialSecurity?.employerInsuranceStatus) === 2, '离职未同步登记雇主险减保');
 
   console.log('[9/9] 核对正式离职、任职关闭和待办闭环');
   detail = await api(`/employees/${employeeId}`);

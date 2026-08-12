@@ -1,8 +1,7 @@
 // 视图注册与切换。业务函数在入口脚本加载完成后才会执行。
 const viewLoaders = {
-  risk: () => loadRisks(),
+  risk: () => loadRiskCenter(),
   dashboard: () => loadDashboard(),
-  riskCases: () => loadRiskCases(),
   audit: () => loadAuditLogs(),
   projects: () => loadProjects(),
   talents: () => loadTalents(),
@@ -20,7 +19,6 @@ const viewElements = {
   roster: '#rosterView',
   dashboard: '#dashboardView',
   risk: '#riskView',
-  riskCases: '#riskCasesView',
   audit: '#auditView',
   projects: '#projectsView',
   talents: '#talentsView',
@@ -33,6 +31,17 @@ const viewElements = {
 };
 
 function switchView(view) {
+  const legacyViewMap = {
+    riskCases: 'risk',
+    insurance: 'risk',
+    factory: 'roster',
+    factoryStaff: 'roster'
+  };
+  view = legacyViewMap[view] || view;
+  if (!viewElements[view]) {
+    const firstVisible = $('.nav-item:not([style*="display: none"]):not([style*="display:none"])');
+    view = firstVisible?.dataset.view || 'office';
+  }
   const navItem = $(`.nav-item[data-view="${view}"]`);
   if (navItem && navItem.style.display === 'none') {
     const firstVisible = $('.nav-item:not([style*="display: none"]):not([style*="display:none"])');
@@ -46,6 +55,7 @@ function switchView(view) {
     if (el) el.classList.toggle('hidden', name !== view);
   });
   $$('.mobile-tabbar button').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+  if (typeof applyTopbarActionVisibility === 'function') applyTopbarActionVisibility(view);
   const loader = viewLoaders[view];
   if (loader) loader().catch(error => toast(error.message, 'error'));
   if (view === 'roster' && window.innerWidth <= 760) {

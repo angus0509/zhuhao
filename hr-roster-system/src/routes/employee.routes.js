@@ -1,6 +1,6 @@
 const express = require('express');
 const controller = require('../controllers/employee.controller');
-const { requireAuth, requirePermission, requireAnyPermission } = require('../middlewares/auth.middleware');
+const { requireAuth, requirePermission } = require('../middlewares/auth.middleware');
 const { sensitiveLimiter, batchLimiter } = require('../middlewares/rate-limit.middleware');
 
 const router = express.Router();
@@ -9,6 +9,7 @@ router.use(requireAuth);
 
 router.get('/bootstrap', requirePermission('employee:view'), controller.bootstrap);
 router.get('/summary', requirePermission('employee:view'), controller.summary);
+router.get('/employees/onsite-overview', requirePermission('employee:view'), controller.onsiteOverview);
 router.get('/employees', requirePermission('employee:view'), controller.list);
 router.get('/employees/mine', requirePermission('employee:view'), controller.listMine);
 router.post('/employees/precheck', sensitiveLimiter, requirePermission('employee:create'), controller.precheck);
@@ -22,7 +23,7 @@ router.put('/employee-transfers/:changeId/handle', requirePermission('employee:t
 router.post('/employees/:id/resign', sensitiveLimiter, requirePermission('employee:resign'), controller.resign);
 router.put(
   '/resignations/:resignationId/progress',
-  requireAnyPermission(['employee:resign', 'payroll:manage']),
+  requirePermission('employee:resign'),
   controller.updateResignationProgress
 );
 router.post('/employees/:id/contracts', requirePermission('contract:manage'), controller.createContract);

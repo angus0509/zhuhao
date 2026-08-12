@@ -479,6 +479,101 @@ async function listProjects(companyId) {
   );
 }
 
+async function getProjectOnsiteAssignees(companyId, projectId) {
+  const project = await db.first(
+    `SELECT p.id, p.project_name projectName, p.customer_id customerId, c.customer_name customerName
+     FROM labor_project p
+     JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
+     WHERE p.id=:projectId AND p.company_id=:companyId`,
+    { companyId, projectId }
+  );
+  if (!project) throw createError('项目不存在', 404);
+
+  const users = await db.query(
+    `SELECT DISTINCT u.id userId, u.real_name realName, u.username, u.phone,
+            CASE WHEN EXISTS (
+              SELECT 1 FROM sys_user_project up WHERE up.user_id=u.id AND up.project_id=:projectId
+            ) THEN 1 ELSE 0 END assigned
+     FROM sys_user u
+     JOIN sys_user_role ur ON ur.user_id=u.id
+     JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id
+     WHERE u.company_id=:companyId AND u.status=1 AND r.status=1 AND r.role_code = 'onsite_staff'
+     ORDER BY assigned DESC, u.real_name, u.id`,
+    { companyId, projectId }
+  );
+
+  return {
+    project,
+    users: users.map(user => ({ ...user, phone: maskPhone(user.phone), assigned: Number(user.assigned) === 1 }))
+  };
+}
+
+async function updateProjectOnsiteAssignees(companyId, projectId, userIds, operatorId) {
+  const selectedUserIds = [...new Set((Array.isArray(userIds) ? userIds : []).map(Number).filter(Number.isInteger))];
+  const project = await db.first(
+    'SELECT id,project_name projectName FROM labor_project WHERE id=:projectId AND company_id=:companyId',
+    { companyId, projectId }
+  );
+  if (!project) throw createError('项目不存在', 404);
+
+  if (selectedUserIds.length) {
+    const params = { companyId };
+    const placeholders = selectedUserIds.map((userId, index) => {
+      params[`userId${index}`] = userId;
+      return `:userId${index}`;
+    });
+    const validUsers = await db.query(
+      `SELECT DISTINCT u.id
+       FROM sys_user u
+       JOIN sys_user_role ur ON ur.user_id=u.id
+       JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id
+       WHERE u.company_id=:companyId AND u.status=1 AND r.status=1 AND r.role_code = 'onsite_staff'
+         AND u.id IN (${placeholders.join(',')})`,
+      params
+    );
+    if (validUsers.length !== selectedUserIds.length) throw createError('包含无效、停用或非驻厂专员账号');
+  }
+
+  return db.transaction(async connection => {
+    await connection.execute(
+      `DELETE up FROM sys_user_project up
+       JOIN sys_user u ON u.id=up.user_id AND u.company_id=:companyId
+       JOIN sys_user_role ur ON ur.user_id=u.id
+       JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id AND r.role_code='onsite_staff'
+       WHERE up.project_id=:projectId`,
+      { companyId, projectId }
+    );
+
+    for (const userId of selectedUserIds) {
+      await connection.execute(
+        `INSERT IGNORE INTO sys_user_project (user_id, project_id)
+         SELECT u.id, p.id
+         FROM sys_user u
+         JOIN sys_user_role ur ON ur.user_id=u.id
+         JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id
+         JOIN labor_project p ON p.id=:projectId AND p.company_id=:companyId
+         WHERE u.id=:userId AND u.company_id=:companyId AND u.status=1
+           AND r.status=1 AND r.role_code='onsite_staff'`,
+        { companyId, projectId, userId }
+      );
+    }
+
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+       VALUES (:companyId,:operatorId,'客户项目','project_onsite_assignment',:projectId,'assign',:afterData)`,
+      {
+        companyId,
+        operatorId,
+        projectId,
+        afterData: JSON.stringify({ projectName: project.projectName, onsiteUserIds: selectedUserIds })
+      }
+    );
+
+    return { projectId, onsiteUserIds: selectedUserIds };
+  });
+}
+
 module.exports = {
   listUsers,
   getUserDetail,
@@ -492,6 +587,8 @@ module.exports = {
   listDepartments,
   listPermissions,
   listProjects,
+  getProjectOnsiteAssignees,
+  updateProjectOnsiteAssignees,
   MANAGED_ROLE_CODES,
   expandPermissionIds
 };

@@ -73,20 +73,24 @@ async function getUserAccess(user) {
     { userId }
   );
 
-  const permissions = await db.query(
-    `
-    SELECT DISTINCT p.permission_code
-    FROM sys_user_role ur
-    JOIN sys_role_permission rp ON rp.role_id = ur.role_id
-    JOIN sys_permission p ON p.id = rp.permission_id
-    JOIN sys_role r ON r.id = ur.role_id
-    WHERE ur.user_id = :userId
-      AND r.status = 1
-      AND p.status = 1
-    ORDER BY p.permission_code
-    `,
-    { userId }
-  );
+  const permissions = roles.some(role => role.role_code === 'company_admin')
+    ? await db.query(
+      `SELECT permission_code FROM sys_permission WHERE status=1 ORDER BY permission_code`
+    )
+    : await db.query(
+      `
+      SELECT DISTINCT p.permission_code
+      FROM sys_user_role ur
+      JOIN sys_role_permission rp ON rp.role_id = ur.role_id
+      JOIN sys_permission p ON p.id = rp.permission_id
+      JOIN sys_role r ON r.id = ur.role_id
+      WHERE ur.user_id = :userId
+        AND r.status = 1
+        AND p.status = 1
+      ORDER BY p.permission_code
+      `,
+      { userId }
+    );
 
   const dataScope = effectiveDataScope(roles);
   const scopeDeptIds = await getScopeDeptIds(user, roles, dataScope);

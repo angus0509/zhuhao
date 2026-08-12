@@ -48,6 +48,7 @@ async function scanMissingContracts(connection, companyId) {
     FROM hr_employee e
     WHERE e.company_id = :companyId
       AND e.employee_status = 2
+      AND e.lifecycle_status <> 'OFFBOARDING'
       AND e.deleted_at IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM hr_labor_contract c
@@ -183,7 +184,6 @@ async function scanSpecialWorkCertificate(connection, companyId) {
 
 async function scanEmployerInsurance(connection, companyId) {
   const current = today();
-  const after30Days = addDays(current, 30);
   const [employees] = await connection.execute(
     `SELECT e.id,e.name,s.id social_id,s.employer_insurance_status,s.employer_end_date
      FROM hr_employee e
@@ -191,9 +191,9 @@ async function scanEmployerInsurance(connection, companyId) {
        SELECT s2.id FROM hr_social_security s2
        WHERE s2.company_id=e.company_id AND s2.employee_id=e.id ORDER BY s2.id DESC LIMIT 1
      )
-     WHERE e.company_id=:companyId AND e.employee_status=2 AND e.deleted_at IS NULL
-       AND (COALESCE(s.employer_insurance_status,0)<>1 OR (s.employer_end_date IS NOT NULL AND s.employer_end_date<=:after30Days))`,
-    { companyId, after30Days }
+     WHERE e.company_id=:companyId AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
+       AND (COALESCE(s.employer_insurance_status,0)<>1 OR (s.employer_end_date IS NOT NULL AND s.employer_end_date<:current))`,
+    { companyId, current }
   );
   let created = 0;
   for (const employee of employees) {
@@ -203,12 +203,12 @@ async function scanEmployerInsurance(connection, companyId) {
       companyId,
       employeeId: employee.id,
       riskType: 7,
-      riskLevel: missing || expired ? 3 : 2,
-      riskTitle: missing ? '员工未登记有效雇主险' : expired ? '员工雇主险已过期' : '员工雇主险即将到期',
+      riskLevel: 3,
+      riskTitle: missing ? '新员工雇主险未增保' : '员工雇主险已失效',
       riskDesc: missing
-        ? `${employee.name}当前未登记有效雇主责任险保障`
-        : `${employee.name}雇主责任险到期日期为${employee.employer_end_date}`,
-      riskKey: `employer_insurance:${employee.id}:${employee.social_id || 0}:${employee.employer_end_date || 'missing'}`
+        ? `${employee.name}入职后尚未办理雇主险增保`
+        : `${employee.name}雇主险已于${employee.employer_end_date}失效，请重新增保`,
+      riskKey: `employer_insurance_missing:${employee.id}`
     });
   }
   return created;
@@ -216,17 +216,58 @@ async function scanEmployerInsurance(connection, companyId) {
 
 async function scanRisks(companyId) {
   return db.transaction(async connection => {
-    // 当前业务不再管理社保合规，自动关闭历史未结社保风险，避免继续提示。
+    // 简化后的入职合规只保留未签劳动合同和未生效雇主险两项。
     await connection.execute(
-      `UPDATE hr_risk_alert SET handle_status=2,handled_at=NOW(),handle_note='系统已取消社保合规提示'
-       WHERE company_id=:companyId AND risk_type=3 AND handle_status IN (0,1)`,
+      `UPDATE hr_risk_alert SET handle_status=2,handle_time=NOW(),handle_remark='已移出入职合规中心'
+       WHERE company_id=:companyId AND risk_type NOT IN (1,7) AND handle_status IN (0,1)`,
+      { companyId }
+    );
+    // 修复历史关联状态：实际已经签订合同或雇主险有效时，自动关闭遗留提醒。
+    await connection.execute(
+      `UPDATE hr_risk_alert r
+       SET r.handle_status=2,r.handle_time=NOW(),r.handle_remark='系统核验：劳动合同已签订'
+       WHERE r.company_id=:companyId AND r.risk_type=1 AND r.handle_status IN (0,1)
+         AND EXISTS (SELECT 1 FROM hr_labor_contract c
+           WHERE c.company_id=r.company_id AND c.employee_id=r.employee_id AND c.sign_status=1)`,
+      { companyId }
+    );
+    // 若合同被撤销、雇主险减保或已经失效，重新打开此前系统办结的核心提醒。
+    await connection.execute(
+      `UPDATE hr_risk_alert r
+       JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
+       SET r.handle_status=0,r.handler_id=NULL,r.handle_time=NULL,r.handle_remark='系统复查：劳动合同当前未签订'
+       WHERE r.company_id=:companyId AND r.risk_type=1 AND r.handle_status=2
+         AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM hr_labor_contract c
+           WHERE c.company_id=r.company_id AND c.employee_id=r.employee_id AND c.sign_status=1)`,
+      { companyId }
+    );
+    await connection.execute(
+      `UPDATE hr_risk_alert r
+       JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
+       SET r.handle_status=0,r.handler_id=NULL,r.handle_time=NULL,r.handle_remark='系统复查：雇主险当前未生效'
+       WHERE r.company_id=:companyId AND r.risk_type=7 AND r.handle_status=2
+         AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM hr_social_security s
+           WHERE s.id=(SELECT s2.id FROM hr_social_security s2
+             WHERE s2.company_id=r.company_id AND s2.employee_id=r.employee_id ORDER BY s2.id DESC LIMIT 1)
+           AND s.employer_insurance_status=1
+           AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE()))`,
+      { companyId }
+    );
+    await connection.execute(
+      `UPDATE hr_risk_alert r
+       SET r.handle_status=2,r.handle_time=NOW(),r.handle_remark='系统核验：雇主险保障中'
+       WHERE r.company_id=:companyId AND r.risk_type=7 AND r.handle_status IN (0,1)
+         AND EXISTS (SELECT 1 FROM hr_social_security s
+           WHERE s.id=(SELECT s2.id FROM hr_social_security s2
+             WHERE s2.company_id=r.company_id AND s2.employee_id=r.employee_id ORDER BY s2.id DESC LIMIT 1)
+           AND s.employer_insurance_status=1
+           AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE()))`,
       { companyId }
     );
     let created = 0;
     created += await scanMissingContracts(connection, companyId);
-    created += await scanContractExpire(connection, companyId);
-    created += await scanCertificateExpire(connection, companyId);
-    created += await scanSpecialWorkCertificate(connection, companyId);
     created += await scanEmployerInsurance(connection, companyId);
     return { created };
   });
@@ -234,24 +275,37 @@ async function scanRisks(companyId) {
 
 async function listRisks(companyId, user = null) {
   const params = { companyId };
-  const where = ['r.company_id = :companyId', 'r.risk_type <> 3'];
+  const where = ['r.company_id = :companyId', 'r.risk_type IN (1,7)', 'e.employee_status = 2', "e.lifecycle_status <> 'OFFBOARDING'"];
   applyDataScope(where, params, await resolveDataScope(companyId, user));
 
   const rows = await db.query(
     `
-    SELECT r.*, e.name AS employee_name, e.employee_no,
-      (SELECT c.id FROM hr_risk_case c
-       WHERE c.company_id = r.company_id AND c.source_alert_id = r.id
-       ORDER BY c.id DESC LIMIT 1) AS risk_case_id
+    SELECT r.*, e.name AS employee_name, e.employee_no,j.hire_date,j.project_id project_id,
+      cu.customer_name,lp.project_name,p.position_name,
+      EXISTS(SELECT 1 FROM hr_labor_contract c
+        WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1) AS contract_signed,
+      EXISTS(SELECT 1 FROM hr_social_security s
+        WHERE s.id=(SELECT s2.id FROM hr_social_security s2
+          WHERE s2.company_id=e.company_id AND s2.employee_id=e.id ORDER BY s2.id DESC LIMIT 1)
+        AND s.employer_insurance_status=1
+        AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE())) AS employer_insurance_active
     FROM hr_risk_alert r
     JOIN hr_employee e ON e.id = r.employee_id AND e.company_id = r.company_id
     LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
+    LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
+    LEFT JOIN labor_project lp ON lp.id=j.project_id AND lp.company_id=e.company_id
+    LEFT JOIN hr_position p ON p.id=j.position_id AND p.company_id=e.company_id
     WHERE ${where.join(' AND ')}
     ORDER BY r.handle_status ASC, r.risk_level DESC, r.id DESC
     `,
     params
   );
-  return rows.map(formatRisk);
+  return rows.map(row => ({
+    ...formatRisk(row),
+    hireDate: row.hire_date || '',
+    contractSigned: Boolean(row.contract_signed),
+    employerInsuranceActive: Boolean(row.employer_insurance_active)
+  }));
 }
 
 async function assertRiskScope(companyId, riskId, user, connection = db.pool) {
@@ -306,6 +360,9 @@ function formatRiskCase(row) {
     employeeId: row.employee_id,
     employeeName: row.employee_name || '',
     employeeNo: row.employee_no || '',
+    customerName: row.customer_name || '',
+    projectName: row.project_name || '',
+    positionName: row.position_name || '',
     riskTitle: row.risk_title,
     riskDesc: row.risk_desc || '',
     riskLevel: row.risk_level,
@@ -348,11 +405,14 @@ async function listRiskCases(companyId, user = null, statusText = '') {
   applyDataScope(where, params, await resolveDataScope(companyId, user));
   const rows = await db.query(
     `SELECT c.*, r.employee_id, r.risk_title, r.risk_desc, r.risk_level,
-            e.name AS employee_name, e.employee_no
+            e.name AS employee_name, e.employee_no,cu.customer_name,lp.project_name,p.position_name
      FROM hr_risk_case c
      JOIN hr_risk_alert r ON r.id = c.source_alert_id AND r.company_id = c.company_id
      JOIN hr_employee e ON e.id = r.employee_id AND e.company_id = r.company_id
      LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
+     LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
+     LEFT JOIN labor_project lp ON lp.id=j.project_id AND lp.company_id=e.company_id
+     LEFT JOIN hr_position p ON p.id=j.position_id AND p.company_id=e.company_id
      WHERE ${where.join(' AND ')}
      ORDER BY c.status ASC, c.deadline ASC, c.id DESC`,
     params

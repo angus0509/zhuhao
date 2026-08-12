@@ -45,6 +45,10 @@ services:
       JWT_EXPIRES_IN_SECONDS: 604800
       DATA_ENCRYPT_KEY: ${DATA_ENCRYPT_KEY:?DATA_ENCRYPT_KEY未配置}
       DATA_ENCRYPT_IV: ${DATA_ENCRYPT_IV:?DATA_ENCRYPT_IV未配置}
+      # OCR 优先使用 Lighthouse/CVM 实例角色；无实例角色时使用以下可选密钥。
+      TENCENT_OCR_REGION: ${TENCENT_OCR_REGION:-ap-shanghai}
+      TENCENT_SECRET_ID: ${TENCENT_SECRET_ID:-}
+      TENCENT_SECRET_KEY: ${TENCENT_SECRET_KEY:-}
     ports:
       - "127.0.0.1:3120:3100"
     volumes:

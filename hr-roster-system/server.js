@@ -14,7 +14,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const buildInternalEmployeeNo = () => `YY${Date.now().toString(36).toUpperCase()}${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
 const dictionaries = {
-  employeeStatus: { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单' },
+  employeeStatus: { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' },
   employmentType: { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' },
   workType: { 1: '计时', 2: '计件', 3: '混合' },
   gender: { 0: '未知', 1: '男', 2: '女' },
@@ -345,6 +345,7 @@ function enrichEmployee(db, employee, options = {}) {
     gender: employee.gender,
     genderName: dictionaries.gender[employee.gender] || '未知',
     idCardNo: options.showSensitive ? employee.idCardNo : maskIdCard(employee.idCardNo),
+    address: options.showSensitive ? (employee.address || '') : (employee.address ? '已填写' : ''),
     phone: options.showSensitive ? employee.phone : maskPhone(employee.phone),
     education: employee.education || '',
     bankName: employee.bankName || '',
@@ -441,7 +442,11 @@ function formatRisk(risk) {
 }
 
 function validateEmployeeInput(db, body, id = 0) {
-  const required = [
+  const interview = Number(body.employeeStatus) === 6;
+  const required = interview ? [
+    ['name', '姓名不能为空'],
+    ['phone', '手机号不能为空']
+  ] : [
     ['name', '姓名不能为空'],
     ['phone', '手机号不能为空'],
     ['idCardNo', '身份证号不能为空'],
@@ -456,7 +461,8 @@ function validateEmployeeInput(db, body, id = 0) {
     if (!body[field]) return message;
   }
   if (!/^1[3-9]\d{9}$/.test(body.phone)) return '手机号格式不正确';
-  if (!/^\d{17}[\dXx]$/.test(body.idCardNo)) return '身份证号格式不正确';
+  if (body.idCardNo && !/^\d{17}[\dXx]$/.test(body.idCardNo)) return '身份证号格式不正确';
+  if (interview && (!body.deptId || !body.positionId)) return '';
   const blacklistHit = db.blacklist?.find(item => item.status === 1 && item.idCardNo.toUpperCase() === String(body.idCardNo).toUpperCase());
   if (blacklistHit) return `该人员命中全公司黑名单：${blacklistHit.reason}`;
 
@@ -1371,13 +1377,14 @@ async function handleApi(req, res, url) {
         name: body.name,
         gender: Number(body.gender || 0),
         idCardNo: body.idCardNo,
+        address: body.address || '',
         phone: body.phone,
         education: body.education || '',
         bankName: body.bankName || '',
         bankCardNo: body.bankCardNo || '',
         emergencyContact: body.emergencyContact || '',
         emergencyPhone: body.emergencyPhone || '',
-        employeeStatus: Number(body.employeeStatus || 2),
+        employeeStatus: [1, 2, 5, 6].includes(Number(body.employeeStatus)) ? Number(body.employeeStatus) : 1,
         createdAt: now(),
         updatedAt: now(),
         deletedAt: null
@@ -1471,6 +1478,8 @@ async function handleApi(req, res, url) {
       if (!employee) return fail(res, 404, '员工不存在');
       if (employee.employeeStatus === 3) return fail(res, 400, '员工已离职，不能重复办理');
       if (!body.leaveDate || !body.leaveType || !body.leaveReason) return fail(res, 400, '请完整填写离职信息');
+      if (![body.badgeReturned, body.toolsReturned, body.dormCleared, body.attendanceConfirmed]
+        .every(item => Number(item) === 1)) return fail(res, 400, '请确认完成全部离职交接清单');
       const currentJob = db.jobs.find(item => item.employeeId === id && item.jobStatus === 1);
       if (currentJob && body.leaveDate < currentJob.hireDate) return fail(res, 400, '离职日期不能早于入职日期');
 
@@ -1483,25 +1492,36 @@ async function handleApi(req, res, url) {
         leaveDate: body.leaveDate,
         leaveType: Number(body.leaveType),
         leaveReason: body.leaveReason,
-        handoverStatus: Number(body.handoverStatus || 0),
-        settlementStatus: Number(body.settlementStatus || 0),
-        riskRemark: body.riskRemark || '',
+        handoverStatus: 2,
+        badgeReturned: true,
+        toolsReturned: true,
+        dormCleared: true,
+        attendanceConfirmed: true,
+        completedAt: now(),
         createdAt: now()
       });
       employee.employeeStatus = 3;
+      employee.lifecycleStatus = 'LEFT';
       employee.updatedAt = now();
       if (currentJob) currentJob.jobStatus = 2;
-      createRiskIfNotExists(db, {
+      const existingTalent = db.talents.find(item => item.employeeId === id || item.phone === employee.phone);
+      const talent = existingTalent || { id: nextId(db, 'talent') };
+      Object.assign(talent, {
         employeeId: id,
-        riskType: 6,
-        riskLevel: 2,
-        riskTitle: '离职社保停保提醒',
-        riskDesc: `${employee.name}已办理离职，请确认当月社保停保和工资结算`,
-        riskKey: `resign_followup:${resignationId}`
+        name: employee.name,
+        phone: employee.phone,
+        source: employee.channelSource || '离职员工回流',
+        intentionJob: db.positions.find(item => item.id === currentJob?.positionId)?.positionName || '',
+        tags: ['离职回流'],
+        followStatus: '可重新招聘',
+        ownerName: '企业管理员',
+        resignationReason: body.leaveReason,
+        lastFollowAt: now()
       });
+      if (!existingTalent) db.talents.push(talent);
       addLog(db, '员工离职', 'resign', resignationId, body.leaveReason);
       writeDb(db);
-      return ok(res, { employeeId: id, resignationId }, '离职办理成功');
+      return ok(res, { employeeId: id, resignationId, handoverDone: true, insuranceDone: true, completed: true }, '离职办理成功');
     }
 
     if (req.method === 'POST' && resource === 'employees' && id && action === 'contracts') {

@@ -22,5 +22,7 @@ router.put('/system/roles/:id/departments', requirePermission('system:role'), co
 router.get('/system/departments', requirePermission('system:role'), controller.listDepartments);
 router.get('/system/permissions', requirePermission('system:role'), controller.listPermissions);
 router.get('/system/projects', requirePermission('system:role'), controller.listProjects);
+router.get('/system/projects/:id/onsite-assignees', requirePermission('system:role'), controller.getProjectOnsiteAssignees);
+router.put('/system/projects/:id/onsite-assignees', requirePermission('system:role'), controller.updateProjectOnsiteAssignees);
 
 module.exports = router;

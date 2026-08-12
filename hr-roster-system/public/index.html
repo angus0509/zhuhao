@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/theme-next.css" />
     <link rel="stylesheet" href="/ui-polish.css" />
+    <link rel="stylesheet" href="/layout-refine.css" />
     <script src="/motion-loader.js"></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
     <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
@@ -99,20 +100,16 @@
             <strong>人才库</strong>
           </button>
           <button class="nav-item" data-view="advances" data-perm="advance:menu">
-            <span>资金</span>
-            <strong>工资预支</strong>
+            <span>驻厂</span>
+            <strong>预支记录</strong>
           </button>
           <button class="nav-item" data-view="payroll" data-perm="payroll:menu">
             <span>结算</span>
             <strong>工资发放</strong>
           </button>
           <button class="nav-item" data-view="risk" data-perm="risk:menu">
-            <span>合规</span>
-            <strong>风险预警</strong>
-          </button>
-          <button class="nav-item" data-view="riskCases" data-perm="riskCase:menu">
-            <span>闭环</span>
-            <strong>用工风险管理</strong>
+            <span>风控</span>
+            <strong>用工风险中心</strong>
           </button>
           <button class="nav-item" data-view="audit" data-perm="audit:menu">
             <span>审计</span>
@@ -140,9 +137,9 @@
             <span class="system-status">系统在线</span>
             <span class="user-pill" id="userPill">未登录</span>
             <button class="secondary-button" id="changePasswordButton" type="button">修改密码</button>
-            <button class="secondary-button" id="scanRiskButton" type="button">扫描风险</button>
-            <button class="secondary-button" id="batchEmployeeButton" type="button" data-action-perm="employee:batch">批量录入</button>
-            <button class="primary-button" id="createEmployeeButton" type="button" data-action-perm="employee:create">新增员工</button>
+            <button class="secondary-button" id="scanRiskButton" type="button" data-action-perm="risk:scan" data-topbar-views="risk">扫描风险</button>
+            <button class="secondary-button" id="batchEmployeeButton" type="button" data-action-perm="employee:batch" data-topbar-views="roster">批量录入</button>
+            <button class="primary-button" id="createEmployeeButton" type="button" data-action-perm="employee:create" data-topbar-views="office,roster">新增员工</button>
             <button class="secondary-button" id="logoutButton" type="button">退出</button>
           </div>
         </header>
@@ -156,11 +153,11 @@
             <span>在职员工</span>
             <strong id="activeTotal">0</strong>
           </article>
-          <article class="metric-cell danger">
+          <article class="metric-cell danger metric-action" role="button" tabindex="0" data-risk-preset="open" aria-label="查看未处理风险">
             <span>未处理风险</span>
             <strong id="unresolvedRiskTotal">0</strong>
           </article>
-          <article class="metric-cell">
+          <article class="metric-cell metric-action" role="button" tabindex="0" data-risk-preset="contract" aria-label="查看未签合同风险">
             <span>未签合同</span>
             <strong id="unsignedTotal">0</strong>
           </article>
@@ -173,7 +170,7 @@
         <section class="office-view" id="officeView">
           <div class="office-main">
             <div class="office-welcome">
-              <div><p class="eyebrow">FIELD OPERATIONS DESK</p><h2 id="officeGreeting" aria-live="polite">您好</h2><p>今天优先处理合同、雇主险与工资预支事项。</p></div>
+              <div><p class="eyebrow">FIELD OPERATIONS DESK</p><h2 id="officeGreeting" aria-live="polite">您好</h2><p>今天优先处理入离职、雇主险与驻厂预支登记事项。</p></div>
               <div class="office-date"><span>劳务运营日历</span><strong id="officeDate">-</strong></div>
             </div>
             <div class="office-statline" id="officeStatline"></div>
@@ -186,7 +183,7 @@
                 <p class="pulse-heading-sub">项目交付、人员管理与合规事项集中处理</p>
               </div>
               <div class="pulse-grid">
-                <button class="pulse-card" type="button" data-office-action="projects">
+                <button class="pulse-card" type="button" data-office-action="projects" data-action-perm="project:view">
                   <div class="pulse-card-head">
                     <span class="pulse-mark blue" aria-hidden="true">PD</span>
                     <div class="pulse-titles">
@@ -197,7 +194,7 @@
                   <div class="pulse-stats" id="projectDeliveryPulse"></div>
                   <small class="pulse-cta">进入客户项目 →</small>
                 </button>
-                <button class="pulse-card risk" type="button" data-office-action="risk">
+                <button class="pulse-card risk" type="button" data-office-action="risk" data-action-perm="risk:view">
                   <div class="pulse-card-head">
                     <span class="pulse-mark red" aria-hidden="true">CQ</span>
                     <div class="pulse-titles">
@@ -211,7 +208,7 @@
               </div>
             </section>
             <div class="office-section"><div class="section-title"><div><span>EMPLOYEE OPERATIONS</span><h3>员工管理</h3></div><strong>人员高频业务</strong></div><div class="office-grid" id="employeeOfficeGrid"></div></div>
-            <div class="office-section"><div class="section-title"><div><span>FINANCE & SETTLEMENT</span><h3>预支与结算</h3></div><strong>资金全流程</strong></div><div class="office-grid compact-grid" id="financeOfficeGrid"></div></div>
+            <div class="office-section"><div class="section-title"><div><span>FINANCE & SETTLEMENT</span><h3>驻厂预支与结算</h3></div><strong>现场登记留痕</strong></div><div class="office-grid compact-grid" id="financeOfficeGrid"></div></div>
           </div>
           <aside class="office-rail">
             <div class="rail-panel"><div class="rail-head"><div><span>TO-DO</span><h3>待办中心</h3></div><strong id="todoTotal">0</strong></div><div id="officeTodos" class="todo-list"></div></div>
@@ -227,8 +224,8 @@
                 <p>入职、调岗、合同、雇主险、证件与风险状态</p>
               </div>
               <div class="panel-head-actions">
-                <a class="export-link" id="exportLink" href="/api/export/employees.csv">导出 CSV</a>
-                <a class="export-link" id="exportXlsxLink" href="/api/export/employees.xlsx">导出 XLSX</a>
+                <a class="export-link" id="exportLink" href="/api/export/employees.csv" data-action-perm="employee:export">导出 CSV</a>
+                <a class="export-link" id="exportXlsxLink" href="/api/export/employees.xlsx" data-action-perm="employee:export">导出 XLSX</a>
               </div>
             </div>
 
@@ -245,6 +242,7 @@
                   <option value="2">在职</option>
                   <option value="3">离职</option>
                   <option value="4">黑名单</option>
+                  <option value="5">未入职</option>
                 </select>
               </label>
               <label>
@@ -353,7 +351,7 @@
           <div class="mobile-roster" id="mobileRosterPanel">
             <div class="mobile-roster-head">
               <h3>驻厂人员</h3>
-              <button class="primary-button mobile-add-btn" type="button" id="mobileAddEmployeeBtn">+ 新增员工</button>
+              <button class="primary-button mobile-add-btn" type="button" id="mobileAddEmployeeBtn" data-action-perm="employee:create">+ 新增员工</button>
             </div>
             <div class="mobile-search-bar">
               <input id="mobileEmpSearch" placeholder="搜索姓名 / 手机号" />
@@ -417,17 +415,17 @@
 
         <section class="module-view hidden" id="talentsView">
           <div class="module-hero talent-hero"><div><p class="eyebrow">PRIVATE TALENT POOL</p><h2>人才库</h2><p>沉淀招聘线索、员工转介绍和离职回流人员。</p></div><button class="primary-button" id="createTalentButton" type="button">快速录入人才</button></div>
-          <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>姓名</th><th>联系方式</th><th>来源</th><th>意向岗位</th><th>人才标签</th><th>跟进状态</th><th>负责人</th></tr></thead><tbody id="talentTableBody"></tbody></table></div>
+          <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>人才</th><th>人才来源</th><th>最近客户 / 项目</th><th>岗位 / 招聘渠道</th><th>员工状态</th><th>跟进状态</th><th>可联系状态</th><th>流转时间 / 原因</th><th>负责人</th></tr></thead><tbody id="talentTableBody"></tbody></table></div>
         </section>
 
         <section class="module-view hidden" id="advancesView">
-          <div class="module-hero advance-hero"><div><p class="eyebrow">SALARY ADVANCE</p><h2>工资预支管理</h2><p>申请、审批、放款与工资扣回全流程留痕。</p></div><button class="primary-button" id="createAdvanceButton" type="button">申请预支</button></div>
+          <div class="module-hero advance-hero"><div><p class="eyebrow">ONSITE ADVANCE LEDGER</p><h2>驻厂预支记录</h2><p>驻厂专员登记员工预支时间、金额、用途和所属客户项目，薪资端据此扣回。</p></div><button class="primary-button" id="createAdvanceButton" type="button" data-action-perm="advance:create">登记预支</button></div>
           <div class="mini-kpis" id="advanceKpis"></div>
-          <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>预支单号</th><th>员工</th><th>客户单位/项目</th><th>申请金额</th><th>已放款</th><th>未结余额</th><th>状态</th><th>操作</th></tr></thead><tbody id="advanceTableBody"></tbody></table></div>
+          <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>预支时间</th><th>员工</th><th>客户单位/项目</th><th>预支金额</th><th>用途</th><th>登记人</th><th>未结余额</th><th>状态</th><th>操作</th></tr></thead><tbody id="advanceTableBody"></tbody></table></div>
         </section>
 
         <section class="module-view hidden" id="payrollView">
-          <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYROLL & RECEIPT</p><h2>工资发放与签收</h2><p>支持工资批次、预支扣回、工资条发布和员工电子签收。</p></div><button class="primary-button" type="button" data-office-action="payroll-create">创建工资批次</button></div>
+          <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYROLL & RECEIPT</p><h2>工资发放与签收</h2><p>支持工资批次、预支扣回、工资条发布和员工电子签收。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">创建工资批次</button></div>
           <div class="mini-kpis" id="payrollKpis"></div>
           <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>工资月份</th><th>批次编号</th><th>所属项目</th><th>员工数</th><th>应发工资</th><th>预支扣回</th><th>实发工资</th><th>待签收</th><th>状态</th><th>操作</th></tr></thead><tbody id="payrollTableBody"></tbody></table></div>
         </section>
@@ -483,35 +481,41 @@
           </div>
         </section>
 
-        <section class="risk-panel hidden" id="riskView">
-          <div class="panel-head">
+        <section class="risk-panel risk-command-center hidden" id="riskView">
+          <div class="risk-command-head">
             <div>
-              <p class="eyebrow">COMPLIANCE QUEUE</p>
-              <h2>合规待办中心</h2>
-              <p>集中处理合同、雇主险、证件与工资条合规事项，到期提醒全流程闭环</p>
+              <p class="eyebrow">ONBOARDING COMPLIANCE</p>
+              <h2>新员工入职合规</h2>
+              <p>只检查两件事：劳动合同是否签订、雇主险是否增保。</p>
             </div>
-            <div class="topbar-actions">
-              <label class="inline-filter"><span>类别</span><select id="riskCategoryFilter"><option value="">全部</option><option value="合同">合同</option><option value="雇主险">雇主险</option><option value="证件">证件</option><option value="其他">其他</option></select></label>
-              <button class="secondary-button" id="riskRefreshButton" type="button">刷新</button>
+            <div class="hero-actions">
+              <button class="secondary-button" id="riskRefreshButton" type="button">刷新数据</button>
+              <button class="primary-button" id="riskCenterScanButton" type="button" data-action-perm="risk:scan">重新检查</button>
             </div>
           </div>
-          <div class="mini-kpis" id="complianceKpis"></div>
-          <div class="risk-list" id="riskList"></div>
-        </section>
 
-        <section class="risk-panel hidden" id="riskCasesView">
-          <div class="panel-head">
-            <div>
-              <h2>用工风险管理</h2>
-              <p>风险建档、责任到人、限期整改、证据提交、复核关闭</p>
-            </div>
-            <div class="topbar-actions">
-              <label class="inline-filter"><span>整改状态</span><select id="riskCaseStatusFilter"><option value="">全部</option><option value="0">待整改</option><option value="1">整改中</option><option value="2">待复核</option><option value="3">已关闭</option></select></label>
-              <button class="secondary-button" id="riskCasesRefreshButton" type="button">刷新</button>
-            </div>
+          <div class="onboarding-risk-guide">
+            <div><i>1</i><span><strong>劳动合同</strong><small>登记合同并选择“已签署”</small></span></div>
+            <div><i>2</i><span><strong>雇主险</strong><small>办理增保并登记结果</small></span></div>
+            <p>两项都完成后，员工自动转为“入职合规完成”。</p>
           </div>
-          <div class="risk-case-summary" id="riskCaseSummary"></div>
-          <div class="risk-list" id="riskCaseList"></div>
+
+          <div class="risk-command-kpis" id="complianceKpis"></div>
+
+          <div class="risk-filter-deck">
+            <label><span>查看范围</span><select id="riskComplianceFilter"><option value="pending">只看待完善</option><option value="contract">合同待签</option><option value="insurance">雇主险待增</option><option value="completed">两项已完成</option><option value="all">全部员工</option></select></label>
+            <label class="risk-search-field"><span>搜索</span><input id="riskKeywordInput" placeholder="员工姓名 / 客户单位 / 项目" /></label>
+          </div>
+
+          <div class="risk-center-layout">
+            <section class="risk-queue-panel">
+              <div class="risk-section-head"><div><span>EMPLOYEE LIST</span><h3>入职合规名单</h3></div><strong id="riskQueueCount">0 人</strong></div>
+              <div class="risk-list risk-command-list" id="riskList"></div>
+            </section>
+            <aside class="risk-detail-panel" id="riskDetailPanel">
+              <div class="risk-detail-empty"><span>ONBOARDING FILE</span><strong>选择一名员工</strong><p>查看劳动合同和雇主险状态，并直接办理未完成事项。</p></div>
+            </aside>
+          </div>
         </section>
 
         <section class="risk-panel hidden" id="auditView">
@@ -534,8 +538,8 @@
       </main>
     </div>
 
-    <dialog class="modal" id="employeeModal">
-      <form method="dialog" class="modal-panel" id="employeeForm">
+    <dialog class="modal employee-record-modal" id="employeeModal">
+      <form method="dialog" class="modal-panel employee-record-panel" id="employeeForm">
         <div class="modal-head">
           <div>
             <p class="eyebrow">员工档案</p>
@@ -545,6 +549,16 @@
         </div>
 
         <div class="form-grid">
+          <label id="employeeStatusField">
+            <span>录入状态</span>
+            <select name="employeeStatus">
+              <option value="6" selected>面试（先简单登记）</option>
+              <option value="1">待入职</option>
+              <option value="2">直接入职</option>
+              <option value="5">未入职（自动进入人才库）</option>
+            </select>
+            <small class="muted">“面试”只需姓名和手机号，确认入职前再补齐资料。</small>
+          </label>
           <label><span>姓名</span><input name="name" required /></label>
           <label>
             <span>性别</span>
@@ -556,6 +570,7 @@
           </label>
           <label><span>学历</span><input name="education" placeholder="如：大专/本科" /></label>
           <label><span>身份证号码</span><input name="idCardNo" required /></label>
+          <label><span>地址</span><input name="address" maxlength="255" placeholder="家庭或当前居住地址" /></label>
           <label><span>电话</span><input name="phone" required /></label>
           <label>
             <span>工作单位</span>
@@ -571,24 +586,16 @@
           </label>
           <label>
             <span>工资类型</span>
-            <select name="workType" required>
+            <select name="workType">
               <option value="1">计时</option>
               <option value="2">计件</option>
               <option value="3">混合</option>
             </select>
           </label>
-          <label><span>入职日期</span><input name="hireDate" type="date" required /></label>
-          <label id="employeeStatusField">
-            <span>录入状态</span>
-            <select name="employeeStatus">
-              <option value="1" selected>待入职</option>
-              <option value="2">直接入职</option>
-            </select>
-            <small class="muted">建议先录入，资料核验后再确认入职。</small>
-          </label>
+          <label><span>入职日期</span><input name="hireDate" type="date" /></label>
           <label>
             <span>用工模式</span>
-            <select name="employmentType" required>
+            <select name="employmentType">
               <option value="">请选择用工模式</option>
               <option value="1">全职</option>
               <option value="2">兼职</option>
@@ -600,11 +607,11 @@
           </label>
           <label>
             <span>费用模式</span>
-            <input name="feeMode" maxlength="80" required placeholder="请自行填写" />
+            <input name="feeMode" maxlength="80" placeholder="可后续补充" />
           </label>
           <label>
             <span>招聘渠道</span>
-            <input name="channelSource" maxlength="100" required placeholder="请填写招聘渠道" list="desktopRecruitmentChannelOptions" autocomplete="off" />
+            <input name="channelSource" maxlength="100" placeholder="可后续补充" list="desktopRecruitmentChannelOptions" autocomplete="off" />
             <datalist id="desktopRecruitmentChannelOptions"></datalist>
           </label>
           <label class="full-row"><span>备注</span><input name="remark" placeholder="其他补充信息" /></label>
@@ -654,22 +661,29 @@
       <form method="dialog" class="modal-panel compact" id="supplierForm"><div class="modal-head"><div><p class="eyebrow">招聘来源</p><h2 id="supplierModalTitle">新增供应商</h2></div><button class="icon-button" type="button" data-close-modal="supplierModal">×</button></div><input type="hidden" name="id" /><div class="form-grid single"><label><span>供应商编号</span><input name="supplierNo" placeholder="不填自动生成" /></label><label><span>供应商名称</span><input name="supplierName" required /></label><label><span>统一社会信用代码</span><input name="creditCode" /></label><label><span>联系人</span><input name="contactName" /></label><label><span>联系电话</span><input name="contactPhone" /></label><label><span>合同开始日期</span><input name="contractStartDate" type="date" /></label><label><span>合同结束日期</span><input name="contractEndDate" type="date" /></label><label><span>风险等级</span><select name="riskLevel"><option value="1">低</option><option value="2">中</option><option value="3">高</option></select></label><label><span>状态</span><select name="status"><option value="1">启用</option><option value="0">停用</option></select></label></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="supplierModal">取消</button><button class="primary-button" type="submit">保存</button></div></form>
     </dialog>
 
-    <dialog class="modal" id="batchEmployeeModal">
-      <form method="dialog" class="modal-panel" id="batchEmployeeForm">
+    <dialog class="modal employee-batch-modal" id="batchEmployeeModal">
+      <form method="dialog" class="modal-panel employee-batch-panel" id="batchEmployeeForm">
         <div class="modal-head"><div><p class="eyebrow">BATCH EMPLOYEE ENTRY</p><h2>批量录入员工名单</h2></div><button class="icon-button" type="button" data-close-modal="batchEmployeeModal">×</button></div>
-        <div class="batch-guide"><strong>支持文件导入 或 从 Excel 复制粘贴</strong><span>首行可保留表头，一次最多 200 人。用工模式必填，可填"全职/兼职/劳务/实习/外包/派遣"；费用模式不设默认选项，请根据公司实际规则自行填写；工资类型填"计时/计件/混合"。费用模式为空时该行不会录入。</span></div>
-        <div class="batch-file-zone" id="employeeFileZone" tabindex="0" role="button" aria-label="点击或拖拽上传文件">
-          <input type="file" id="employeeFileInput" accept=".csv,.xlsx,.xls" hidden>
-          <div class="batch-file-inner">
-            <div class="batch-file-icon">⬆</div>
-            <div class="batch-file-text"><strong>点击选择 或 拖拽文件到此处</strong><span>支持 .csv / .xlsx / .xls 格式，解析后自动填充到下方文本框</span></div>
-          </div>
-          <div class="batch-file-name" id="employeeFileName"></div>
+        <div class="employee-batch-workspace">
+          <section class="employee-batch-upload" aria-label="上传员工表格">
+            <div class="batch-guide"><strong>上传员工表格</strong><span>支持 CSV、XLSX、XLS；首行可保留表头，一次最多 200 人。</span></div>
+            <div class="batch-file-zone" id="employeeFileZone" tabindex="0" role="button" aria-label="点击或拖拽上传文件">
+              <input type="file" id="employeeFileInput" accept=".csv,.xlsx,.xls" hidden>
+              <div class="batch-file-inner">
+                <div class="batch-file-icon">⬆</div>
+                <div class="batch-file-text"><strong>选择或拖拽员工表格</strong><span>解析完成后可在右侧核对和修改</span></div>
+              </div>
+              <div class="batch-file-name" id="employeeFileName"></div>
+            </div>
+            <div class="batch-column-preview hidden" id="employeeColumnPreview"></div>
+            <div class="batch-columns"><strong>字段顺序</strong><span>姓名、性别、学历、身份证号码、地址、电话、工作单位、所属项目、岗位、工资类型、入职日期、用工模式、费用模式、招聘渠道、备注、开户行、银行卡号、紧急联系人、紧急电话、录入状态</span></div>
+          </section>
+          <section class="employee-batch-paste" aria-label="粘贴和核对员工数据">
+            <div class="batch-paste-head"><div><strong>粘贴或核对数据</strong><span>面试员工只需姓名和手机号，其余信息可后续补齐</span></div><small>Excel 可直接复制粘贴</small></div>
+            <textarea class="batch-textarea" name="tableData" rows="12" placeholder="张三&#9;男&#9;大专&#9;410xxxxxxxxxxxxxxx&#9;某地地址&#9;13800138000&#9;某制造公司&#9;一厂项目&#9;装配工&#9;计时&#9;2026-07-30&#9;派遣&#9;管理费600元/月&#9;内部推荐&#9;表现优秀&#9;工商银行常州分行&#9;6212xxxxxxxxxxxx&#9;李四&#9;13900139000&#9;未入职" required></textarea>
+            <div class="batch-result hidden" id="batchEmployeeResult"></div>
+          </section>
         </div>
-        <div class="batch-column-preview hidden" id="employeeColumnPreview"></div>
-        <div class="batch-columns">姓名　性别　学历　身份证号码　电话　工作单位　所属项目　岗位　工资类型　入职日期　用工模式　费用模式　招聘渠道　备注　开户行　银行卡号　紧急联系人　紧急电话</div>
-        <textarea class="batch-textarea" name="tableData" rows="12" placeholder="张三&#9;男&#9;大专&#9;410xxxxxxxxxxxxxxx&#9;13800138000&#9;某制造公司&#9;一厂项目&#9;装配工&#9;计时&#9;2026-07-30&#9;派遣&#9;管理费600元/月&#9;内部推荐&#9;表现优秀&#9;工商银行常州分行&#9;6212xxxxxxxxxxxx&#9;李四&#9;13900139000" required></textarea>
-        <div class="batch-result hidden" id="batchEmployeeResult"></div>
         <div class="modal-actions"><button class="secondary-button" id="employeeTemplateButton" type="button">下载 CSV 模板</button><button class="secondary-button" id="employeeXlsxTemplateButton" type="button">下载 XLSX 模板</button><button class="secondary-button" type="button" data-close-modal="batchEmployeeModal">取消</button><button class="primary-button" type="submit">开始批量录入</button></div>
       </form>
     </dialog>
@@ -707,7 +721,6 @@
           <button class="icon-button" value="cancel" type="button" data-close-modal="resignModal">×</button>
         </div>
         <div class="form-grid single">
-          <label><span>申请日期</span><input name="applyDate" type="date" /></label>
           <label><span>离职日期</span><input name="leaveDate" type="date" required /></label>
           <label>
             <span>离职类型</span>
@@ -724,13 +737,12 @@
             <label><input type="checkbox" name="toolsReturned" value="1" /> 工服/工具已归还</label>
             <label><input type="checkbox" name="dormCleared" value="1" /> 宿舍已清退</label>
             <label><input type="checkbox" name="attendanceConfirmed" value="1" /> 考勤已确认</label>
-            <label><input type="checkbox" name="settlementStatus" value="1" /> 离职工资已结算</label>
           </div></label>
-          <label><span>风险备注</span><textarea name="riskRemark" rows="3"></textarea></label>
+          <label id="resignInsuranceOption"><span>雇主险减保</span><span class="checkbox-group"><label><input type="checkbox" name="terminateEmployerInsurance" value="1" /> 已减保</label></span><small id="resignInsuranceHint">当前未投保或已终止时无需减保</small></label>
         </div>
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-close-modal="resignModal">取消</button>
-          <button class="danger-button" type="submit">发起离职流程</button>
+          <button class="danger-button" type="submit">确认离职并归档</button>
         </div>
       </form>
     </dialog>
@@ -745,29 +757,15 @@
           <button class="icon-button" value="cancel" type="button" data-close-modal="contractModal">×</button>
         </div>
         <div class="form-grid single">
-          <label><span>合同编号</span><input name="contractNo" required /></label>
           <label>
-            <span>合同类型</span>
-            <select name="contractType" required>
-              <option value="1">固定期限</option>
-              <option value="2">无固定期限</option>
-              <option value="3">劳务协议</option>
-              <option value="4">实习协议</option>
-            </select>
-          </label>
-          <label>
-            <span>签署状态</span>
-            <select name="signStatus">
+            <span>签署状态 *</span>
+            <select name="signStatus" required>
               <option value="0">未签</option>
-              <option value="1">已签</option>
-              <option value="2">作废</option>
+              <option value="1" selected>已签</option>
             </select>
           </label>
-          <label><span>签署日期</span><input name="signDate" type="date" /></label>
-          <label><span>开始日期</span><input name="startDate" type="date" required /></label>
-          <label><span>结束日期</span><input name="endDate" type="date" /></label>
-          <label><span>续签次数</span><input name="renewalCount" type="number" min="0" value="0" /></label>
-          <label class="attachment-upload-field"><span>合同附件</span><input type="file" data-attachment-input accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" /><small>支持图片、PDF、Word，单个不超过10MB</small></label>
+          <label><span>合同日期 *</span><input name="contractDate" type="date" required /></label>
+          <label class="attachment-upload-field"><span>合同附件（选填）</span><input type="file" data-attachment-input accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" /><small>编号和合同类型由系统自动处理，附件可后续补传</small></label>
         </div>
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-close-modal="contractModal">取消</button>
@@ -864,28 +862,36 @@
       </form>
     </dialog>
 
-    <dialog class="modal compact" id="riskCaseModal">
-      <form method="dialog" class="modal-panel compact" id="riskCaseForm">
+    <dialog class="modal" id="riskCaseModal">
+      <form method="dialog" class="modal-panel risk-case-modal-panel" id="riskCaseForm">
         <div class="modal-head">
-          <div><p class="eyebrow">用工风险整改</p><h2 id="riskCaseModalTitle">创建整改任务</h2></div>
+          <div><p class="eyebrow">RISK CORRECTION WORKFLOW</p><h2 id="riskCaseModalTitle">建立整改任务</h2><p>按步骤填写，状态变化会同步到风险中心。</p></div>
           <button class="icon-button" value="cancel" type="button" data-close-modal="riskCaseModal">×</button>
         </div>
         <input name="sourceAlertId" type="hidden" />
         <input name="caseId" type="hidden" />
         <div class="case-source" id="riskCaseSource"></div>
-        <div class="form-grid single">
-          <label><span>责任人</span><input name="ownerName" required /></label>
-          <label><span>责任部门</span><input name="ownerDept" placeholder="例如：人力资源部" /></label>
-          <label><span>整改期限</span><input name="deadline" type="date" required /></label>
-          <label><span>整改措施</span><textarea name="correctiveMeasure" rows="3" required></textarea></label>
-          <label class="case-progress-field hidden"><span>整改状态</span><select name="status"><option value="0">待整改</option><option value="1">整改中</option><option value="2">待复核</option><option value="3">已关闭</option></select></label>
-          <label class="case-progress-field hidden"><span>整改证据说明</span><textarea name="evidenceNote" rows="3" placeholder="填写合同编号、参保月份、证件核验结果等证据"></textarea></label>
-          <label class="case-progress-field hidden"><span>复核结论</span><textarea name="reviewNote" rows="3" placeholder="关闭风险时必填"></textarea></label>
-          <label class="attachment-upload-field"><span>整改证据附件</span><input type="file" data-attachment-input accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" /><small>可上传合同、雇主险凭证、照片或整改报告</small></label>
+        <div class="risk-form-step"><span>STEP 1</span><strong>明确谁负责、何时完成</strong></div>
+        <div class="form-grid">
+          <label><span>整改责任人 *</span><input name="ownerName" required placeholder="填写实际负责人姓名" /></label>
+          <label><span>责任部门</span><input name="ownerDept" placeholder="例如：驻厂管理部 / HR部" /></label>
+          <label><span>完成期限 *</span><input name="deadline" type="date" required /></label>
+          <label class="case-progress-field hidden"><span>当前进度 *</span><select name="status"><option value="0">待整改：已指派，尚未开始</option><option value="1">整改中：正在处理</option><option value="2">待复核：已提交证据</option><option value="3">已关闭：复核通过</option></select></label>
+          <label class="full-row"><span>整改要求与措施 *</span><textarea name="correctiveMeasure" rows="4" required placeholder="写清楚要解决什么、由谁配合、完成标准是什么"></textarea></label>
         </div>
-        <div class="modal-actions">
+        <div class="risk-form-step case-progress-field hidden"><span>STEP 2</span><strong>提交处理结果和证据</strong></div>
+        <div class="form-grid case-progress-field hidden">
+          <label class="full-row"><span>整改结果 / 证据说明</span><textarea name="evidenceNote" rows="4" placeholder="例如：劳动合同已于8月10日签署，合同编号HT20260810"></textarea><small>状态选择“待复核”或“已关闭”时必填。</small></label>
+          <label class="full-row attachment-upload-field"><span>上传证据附件</span><input type="file" data-attachment-input accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" /><small>支持合同、雇主险凭证、证件照片或整改报告。</small></label>
+        </div>
+        <div class="risk-form-step case-progress-field hidden"><span>STEP 3</span><strong>复核通过后关闭风险</strong></div>
+        <div class="form-grid case-progress-field hidden">
+          <label class="full-row"><span>复核结论</span><textarea name="reviewNote" rows="3" placeholder="说明证据是否有效、风险是否消除；状态选择“已关闭”时必填"></textarea></label>
+        </div>
+        <div class="risk-status-help" id="riskStatusHelp">创建任务后状态为“待整改”，责任人开始处理后再更新为“整改中”。</div>
+        <div class="modal-actions sticky-actions">
           <button class="secondary-button" type="button" data-close-modal="riskCaseModal">取消</button>
-          <button class="primary-button" type="submit">保存任务</button>
+          <button class="primary-button" id="riskCaseSubmitButton" type="submit">创建并指派整改</button>
         </div>
       </form>
     </dialog>
@@ -894,9 +900,26 @@
 
     <dialog class="modal" id="clientManageModal"><form method="dialog" class="modal-panel" id="clientManageForm"><div class="modal-head"><div><p class="eyebrow">客户项目管理</p><h2 id="clientManageTitle">客户单位</h2></div><button class="icon-button" type="button" data-close-modal="clientManageModal">×</button></div><input type="hidden" name="customerId" id="clientManageId" /><div class="form-grid"><label><span>客户名称</span><input name="customerName" required /></label><label><span>联系人</span><input name="contactName" /></label><label><span>联系电话</span><input name="contactPhone" /></label><label><span>结算周期</span><select name="settlementCycle"><option>月结30天</option><option>月结45天</option><option>月结60天</option></select></label><label class="full-row"><span>客户地址</span><input name="address" /></label></div><div class="customer-project-manage-head"><div><h3>客户项目情况</h3><p>可修改现有项目，也可在当前客户下追加项目。</p></div><button class="secondary-button" type="button" id="addCustomerProjectButton">新增项目</button></div><div id="customerProjectsEditor" class="customer-projects-editor"></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="clientManageModal">取消</button><button class="primary-button" type="submit">保存客户项目</button></div></form></dialog>
 
+    <dialog class="modal compact" id="projectOnsiteModal">
+      <form method="dialog" class="modal-panel compact" id="projectOnsiteForm">
+        <div class="modal-head">
+          <div><p class="eyebrow">PROJECT ONSITE ASSIGNMENT</p><h2 id="projectOnsiteTitle">派遣驻厂</h2></div>
+          <button class="icon-button" type="button" data-close-modal="projectOnsiteModal">×</button>
+        </div>
+        <input type="hidden" name="projectId" />
+        <p class="form-tip" id="projectOnsiteContext">选择驻厂专员后，该账号将获得当前客户项目的数据权限。</p>
+        <label><span>驻厂专员（可多选）</span><div class="checkbox-group permission-project-group" id="projectOnsiteAssigneeList"></div></label>
+        <p class="muted">保存后立即关联项目。驻厂专员可在网页端和小程序驻厂工作台查看该客户、项目及项目员工。</p>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="projectOnsiteModal">取消</button>
+          <button class="primary-button" type="submit">保存派遣关系</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="modal compact" id="talentModal"><form method="dialog" class="modal-panel compact" id="talentForm"><div class="modal-head"><div><p class="eyebrow">人才库</p><h2>快速录入人才</h2></div><button class="icon-button" type="button" data-close-modal="talentModal">×</button></div><div class="form-grid single"><label><span>姓名</span><input name="name" required /></label><label><span>手机号</span><input name="phone" required /></label><label><span>来源</span><select name="source"><option>员工转介绍</option><option>招聘平台</option><option>线下招聘</option><option>公众号报名</option></select></label><label><span>意向岗位</span><input name="intentionJob" required /></label><label><span>标签</span><input name="tags" placeholder="可夜班，有经验" /></label><label><span>跟进状态</span><select name="followStatus"><option>待联系</option><option>跟进中</option><option>已面试</option><option>待入职</option></select></label></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="talentModal">取消</button><button class="primary-button" type="submit">录入人才库</button></div></form></dialog>
 
-    <dialog class="modal compact" id="advanceModal"><form method="dialog" class="modal-panel compact" id="advanceForm"><div class="modal-head"><div><p class="eyebrow">工资预支</p><h2>提交预支申请</h2></div><button class="icon-button" type="button" data-close-modal="advanceModal">×</button></div><div class="form-grid single"><label><span>在职员工</span><select name="employeeId" id="advanceEmployeeSelect" required></select></label><label><span>客户单位</span><select name="customerId" id="advanceCustomerSelect" required></select></label><label><span>所属项目（可选）</span><select name="projectId" id="advanceProjectSelect"><option value="">暂不关联具体项目</option></select></label><label><span>申请金额</span><input name="applyAmount" type="number" min="1" max="2000" step="0.01" required /></label><label><span>预支用途</span><textarea name="purpose" rows="3" required></textarea></label><p class="form-tip">客户单位会随员工自动带出；客户尚未创建具体项目时也可提交。单笔不超过2000元，未结余额与本次申请合计不超过3000元。</p></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="advanceModal">取消</button><button class="primary-button" type="submit">提交审批</button></div></form></dialog>
+    <dialog class="modal compact" id="advanceModal"><form method="dialog" class="modal-panel compact" id="advanceForm"><div class="modal-head"><div><p class="eyebrow">驻厂现场台账</p><h2>登记员工预支</h2></div><button class="icon-button" type="button" data-close-modal="advanceModal">×</button></div><input type="hidden" name="recordMode" value="onsite" /><div class="form-grid single"><label><span>在职员工</span><select name="employeeId" id="advanceEmployeeSelect" required></select></label><label><span>客户单位</span><select name="customerId" id="advanceCustomerSelect" required></select></label><label><span>所属项目（可选）</span><select name="projectId" id="advanceProjectSelect"><option value="">暂不关联具体项目</option></select></label><label><span>预支时间</span><input name="advanceAt" type="datetime-local" required /></label><label><span>预支金额</span><input name="applyAmount" type="number" min="1" max="2000" step="0.01" placeholder="请输入实际预支金额" required /></label><label><span>预支用途</span><textarea name="purpose" rows="3" maxlength="255" placeholder="如：生活费、交通费、住宿押金、紧急支出" required></textarea></label><p class="form-tip">登记后直接形成驻厂预支台账和未结余额，薪资核算时可进行预支扣回。单笔不超过2000元，员工未结余额与本次登记合计不超过3000元。</p></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="advanceModal">取消</button><button class="primary-button" type="submit">保存预支记录</button></div></form></dialog>
 
     <dialog class="modal" id="blacklistModal"><form method="dialog" class="modal-panel" id="blacklistForm"><div class="modal-head"><div><p class="eyebrow">全公司共享</p><h2>录入黑名单人员</h2></div><button class="icon-button" type="button" data-close-modal="blacklistModal">×</button></div><div class="risk-form-warning">录入后，该身份证号码将在员工录入和人才转入职时被公司级拦截。请确保原因真实、具体且有业务依据。</div><div class="form-grid"><label><span>姓名 *</span><input name="name" required /></label><label><span>身份证号码 *</span><input name="idCardNo" maxlength="18" required /></label><label><span>联系电话</span><input name="phone" /></label><label><span>风险等级</span><select name="riskLevel"><option>高</option><option>中</option><option>低</option></select></label><label><span>来源项目/单位</span><input name="source" placeholder="例如：某用工项目" /></label><label><span>黑名单原因 *</span><select name="reason" required><option value="">请选择</option><option>严重旷工或恶意离职</option><option>提供虚假身份或资料</option><option>盗窃、打架等严重违纪</option><option>造成重大安全或质量事故</option><option>存在工资预支未结清风险</option><option>其他经公司审核的风险原因</option></select></label><label class="full-row"><span>详细备注</span><textarea name="remark" rows="4" placeholder="填写事件经过、发生日期、证据材料及审批情况"></textarea></label></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="blacklistModal">取消</button><button class="danger-button" type="submit">确认录入并全公司共享</button></div></form></dialog>
 
@@ -938,7 +961,30 @@
 
     <dialog class="modal compact" id="resetPasswordModal"><form method="dialog" class="modal-panel compact" id="resetPasswordForm"><div class="modal-head"><div><p class="eyebrow">权限管理</p><h2>重置密码</h2></div><button class="icon-button" type="button" data-close-modal="resetPasswordModal">×</button></div><input type="hidden" name="userId" id="resetPasswordUserId" /><p style="margin-bottom:12px;color:var(--muted)">为 <strong id="resetPasswordUserName">-</strong> 设置新密码</p><div class="form-grid single"><label><span>新密码</span><input name="newPassword" type="password" minlength="8" required /></label><label><span>确认密码</span><input name="confirmPassword" type="password" minlength="8" required /></label></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="resetPasswordModal">取消</button><button class="primary-button" type="submit">确认重置</button></div></form></dialog>
 
-    <dialog class="modal compact" id="rolePermissionModal"><form method="dialog" class="modal-panel compact" id="rolePermissionForm"><div class="modal-head"><div><p class="eyebrow">角色权限配置</p><h2 id="rolePermissionTitle">-</h2></div><button class="icon-button" type="button" data-close-modal="rolePermissionModal">×</button></div><input type="hidden" name="roleId" id="rolePermissionRoleId" /><div class="form-grid single"><p class="form-tip" id="rolePermissionHint">勾选功能权限时会自动包含对应菜单，保存后相关账号重新登录生效。</p><label><span>权限项</span><div class="checkbox-group perm-tree" id="rolePermissionTree"></div></label><label id="roleDepartmentSection" class="hidden"><span>数据部门范围</span><small class="muted">“本部门”或“本部门及下级”角色必须勾选可见根部门。</small><div class="checkbox-group" id="roleDepartmentCheckboxes"></div></label></div><div class="modal-actions"><button class="secondary-button" type="button" data-close-modal="rolePermissionModal">取消</button><button class="primary-button" type="submit" id="rolePermissionSubmit">保存配置</button></div></form></dialog>
+    <dialog class="modal role-permission-modal" id="rolePermissionModal">
+      <form method="dialog" class="modal-panel role-permission-modal-panel" id="rolePermissionForm">
+        <div class="modal-head">
+          <div><p class="eyebrow">角色权限配置</p><h2 id="rolePermissionTitle">-</h2></div>
+          <button class="icon-button" type="button" data-close-modal="rolePermissionModal">×</button>
+        </div>
+        <input type="hidden" name="roleId" id="rolePermissionRoleId" />
+        <div class="form-grid single role-permission-body">
+          <p class="form-tip" id="rolePermissionHint">勾选功能权限时会自动包含对应菜单，保存后相关账号重新登录生效。</p>
+          <div class="permission-tree-toolbar">
+            <strong id="rolePermissionCount">已选择 0 / 0 项</strong>
+            <input id="rolePermissionSearch" type="search" placeholder="搜索权限名称或编码" autocomplete="off" />
+            <button class="secondary-button" id="rolePermissionSelectAll" type="button">全选</button>
+            <button class="secondary-button" id="rolePermissionClearAll" type="button">清空</button>
+          </div>
+          <label class="permission-tree-field"><span>全部权限项</span><div class="checkbox-group perm-tree" id="rolePermissionTree"></div></label>
+          <label id="roleDepartmentSection" class="hidden"><span>数据部门范围</span><small class="muted">“本部门”或“本部门及下级”角色必须勾选可见根部门。</small><div class="checkbox-group" id="roleDepartmentCheckboxes"></div></label>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="rolePermissionModal">取消</button>
+          <button class="primary-button" type="submit" id="rolePermissionSubmit">保存配置</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog class="modal" id="mobileEmployeeModal">
       <form method="dialog" class="modal-panel" id="mobileEmployeeForm">
@@ -960,6 +1006,16 @@
         </div>
 
         <div class="form-grid single">
+          <label id="mobileEmployeeStatusField">
+            <span>录入状态</span>
+            <select name="employeeStatus">
+              <option value="6" selected>面试（先简单登记）</option>
+              <option value="1">待入职</option>
+              <option value="2">直接入职</option>
+              <option value="5">未入职（自动进入人才库）</option>
+            </select>
+            <small class="muted">“面试”只需姓名和手机号，确认入职前再补齐资料。</small>
+          </label>
           <label><span>姓名</span><input name="name" required id="mEmpName" /></label>
           <label>
             <span>性别</span>
@@ -970,6 +1026,7 @@
             </select>
           </label>
           <label><span>身份证号码</span><input name="idCardNo" required id="mEmpIdCard" /></label>
+          <label><span>地址</span><input name="address" id="mEmpAddress" maxlength="255" placeholder="拍摄身份证后自动识别，也可手工填写" /></label>
           <label><span>电话</span><input name="phone" required id="mEmpPhone" /></label>
           <label>
             <span>工作单位</span>
@@ -985,7 +1042,7 @@
           </label>
           <label>
             <span>用工模式</span>
-            <select name="employmentType" required>
+            <select name="employmentType">
               <option value="">请选择用工模式</option>
               <option value="1">全职</option>
               <option value="2">兼职</option>
@@ -997,28 +1054,20 @@
           </label>
           <label>
             <span>费用模式</span>
-            <input name="feeMode" maxlength="80" required placeholder="请自行填写" />
+            <input name="feeMode" maxlength="80" placeholder="可后续补充" />
           </label>
           <label>
             <span>工资类型</span>
-            <select name="workType" required>
+            <select name="workType">
               <option value="1">计时</option>
               <option value="2">计件</option>
               <option value="3">混合</option>
             </select>
           </label>
-          <label><span>入职日期</span><input name="hireDate" type="date" required /></label>
-          <label id="mobileEmployeeStatusField">
-            <span>录入状态</span>
-            <select name="employeeStatus">
-              <option value="1" selected>待入职</option>
-              <option value="2">直接入职</option>
-            </select>
-            <small class="muted">与小程序一致，默认进入待入职。</small>
-          </label>
+          <label><span>入职日期</span><input name="hireDate" type="date" /></label>
           <label>
             <span>招聘渠道</span>
-            <input name="channelSource" maxlength="100" required placeholder="请填写招聘渠道" list="mobileRecruitmentChannelOptions" autocomplete="off" />
+            <input name="channelSource" maxlength="100" placeholder="可后续补充" list="mobileRecruitmentChannelOptions" autocomplete="off" />
             <datalist id="mobileRecruitmentChannelOptions"></datalist>
           </label>
           <input type="hidden" name="email" />

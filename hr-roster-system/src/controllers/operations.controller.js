@@ -16,7 +16,7 @@ exports.batchCreateBlacklist = asyncHandler(async (req, res) => {
   success(res, data, `批量录入完成：成功${data.successCount}人，失败${data.failureCount}人`);
 });
 exports.listAdvances = asyncHandler(async (req, res) => success(res, await service.listAdvances(req.companyId, req.query, req.user)));
-exports.createAdvance = asyncHandler(async (req, res) => success(res, await service.createAdvance(req.companyId, req.body, req.operatorId, req.user), '预支申请提交成功'));
+exports.createAdvance = asyncHandler(async (req, res) => success(res, await service.createAdvance(req.companyId, req.body, req.operatorId, req.user), req.body.recordMode === 'onsite' ? '驻厂预支记录已保存' : '预支申请提交成功'));
 exports.approveAdvance = asyncHandler(async (req, res) => success(res, await service.approveAdvance(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '审批完成'));
 exports.payAdvance = asyncHandler(async (req, res) => success(res, await service.payAdvance(req.companyId, Number(req.params.id), req.operatorId, req.user), '放款成功'));
 exports.payrollOverview = asyncHandler(async (req, res) => success(res, await service.payrollOverview(req.companyId, req.user)));

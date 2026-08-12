@@ -119,6 +119,13 @@ REQUIRED=(
   "sql/migrate-recruitment-channel-20260806.mysql.sql"
   "sql/migrate-payslip-receipt-audit-20260806.mysql.sql"
   "sql/migrate-token-version-20260806.mysql.sql"
+  "sql/migrate-remove-insurance-menu-20260807.mysql.sql"
+  "sql/migrate-talent-employee-flow-20260810.mysql.sql"
+  "sql/migrate-unified-risk-center-20260810.mysql.sql"
+  "sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
+  "sql/migrate-onsite-contract-permission-20260811.mysql.sql"
+  "sql/migrate-employee-address-interview-20260811.mysql.sql"
+  "sql/migrate-simplified-resignation-20260811.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -222,11 +229,19 @@ M4="sql/migrate-system-notices-20260804.mysql.sql"
 M5="sql/migrate-risk-scan-log-20260804.mysql.sql"
 M6="sql/migrate-attachments-20260804.mysql.sql"
 M7="sql/migrate-onsite-lifecycle-v1-20260805.mysql.sql"
+M8A="sql/migrate-onsite-employee-edit-permission-20260806.mysql.sql"
 M8="sql/migrate-recruitment-channel-20260806.mysql.sql"
 M9="sql/migrate-payslip-receipt-audit-20260806.mysql.sql"
 M10="sql/migrate-token-version-20260806.mysql.sql"
+M11="sql/migrate-remove-insurance-menu-20260807.mysql.sql"
+M12="sql/migrate-talent-employee-flow-20260810.mysql.sql"
+M13="sql/migrate-unified-risk-center-20260810.mysql.sql"
+M14="sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
+M15="sql/migrate-onsite-contract-permission-20260811.mysql.sql"
+M16="sql/migrate-employee-address-interview-20260811.mysql.sql"
+M17="sql/migrate-simplified-resignation-20260811.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8" "$M9" "$M10"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 
@@ -239,6 +254,69 @@ for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8" "$M9" "$M10"; do
   # DELETE FROM / TRUNCATE 直接失败
   if echo "$content" | grep -qiE '\bDELETE\b.*\bFROM\b|\bTRUNCATE\b'; then
     echo "  失败: $(basename "$mp") 包含 DELETE/TRUNCATE" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M17：仅关闭旧工资结算待办并回填兼容字段，不删除历史离职数据。
+C17="$(cat "$WORKDIR/$M17")"
+for required in "task_type='PAYROLL_SETTLEMENT'" 'task_status=3' 'settlement_status=1'; do
+  if ! echo "$C17" | grep -q "$required"; then
+    echo "  失败: $M17 缺少简化离职迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M16：地址必须加密存储，面试状态与可补齐任职字段必须同步迁移。
+C16="$(cat "$WORKDIR/$M16")"
+for required in "COLUMN_NAME='address'" '6面试' 'employment_type TINYINT DEFAULT NULL' 'hire_date DATE DEFAULT NULL'; do
+  if ! echo "$C16" | grep -q "$required"; then
+    echo "  失败: $M16 缺少面试简登迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M15：只为驻厂角色补充合同登记权限，数据范围仍由接口按项目隔离。
+C15="$(cat "$WORKDIR/$M15")"
+for required in "role_code='onsite_staff'" "permission_code='contract:manage'" "INSERT IGNORE INTO sys_role_permission"; do
+  if ! echo "$C15" | grep -q "$required"; then
+    echo "  失败: $M15 缺少驻厂合同权限迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M14：入职合规只能保留合同、雇主险，并修复历史员工的状态关联。
+C14="$(cat "$WORKDIR/$M14")"
+for required in "risk_type NOT IN (1,7)" "CONCAT('contract_missing:',e.id)" "CONCAT('employer_insurance_missing:',e.id)" "INSERT INTO hr_work_task" "'EMPLOYEE_ONBOARDING'" "系统复查：劳动合同当前未签订" "系统复查：雇主险当前未生效" "lifecycle_status='ONBOARDING'" "lifecycle_status='ACTIVE'"; do
+  if ! echo "$C14" | grep -q "$required"; then
+    echo "  失败: $M14 缺少入职合规迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M13：旧风险整改菜单授权必须迁移到统一入口，并停用重复菜单。
+C13="$(cat "$WORKDIR/$M13")"
+for required in "old_p.permission_code='riskCase:menu'" "new_p.permission_code='risk:menu'" "permission_name='用工风险中心'" "permission_code='riskCase:menu'" 'status=0'; do
+  if ! echo "$C13" | grep -q "$required"; then
+    echo "  失败: $M13 缺少统一风险中心迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M12：人才库回流只能新增字段、索引和回填离职人员，必须具备幂等保护。
+C12="$(cat "$WORKDIR/$M12")"
+for required in "COLUMN_NAME='employee_id'" 'uk_company_employee' 'ON DUPLICATE KEY UPDATE' 'WHERE e.employee_status=3'; do
+  if ! echo "$C12" | grep -q "$required"; then
+    echo "  失败: $M12 缺少人才库回流迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M11：取消保险提示只能停用旧权限，不得删除角色授权历史。
+C11="$(cat "$WORKDIR/$M11")"
+for required in "permission_code IN ('insurance:menu', 'insurance:view')" 'status=0' "permission_code='social:manage'"; do
+  if ! echo "$C11" | grep -q "$required"; then
+    echo "  失败: $M11 缺少保险菜单停用项 — $required" >&2
     VERIFY_PASS=false
   fi
 done

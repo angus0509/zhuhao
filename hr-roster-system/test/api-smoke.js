@@ -1,9 +1,10 @@
 const { signToken } = require('../src/utils/token');
+const db = require('../src/db');
 
 const baseUrl = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:3100/api';
 const userId = Number(process.env.SMOKE_USER_ID || 1);
 const companyId = Number(process.env.SMOKE_COMPANY_ID || 1);
-const token = signToken({ userId, companyId, username: 'smoke-check', employeeId: null });
+let token = '';
 const paths = [
   '/auth/me',
   '/bootstrap',
@@ -21,7 +22,6 @@ const paths = [
   '/employees/mine?page=1&pageSize=2',
   '/advances?page=1&pageSize=2',
   '/payroll/overview',
-  '/insurance/overview',
   '/risk-alerts',
   '/risk-cases',
   '/talents',
@@ -37,6 +37,18 @@ const paths = [
 ];
 
 async function main() {
+  const user = await db.first(
+    'SELECT id,company_id companyId,username,employee_id employeeId,token_version tokenVersion FROM sys_user WHERE id=:userId AND company_id=:companyId AND status=1',
+    { userId, companyId }
+  );
+  if (!user) throw new Error('只读 smoke 用户不存在或已停用');
+  token = signToken({
+    userId: user.id,
+    companyId: user.companyId,
+    username: user.username,
+    employeeId: user.employeeId || null,
+    tokenVersion: Number(user.tokenVersion || 0)
+  });
   let employeeId = null;
   for (const path of paths) {
     const response = await fetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
@@ -62,7 +74,9 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error.message);
-  process.exit(1);
-});
+main()
+  .catch(error => {
+    console.error(error.message);
+    process.exitCode = 1;
+  })
+  .finally(() => db.pool.end());

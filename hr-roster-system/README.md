@@ -141,7 +141,7 @@ npm run prototype
 | 权限管理 | 后台账号、角色权限、数据范围和授权项目 |
 | 员工档案 | 新增、编辑、手机号/身份证/银行卡脱敏展示 |
 | 任职记录 | 当前任职、调岗生成历史记录 |
-| 离职管理 | 发起离职、工牌/工具/宿舍/考勤交接、退保、工资结算，全部完成后才正式离职 |
+| 离职管理 | 驻厂单页填写离职信息、确认四项交接并同步雇主险减保，办结后保留在已离职花名册并回流人才库 |
 | 合同社保 | 合同状态、社保状态展示 |
 | 证件资料 | 身份证、健康证、特种作业证状态展示 |
 | 合同维护 | 员工详情内登记劳动合同 |
@@ -195,7 +195,7 @@ npm run prototype
 | POST | `/api/employees/:id/job-transfer` | 员工调岗 |
 | PUT | `/api/employee-transfers/:changeId/handle` | 跨项目接收/拒绝或跨客户 HR 复核 |
 | POST | `/api/employees/:id/resign` | 员工离职 |
-| PUT | `/api/resignations/:resignationId/progress` | 更新离职交接和工资结算进度，闭环后转为已离职 |
+| PUT | `/api/resignations/:resignationId/progress` | 兼容历史离职记录，一次确认交接和雇主险减保后归档 |
 | POST | `/api/employees/:id/contracts` | 登记员工合同 |
 | PUT | `/api/employees/:id/social-security` | 维护社保公积金 |
 | POST | `/api/employees/:id/certificates` | 添加员工证件 |
