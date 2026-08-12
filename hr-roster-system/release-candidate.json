@@ -1,20 +1,20 @@
 {
-  "generatedAt": "2026-08-12T14:55:45+08:00",
+  "generatedAt": "2026-08-12T17:34:50.164Z",
   "webApi": {
-    "archive": "/tmp/hr-roster-deploy-20260812-145545.tar.gz",
-    "sha256": "e86030401be8aedcbba9bbecc15ecafb3aefc287581b6801c05261e2aa74b396",
+    "archive": "/tmp/hr-roster-deploy-20260813-013214.tar.gz",
+    "sha256": "296e451c6cf805779d246e4ca73e0500b7b0bde10421ab840b879a87f5062c2c",
     "publicBaseUrl": "https://lczpt.com",
     "verificationStatus": "deployed-and-public-regression-passed",
-    "deployedAt": "2026-08-12T14:58:00+08:00"
+    "deployedAt": "2026-08-12T17:34:50.165Z"
   },
   "miniprogram": {
     "project": "/Users/zhuhao/Documents/moluo/hr-roster-system/wechat-miniprogram",
     "version": "1.1.6",
     "appid": "wxc6bb140d2393e557",
     "description": "统一苹果安卓版本更新机制，增加实际运行版本和环境显示",
-    "verificationStatus": "local-candidate-pending-upload",
-    "uploadedAt": null,
-    "packageSizeBytes": null,
+    "verificationStatus": "uploaded-trial-pending-uat",
+    "uploadedAt": "2026-08-12T17:34:50.165Z",
+    "packageSizeBytes": 251175,
     "reviewStatus": "not-submitted"
   },
   "deploymentOrder": [
