@@ -9,12 +9,12 @@
   },
   "miniprogram": {
     "project": "/Users/zhuhao/Documents/moluo/hr-roster-system/wechat-miniprogram",
-    "version": "1.1.5",
+    "version": "1.1.6",
     "appid": "wxc6bb140d2393e557",
     "description": "统一苹果安卓版本更新机制，增加实际运行版本和环境显示",
-    "verificationStatus": "uploaded-trial-pending-uat",
-    "uploadedAt": "2026-08-12T16:50:20.507Z",
-    "packageSizeBytes": 251159,
+    "verificationStatus": "local-candidate-pending-upload",
+    "uploadedAt": null,
+    "packageSizeBytes": null,
     "reviewStatus": "not-submitted"
   },
   "deploymentOrder": [

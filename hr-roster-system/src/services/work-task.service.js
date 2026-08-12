@@ -50,7 +50,11 @@ async function listTasks(companyId, query, user) {
             target_project.project_name target_project_name,target_customer.customer_name target_customer_name
      FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
-     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+     LEFT JOIN hr_employee_job j ON j.id=(
+       SELECT j2.id FROM hr_employee_job j2
+       WHERE j2.employee_id=e.id AND j2.company_id=e.company_id
+       ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+     )
      LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
      LEFT JOIN hr_position p ON p.id=j.position_id AND p.company_id=e.company_id
      LEFT JOIN sys_user u ON u.id=t.assigned_user_id
@@ -58,6 +62,13 @@ async function listTasks(companyId, query, user) {
      LEFT JOIN crm_customer target_customer ON target_customer.id=target_project.customer_id AND target_customer.company_id=t.company_id
      WHERE t.company_id=:companyId
        AND t.task_type<>'PAYROLL_SETTLEMENT'
+       AND (
+         (t.task_type='ARRIVAL' AND e.employee_status=1)
+         OR (t.task_type IN ('CONTRACT','INSURANCE') AND e.employee_status=2 AND COALESCE(e.lifecycle_status,'')<>'OFFBOARDING')
+         OR (t.task_type IN ('OFFBOARD','INSURANCE_TERMINATION') AND e.lifecycle_status='OFFBOARDING')
+         OR (t.task_type='DOCUMENT' AND e.employee_status IN (1,2,6))
+         OR t.task_type='TRANSFER_ACCEPTANCE'
+       )
        AND (:taskStatus IS NULL OR t.task_status=:taskStatus)
        AND (:taskType IS NULL OR t.task_type=:taskType)
        AND (:riskLevel IS NULL OR t.risk_level=:riskLevel)
@@ -75,7 +86,11 @@ async function getScopedTask(companyId, taskId, user) {
   const task = await db.first(
     `SELECT t.* FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
-     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+     LEFT JOIN hr_employee_job j ON j.id=(
+       SELECT j2.id FROM hr_employee_job j2
+       WHERE j2.employee_id=e.id AND j2.company_id=e.company_id
+       ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+     )
      WHERE t.company_id=:companyId AND t.id=:taskId ${scope} LIMIT 1`,
     params
   );

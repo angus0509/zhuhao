@@ -336,7 +336,11 @@ async function assertEmployeeScope(companyId, employeeId, user, connection = db.
   const [[employee]] = await connection.execute(
     `SELECT e.id
      FROM hr_employee e
-     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+     LEFT JOIN hr_employee_job j ON j.id=(
+       SELECT j2.id FROM hr_employee_job j2
+       WHERE j2.employee_id=e.id AND j2.company_id=e.company_id
+       ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+     )
      WHERE ${where.join(' AND ')} LIMIT 1`,
     params
   );
@@ -564,7 +568,11 @@ async function getOnsiteOverview(companyId, user = null) {
        SUM(CASE WHEN e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING'
          AND COALESCE(s.employer_insurance_status,0)<>1 THEN 1 ELSE 0 END) insuranceGapCount
      FROM hr_employee e
-     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+     LEFT JOIN hr_employee_job j ON j.id=(
+       SELECT j2.id FROM hr_employee_job j2
+       WHERE j2.employee_id=e.id AND j2.company_id=e.company_id
+       ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+     )
      LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
      LEFT JOIN hr_social_security s ON s.id=(
        SELECT s2.id FROM hr_social_security s2
@@ -631,7 +639,11 @@ async function listEmployees(companyId, query, user = null, options = {}) {
 
   const baseFrom = `
     FROM hr_employee e
-    LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
+    LEFT JOIN hr_employee_job j ON j.id = (
+      SELECT j2.id FROM hr_employee_job j2
+      WHERE j2.employee_id = e.id AND j2.company_id = e.company_id
+      ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+    )
     LEFT JOIN hr_department d ON d.id = j.dept_id AND d.company_id = e.company_id
     LEFT JOIN crm_customer cu ON cu.id = j.customer_id AND cu.company_id = e.company_id
     LEFT JOIN hr_position p ON p.id = j.position_id AND p.company_id = e.company_id
@@ -710,7 +722,11 @@ async function listMyEmployees(companyId, user, query = {}) {
 
   const baseFrom = `
     FROM hr_employee e
-    LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
+    LEFT JOIN hr_employee_job j ON j.id = (
+      SELECT j2.id FROM hr_employee_job j2
+      WHERE j2.employee_id = e.id AND j2.company_id = e.company_id
+      ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+    )
     LEFT JOIN crm_customer cu ON cu.id = j.customer_id AND cu.company_id = e.company_id
     LEFT JOIN hr_position p ON p.id = j.position_id AND p.company_id = e.company_id
     LEFT JOIN hr_recruiter rec ON rec.id=e.recruiter_id AND rec.company_id=e.company_id
@@ -756,7 +772,11 @@ async function getEmployeeDetail(companyId, employeeId, options = {}) {
       res.leave_date,
       COALESCE(r.risk_count, 0) AS risk_count
     FROM hr_employee e
-    LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
+    LEFT JOIN hr_employee_job j ON j.id = (
+      SELECT j2.id FROM hr_employee_job j2
+      WHERE j2.employee_id = e.id AND j2.company_id = e.company_id
+      ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+    )
     LEFT JOIN hr_department d ON d.id = j.dept_id AND d.company_id = e.company_id
     LEFT JOIN crm_customer cu ON cu.id = j.customer_id AND cu.company_id = e.company_id
     LEFT JOIN hr_position p ON p.id = j.position_id AND p.company_id = e.company_id
@@ -2220,9 +2240,19 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
       companyId,
       employeeId,
       employeeName: employee.name,
+      projectId: employee.project_id || null,
       operatorId,
       hireDate
     });
+
+    // 入职状态与到岗待办必须在同一事务完成，避免页面仍显示“确认入职”。
+    await connection.execute(
+      `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,
+         completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId
+         AND task_type='ARRIVAL' AND task_status IN (0,1)`,
+      { companyId, employeeId, operatorId }
+    );
 
     await connection.execute(
       `INSERT INTO hr_operation_log
