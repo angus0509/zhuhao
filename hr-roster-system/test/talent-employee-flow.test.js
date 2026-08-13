@@ -52,6 +52,7 @@ assertIncludes(webApp, 'item.customerName', 'Web 人才库未展示客户单位'
 assertIncludes(webApp, "'employeeStatus'", 'Web 批量录入未支持未入职状态列');
 assertIncludes(employeeService, 'const employeeStatusMap = { 待入职: 1, 直接入职: 2, 在职: 2, 未入职: 5, 面试: 6 };', '后端批量录入未映射面试状态');
 assertIncludes(miniAdd, 'const EMPLOYEE_STATUS_VALUES = [6, 1, 2, 5];', '小程序未将面试设为默认状态');
-assertIncludes(miniList, "stage === 'unjoined'", '小程序花名册缺少未入职筛选');
+assertIncludes(miniList, "isUnjoined", '小程序驻厂页面未识别未入职回流状态');
+assertIncludes(miniList, "'未入职·已入人才库'", '小程序未入职回流提示缺失');
 
 console.log('员工未入职、离职回流与人才库关联契约检查通过。');

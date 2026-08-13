@@ -1,20 +1,20 @@
 {
-  "generatedAt": "2026-08-12T17:34:50.164Z",
+  "generatedAt": "2026-08-13T05:38:20Z",
   "webApi": {
-    "archive": "/tmp/hr-roster-deploy-20260813-013214.tar.gz",
-    "sha256": "296e451c6cf805779d246e4ca73e0500b7b0bde10421ab840b879a87f5062c2c",
+    "archive": "/tmp/hr-roster-deploy-20260813-133759.tar.gz",
+    "sha256": "3110f18718c2ea93ca010195c6553c4d72169db859fb7da00badb8efccad0d17",
     "publicBaseUrl": "https://lczpt.com",
     "verificationStatus": "deployed-and-public-regression-passed",
-    "deployedAt": "2026-08-12T17:34:50.165Z"
+    "deployedAt": "2026-08-13T05:37:45Z"
   },
   "miniprogram": {
     "project": "/Users/zhuhao/Documents/moluo/hr-roster-system/wechat-miniprogram",
     "version": "1.1.7",
     "appid": "wxc6bb140d2393e557",
     "description": "简化驻厂面试入职离职流程，合同与雇主险合并办理并同步网页端",
-    "verificationStatus": "verified-pending-upload",
-    "uploadedAt": null,
-    "packageSizeBytes": null,
+    "verificationStatus": "uploaded-successfully-pending-review",
+    "uploadedAt": "2026-08-13T05:27:45Z",
+    "packageSizeBytes": 256067,
     "reviewStatus": "not-submitted"
   },
   "deploymentOrder": [

@@ -14,6 +14,8 @@ const pkg = JSON.parse(read('package.json'));
 assert.doesNotMatch(migration, /\bDROP\b|\bDELETE\b|\bTRUNCATE\b/i, '简化流程迁移不得删除结构或历史数据');
 assert.match(migration, /'ONBOARDING_COMPLIANCE'/, '迁移缺少合并合规待办');
 assert.match(migration, /task_type IN \('CONTRACT','INSURANCE'\)[\s\S]*task_status=3/, '迁移未关闭旧开放合规待办');
+assert.match(migration, /NOT EXISTS \([\s\S]*task_type='ONBOARDING_COMPLIANCE'[\s\S]*task_status IN \(0,1\)/, '迁移未避免重复插入已存在的合并合规待办');
+assert.match(migration, /LEFT JOIN \([\s\S]*task_status=3[\s\S]*completed\.company_id IS NULL/, '迁移未避免关闭旧待办时撞击已完成唯一键');
 assert.match(migration, /ON DUPLICATE KEY UPDATE/, '迁移缺少重复执行保护');
 assert.match(schema, /ONBOARDING_COMPLIANCE/, '主数据库结构注释未登记合并待办类型');
 assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${migrationPath}"`), '生产部署未执行简化流程迁移');

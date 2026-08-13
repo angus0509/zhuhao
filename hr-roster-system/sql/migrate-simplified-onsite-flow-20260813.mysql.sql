@@ -18,6 +18,16 @@ LEFT JOIN hr_work_task t ON t.company_id=e.company_id AND t.employee_id=e.id
 WHERE e.employee_status=2 AND e.deleted_at IS NULL
   AND e.lifecycle_status<>'OFFBOARDING'
   AND (e.contract_status<>'SIGNED' OR e.insurance_status<>'ACTIVE')
+  AND NOT EXISTS (
+    SELECT 1
+    FROM hr_work_task existing
+    WHERE existing.company_id=e.company_id
+      AND existing.employee_id=e.id
+      AND existing.task_type='ONBOARDING_COMPLIANCE'
+      AND existing.source_type='EMPLOYEE_ONBOARDING'
+      AND existing.source_id=e.id
+      AND existing.task_status IN (0,1)
+  )
 GROUP BY e.company_id,e.id,j.project_id,e.name,e.created_by
 ON DUPLICATE KEY UPDATE
   project_id=VALUES(project_id),task_title=VALUES(task_title),task_content=VALUES(task_content),
@@ -32,5 +42,17 @@ JOIN (
   WHERE task_type='ONBOARDING_COMPLIANCE' AND task_status IN (0,1)
   GROUP BY company_id,employee_id
 ) merged ON merged.company_id=legacy.company_id AND merged.employee_id=legacy.employee_id
+LEFT JOIN (
+  SELECT company_id,employee_id,project_id,task_type,source_type,source_id
+  FROM hr_work_task
+  WHERE task_status=3
+  GROUP BY company_id,employee_id,project_id,task_type,source_type,source_id
+) completed ON completed.company_id=legacy.company_id
+  AND completed.employee_id=legacy.employee_id
+  AND completed.project_id <=> legacy.project_id
+  AND completed.task_type=legacy.task_type
+  AND completed.source_type=legacy.source_type
+  AND completed.source_id <=> legacy.source_id
 SET task_status=3,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
-WHERE legacy.task_type IN ('CONTRACT','INSURANCE') AND legacy.task_status IN (0,1);
+WHERE legacy.task_type IN ('CONTRACT','INSURANCE') AND legacy.task_status IN (0,1)
+  AND completed.company_id IS NULL;
