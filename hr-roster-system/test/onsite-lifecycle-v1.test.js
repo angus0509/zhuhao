@@ -33,7 +33,7 @@ if (!service.includes('validateRecruitmentSource')) throw new Error('缺少招�
 if (!service.includes('r.handle_status IN (0, 1) AND r.risk_level = 3')) throw new Error('汇总风险字段必须使用表别名，避免员工风险等级字段引发歧义');
 if ((service.match(/LEFT JOIN hr_recruiter rec/g) || []).length < 2) throw new Error('员工列表和详情均必须关联招聘人');
 if ((service.match(/LEFT JOIN hr_recruitment_supplier rs/g) || []).length < 2) throw new Error('员工列表和详情均必须关联招聘供应商');
-if (!service.includes("taskType: 'INSURANCE'")) throw new Error('到岗未生成保险待办');
+if (!service.includes("taskType: 'ONBOARDING_COMPLIANCE'")) throw new Error('到岗未生成合同和雇主险合并待办');
 if (!service.includes('terminateEmployerInsuranceForResignation')) throw new Error('离职未在同一事务办理雇主险减保');
 if (!service.includes("task_type='INSURANCE_TERMINATION'")) throw new Error('退保保存后未自动关闭待办');
 if (!service.includes("contract_status='SIGNED'")) throw new Error('合同签署后未同步员工合规状态');

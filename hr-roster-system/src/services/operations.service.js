@@ -869,13 +869,14 @@ async function operationsHome(companyId, user) {
     ARRIVAL: ['待确认到岗', 'roster'],
     INSURANCE: ['到岗待增雇主险', 'roster'],
     CONTRACT: ['合同待签署', 'roster'],
+    ONBOARDING_COMPLIANCE: ['合同和雇主险待确认', 'roster'],
     DOCUMENT: ['员工资料待补', 'roster'],
     OFFBOARD: ['离职交接待办', 'roster'],
     INSURANCE_TERMINATION: ['离职待减雇主险', 'roster'],
     TRANSFER_ACCEPTANCE: ['跨项目转岗待接收', 'tasks']
   };
   const lifecycleTodos = lifecycleTasks
-    .filter(item => !['CONTRACT', 'INSURANCE'].includes(item.taskType))
+    .filter(item => !['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'].includes(item.taskType))
     .map(item => ({
     id: `lifecycle-${item.taskType}`,
     title: taskConfig[item.taskType]?.[0] || item.taskType,

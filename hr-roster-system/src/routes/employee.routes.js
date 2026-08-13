@@ -1,6 +1,6 @@
 const express = require('express');
 const controller = require('../controllers/employee.controller');
-const { requireAuth, requirePermission } = require('../middlewares/auth.middleware');
+const { requireAuth, requirePermission, requireAllPermissions } = require('../middlewares/auth.middleware');
 const { sensitiveLimiter, batchLimiter } = require('../middlewares/rate-limit.middleware');
 
 const router = express.Router();
@@ -17,7 +17,10 @@ router.post('/employees', sensitiveLimiter, requirePermission('employee:create')
 router.post('/employees/batch', batchLimiter, requirePermission('employee:batch'), controller.batchCreate);
 router.get('/employees/:id', requirePermission('employee:view'), controller.detail);
 router.put('/employees/:id', requirePermission('employee:update'), controller.update);
+router.put('/employees/:id/interview-result', sensitiveLimiter, requirePermission('employee:update'), controller.handleInterviewResult);
+router.put('/employees/:id/arrival-result', sensitiveLimiter, requirePermission('employee:update'), controller.handleArrivalResult);
 router.post('/employees/:id/onboard', sensitiveLimiter, requirePermission('employee:update'), controller.onboard);
+router.post('/employees/:id/onboarding-compliance/confirm', sensitiveLimiter, requireAllPermissions(['contract:manage', 'social:manage']), controller.confirmOnboardingCompliance);
 router.post('/employees/:id/job-transfer', requirePermission('employee:transfer'), controller.transferJob);
 router.put('/employee-transfers/:changeId/handle', requirePermission('employee:transfer'), controller.handleTransfer);
 router.post('/employees/:id/resign', sensitiveLimiter, requirePermission('employee:resign'), controller.resign);

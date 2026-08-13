@@ -29,9 +29,7 @@ const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
 const taskStyle = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxss');
 assertIncludes(taskJs, 'contractCount:', '待办页未统计合同具体数量');
-assertIncludes(taskJs, 'insuranceCount:', '待办页未统计雇主险具体数量');
-assertIncludes(taskWxml, '合同 {{contractCount}}', '待办筛选未显示合同数量');
-assertIncludes(taskWxml, '雇主险 {{insuranceCount}}', '待办筛选未显示雇主险数量');
+assertIncludes(taskWxml, '合同和雇主险 {{contractCount}}', '待办筛选未显示合并合规人数');
 assertIncludes(taskStyle, 'min-height: 96rpx', '待办处理按钮点击区域过小');
 assertIncludes(taskStyle, 'font-size: 32rpx', '待办事项标题字号过小');
 

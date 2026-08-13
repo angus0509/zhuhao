@@ -774,6 +774,25 @@
       </form>
     </dialog>
 
+    <dialog class="modal" id="complianceModal">
+      <form method="dialog" class="modal-panel compact" id="complianceForm">
+        <div class="modal-head">
+          <div><p class="eyebrow">入职合规</p><h2>一键确认合同和雇主险</h2></div>
+          <button class="icon-button" value="cancel" type="button" data-close-modal="complianceModal">×</button>
+        </div>
+        <div class="form-grid single">
+          <label><span>合同签订日期 *</span><input name="contractDate" type="date" required /></label>
+          <label><span>雇主险生效日期 *</span><input name="insuranceStartDate" type="date" required /></label>
+          <label><span>备注（选填）</span><textarea name="remark" rows="3" placeholder="例如：现场资料已核验"></textarea></label>
+          <p class="form-hint">提交后将同时登记已签合同和雇主险增保，并关闭该员工对应待办与风险。</p>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="complianceModal">取消</button>
+          <button class="primary-button" type="submit">确认已办理</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="modal" id="socialModal">
       <form method="dialog" class="modal-panel compact" id="socialForm">
         <div class="modal-head">

@@ -32,7 +32,7 @@ if (fs.existsSync(miniAppPath)) {
   assertIncludes(homeJs, "wx.setStorageSync('onsite_employee_stage'", '小程序首页无法直达员工生命周期筛选');
   assertIncludes(homeJs, "item.taskType === 'CONTRACT'", '小程序驻厂待办未识别合同签署任务');
   assertIncludes(homeJs, "hasPermission(session.user, 'contract:manage')", '小程序工作台未校验合同登记权限');
-  assertIncludes(homeJs, '/pages/employees/contract/index?id=', '小程序合同待办不能直达登记页面');
+  assertIncludes(homeJs, '/pages/employees/compliance/index?id=', '小程序合同和雇主险待办不能直达合并办理页面');
   assertIncludes(homeJs, "item.taskType === 'TRANSFER_ACCEPTANCE'", '小程序首页未识别转岗接收任务');
   assertIncludes(homeJs, "wx.setStorageSync('onsite_transfer_task'", '小程序未向转岗处理页传递待办信息');
   assertIncludes(homeJs, '/pages/employees/transfer-handle/index?changeId=', '小程序转岗待办不能直达处理页面');
@@ -46,8 +46,7 @@ if (fs.existsSync(miniAppPath)) {
   assertIncludes(taskJs, "request({ url: '/risk-alerts' })", '风险处理页未加载具体风险提醒');
   assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '合规待办页未加载待处理事项');
   assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '合规待办页未加载处理中事项');
-  assertIncludes(taskJs, '/pages/employees/contract/index?id=', '劳动合同待办无法直达合同登记');
-  assertIncludes(taskJs, '/pages/employees/insurance/index?id=', '雇主险待办无法直达增保办理');
+  assertIncludes(taskJs, '/pages/employees/compliance/index?id=', '合同和雇主险待办无法直达合并办理');
   assertIncludes(taskJs, "hasPermission(session.user, 'contract:manage')", '合同待办直接办理缺少权限校验');
   assertIncludes(taskJs, "hasPermission(session.user, 'social:manage')", '雇主险待办直接办理缺少权限校验');
   assertIncludes(taskJs, 'avatarText:', '风险事项未在 JS 中生成微信兼容的头像文字');
@@ -82,16 +81,16 @@ if (fs.existsSync(miniAppPath)) {
   if (/wx:elif="\{\{submitError\}\}"/.test(addWxml)) throw new Error('提交错误仍会隐藏整个新增员工表单');
 
   const onboardJs = read('wechat-miniprogram/miniprogram/pages/employees/onboard/index.js');
-  assertIncludes(onboardJs, "hasPermission(session.user, 'social:manage')", '确认入职未根据权限控制雇主险后续办理');
-  assertIncludes(onboardJs, '&action=ADD', '确认入职后的雇主险入口未明确指定增保');
+  assertIncludes(onboardJs, "url: `/employees/${this.data.employeeId}/onboard`", '确认入职未调用员工入职接口');
+  assertIncludes(onboardJs, "markDirty('employees', 'home', 'tasks', 'advances')", '确认入职后未刷新合并合规待办');
 
   const listJs = read('wechat-miniprogram/miniprogram/pages/employees/index.js');
   assertIncludes(listJs, 'customerStats', '员工列表缺少客户分类统计');
   assertIncludes(listJs, 'insuranceComplete: employerCovered', '员工列表未按雇主险判断完成状态');
-  assertIncludes(listJs, 'activeInsurance', '员工列表缺少雇主险筛选');
-  assertIncludes(listJs, "activeStage: 'active'", '驻厂人员页未默认展示在职员工');
-  assertIncludes(listJs, "stage === 'offboarding'", '驻厂人员页缺少离职处理中筛选');
-  assertIncludes(listJs, "stage === 'unjoined'", '驻厂人员页缺少未入职筛选');
+  if (listJs.includes('activeInsurance')) throw new Error('驻厂人员页仍保留已取消的独立雇主险筛选');
+  assertIncludes(listJs, "activeStage: ''", '驻厂人员页应默认展示当前客户全部人员');
+  assertIncludes(listJs, "stage === 'interview'", '驻厂人员页缺少面试筛选');
+  assertIncludes(listJs, "stage === 'left'", '驻厂人员页缺少已离职筛选');
   assertIncludes(listJs, 'goOnboard(event)', '驻厂人员列表缺少快捷确认入职');
   assertIncludes(listJs, 'goResign(event)', '驻厂人员列表缺少快捷离职管理');
   assertIncludes(listJs, 'async loadAllEmployeePages(keyword, customerId', '驻厂人员页仍只读取前200名员工');

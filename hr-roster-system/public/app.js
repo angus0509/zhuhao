@@ -577,6 +577,7 @@ function renderDetail(detail) {
       <div class="topbar-actions">
         ${permissions.includes('employee:update') ? `<button class="secondary-button" type="button" data-action="edit" data-id="${basic.id}">编辑</button>` : ''}
         ${permissions.includes('employee:transfer') ? `<button class="secondary-button" type="button" data-action="transfer" data-id="${basic.id}">调岗</button>` : ''}
+        ${permissions.includes('contract:manage') && permissions.includes('social:manage') && Number(basic.employeeStatus) === 2 ? `<button class="primary-button" type="button" data-action="compliance" data-id="${basic.id}">一键确认合同和雇主险</button>` : ''}
         ${permissions.includes('contract:manage') ? `<button class="secondary-button" type="button" data-action="contract" data-id="${basic.id}">合同</button>` : ''}
         ${permissions.includes('social:manage') ? `<button class="secondary-button" type="button" data-action="social" data-id="${basic.id}">雇主险</button>` : ''}
         ${permissions.includes('cert:manage') ? `<button class="secondary-button" type="button" data-action="certificate" data-id="${basic.id}">证件</button>` : ''}
@@ -759,6 +760,7 @@ function renderRiskDetail(row) {
   const permissions = state.user?.permissions || [];
   const canContract = permissions.includes('contract:manage');
   const canInsurance = permissions.includes('social:manage');
+  const canCompliance = canContract && canInsurance;
   panel.innerHTML = `<div class="risk-detail-head"><div><span>EMPLOYEE #${row.employeeId}</span><h3>${escapeHtml(row.employeeName)}</h3></div>${badge(row.completed ? '入职合规完成' : '入职事项待完善', row.completed ? 'green' : 'amber')}</div>
     <div class="risk-detail-context onboarding-person-context">
       ${infoItem('客户单位', row.customerName || '未分配')}
@@ -771,6 +773,7 @@ function renderRiskDetail(row) {
       <article class="onboarding-check-card ${row.employerInsuranceActive ? 'done' : 'pending'}"><div><i>${row.employerInsuranceActive ? '✓' : '2'}</i><span><strong>雇主险</strong><small>${row.employerInsuranceActive ? '当前雇主险保障有效' : '尚未办理有效雇主险增保'}</small></span></div>${row.employerInsuranceActive ? badge('保障中', 'green') : canInsurance ? `<button class="primary-button" type="button" data-action="social" data-id="${row.employeeId}" data-insurance-action="ADD">办理增保</button>` : badge('待增保', 'amber')}</article>
     </section>
     <div class="onboarding-result ${row.completed ? 'done' : ''}"><strong>${row.completed ? '两项均已完成' : `还有 ${row.pendingCount} 项需要办理`}</strong><p>${row.completed ? '系统已自动完成入职合规闭环。' : '办理完成后系统会自动更新状态，无需建立整改任务。'}</p></div>
+    ${!row.completed && canCompliance ? `<button class="primary-button" type="button" data-action="compliance" data-id="${row.employeeId}">一键确认合同和雇主险</button>` : ''}
     <div class="risk-detail-actions"><button class="secondary-button" type="button" data-risk-employee="${row.employeeId}">查看员工档案</button></div>`;
 }
 
@@ -1022,6 +1025,17 @@ function openContractModal(id) {
   $('#contractModal').showModal();
 }
 
+function openComplianceModal(id) {
+  state.selectedEmployeeId = Number(id);
+  const form = $('#complianceForm');
+  form.reset();
+  const now = new Date();
+  const date = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  form.elements.contractDate.value = date;
+  form.elements.insuranceStartDate.value = date;
+  $('#complianceModal').showModal();
+}
+
 function openSocialModal(id, requestedAction = '') {
   state.selectedEmployeeId = Number(id);
   const form = $('#socialForm');
@@ -1103,6 +1117,20 @@ async function submitSocial(event) {
   });
   $('#socialModal').close();
   toast(body.employerInsuranceAction === 'ADD' ? '雇主险增保已登记' : '雇主险减保已登记');
+  await refreshEmployeeWorkspace();
+  await selectEmployee(state.selectedEmployeeId);
+}
+
+async function submitOnboardingCompliance(event) {
+  event.preventDefault();
+  const body = formToObject(event.currentTarget);
+  if (!window.confirm('确认该员工劳动合同已签署，且雇主险已完成增保？')) return;
+  await api(`/api/employees/${state.selectedEmployeeId}/onboarding-compliance/confirm`, {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  $('#complianceModal').close();
+  toast('合同和雇主险已一键确认');
   await refreshEmployeeWorkspace();
   await selectEmployee(state.selectedEmployeeId);
 }
@@ -1356,7 +1384,7 @@ async function loadWorkTasks() {
   const canContract = permissions.includes('contract:manage');
   const canInsurance = permissions.includes('social:manage');
   const canCertificate = permissions.includes('cert:manage');
-  const taskView = { INSURANCE: 'roster', INSURANCE_TERMINATION: 'roster', ARRIVAL: 'roster', CONTRACT: 'roster', DOCUMENT: 'roster', OFFBOARD: 'roster', TRANSFER_ACCEPTANCE: 'tasks' };
+  const taskView = { INSURANCE: 'roster', INSURANCE_TERMINATION: 'roster', ARRIVAL: 'roster', CONTRACT: 'roster', ONBOARDING_COMPLIANCE: 'roster', DOCUMENT: 'roster', OFFBOARD: 'roster', TRANSFER_ACCEPTANCE: 'tasks' };
   $('#taskTableBody').innerHTML = state.workTasks.map(item => {
     const tone = item.riskLevel === 3 ? 'red' : item.riskLevel === 2 ? 'amber' : 'blue';
     const transferAction = item.taskType === 'TRANSFER_ACCEPTANCE' && canHandleTransfer
@@ -1365,7 +1393,9 @@ async function loadWorkTasks() {
     const offboardAction = item.taskType === 'OFFBOARD' && canManageOffboard
       ? `<button class="table-button" data-open-offboard="${item.employeeId}">打开离职办理</button>`
       : '';
-    const businessAction = item.taskType === 'CONTRACT' && canContract
+    const businessAction = item.taskType === 'ONBOARDING_COMPLIANCE' && canContract && canInsurance
+      ? `<button class="table-button primary" data-action="compliance" data-id="${item.employeeId}">一键确认办理</button>`
+      : item.taskType === 'CONTRACT' && canContract
       ? `<button class="table-button primary" data-action="contract" data-id="${item.employeeId}">直接登记合同</button>`
       : item.taskType === 'INSURANCE' && canInsurance
         ? `<button class="table-button primary" data-action="social" data-id="${item.employeeId}" data-insurance-action="ADD">直接办理增保</button>`
@@ -2223,6 +2253,7 @@ function bindEvents() {
   $('#transferCustomerSelect').addEventListener('change', updateTransferProjectOptions);
   $('#resignForm').addEventListener('submit', event => submitResign(event).catch(error => toast(error.message)));
   $('#contractForm').addEventListener('submit', event => submitContract(event).catch(error => toast(error.message)));
+  $('#complianceForm').addEventListener('submit', event => submitOnboardingCompliance(event).catch(error => toast(error.message)));
   $('#socialForm').addEventListener('submit', event => submitSocial(event).catch(error => toast(error.message)));
   $('#certificateForm').addEventListener('submit', event => submitCertificate(event).catch(error => toast(error.message)));
   $('#passwordForm').addEventListener('submit', event => changePassword(event).catch(error => toast(error.message)));
@@ -2498,6 +2529,7 @@ function bindEvents() {
     if (action === 'transfer') openTransferModal(id);
     if (action === 'resign') openResignModal(id);
     if (action === 'contract') openContractModal(id);
+    if (action === 'compliance') openComplianceModal(id);
     if (action === 'social') openSocialModal(id, actionButton.dataset.insuranceAction);
     if (action === 'certificate') openCertificateModal(id);
     if (action === 'handle-risk') handleRisk(id, status).catch(error => toast(error.message));

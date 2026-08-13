@@ -27,8 +27,7 @@ assert(homeWxml.includes('bindtap="goRiskCenter"'), '首页未处理风险和合
 assert(homeWxml.includes('bindtap="goTodo"'), '首页具体待办无法点击');
 assert(taskJs.includes("request({ url: '/risk-alerts' })"), '风险处理页未关联风险数据');
 assert(taskJs.includes("request({ url: '/work-tasks?taskStatus=0' })"), '合规处理页未关联待处理工作任务');
-assert(taskJs.includes('/pages/employees/contract/index?id='), '合同待办无法直达办理');
-assert(taskJs.includes('/pages/employees/insurance/index?id='), '雇主险待办无法直达办理');
+assert(taskJs.includes('/pages/employees/compliance/index?id='), '合同和雇主险待办无法直达合并办理');
 
 const routeSources = [
   read('src/routes/auth.routes.js'),
@@ -46,6 +45,9 @@ const requiredRoutes = [
   ["get", '/employees/onsite-overview'],
   ["post", '/ocr/idcard'],
   ["post", '/employees/:id/onboard'],
+  ["put", '/employees/:id/interview-result'],
+  ["put", '/employees/:id/arrival-result'],
+  ["post", '/employees/:id/onboarding-compliance/confirm'],
   ["post", '/employees/:id/resign'],
   ["put", '/employees/:id/social-security'],
   ["get", '/advances'],

@@ -24,10 +24,9 @@ const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
 assertIncludes(taskJs, "request({ url: '/risk-alerts' })", '页面未读取风险提醒');
 assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '页面未读取待处理合规任务');
 assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '页面未读取处理中合规任务');
-assertIncludes(taskJs, "CONTRACT: { kind: 'contract'", '页面未识别合同待办');
-assertIncludes(taskJs, "kind === 'contract'", '风险数据未归类为合同待办');
-assertIncludes(taskJs, '/pages/employees/contract/index?id=', '合同待办未直达合同登记');
-assertIncludes(taskJs, '/pages/employees/insurance/index?id=', '雇主险待办未直达增保办理');
+assertIncludes(taskJs, "CONTRACT: { kind: 'compliance'", '页面未将历史合同待办归入合并合规');
+assertIncludes(taskJs, "kind === 'compliance'", '风险数据未归类为合并合规待办');
+assertIncludes(taskJs, '/pages/employees/compliance/index?id=', '合同和雇主险待办未直达合并办理');
 assertIncludes(taskJs, "taskType === 'ARRIVAL'", '到岗待办未直达确认入职');
 assertIncludes(taskJs, '/pages/employees/onboard/index?id=', '到岗待办缺少确认入职页面');
 assertIncludes(taskJs, "taskType === 'DOCUMENT'", '资料待补未直达员工编辑');
@@ -66,7 +65,7 @@ assertIncludes(summaryRiskQuery, 'e.deleted_at IS NULL', '首页未处理风险�
 const operationsService = read('src/services/operations.service.js');
 assertIncludes(
   operationsService,
-  ".filter(item => !['CONTRACT', 'INSURANCE'].includes(item.taskType))",
+  ".filter(item => !['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'].includes(item.taskType))",
   '今日待办仍重复显示合同和雇主险生命周期任务'
 );
 const complianceQueryBlock = operationsService.slice(

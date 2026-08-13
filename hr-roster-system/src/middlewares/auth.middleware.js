@@ -76,10 +76,22 @@ function requireAnyPermission(permissionCodes) {
   };
 }
 
+function requireAllPermissions(permissionCodes) {
+  const required = Array.isArray(permissionCodes) ? permissionCodes : [];
+  return (req, _res, next) => {
+    if (!req.user) return next(createError('未登录或登录已过期', 401));
+    if (!required.every(code => req.user.permissions.includes(code))) {
+      return next(createError('缺少办理合同或雇主险的权限', 403));
+    }
+    next();
+  };
+}
+
 module.exports = {
   requireAuth,
   requirePermission,
   requireAnyPermission,
+  requireAllPermissions,
   readCookie,
   assertCookieRequestOrigin
 };

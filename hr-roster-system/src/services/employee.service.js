@@ -1101,6 +1101,21 @@ async function createWorkTask(connection, task) {
   );
 }
 
+async function closeEmployeeOpenItems(connection, companyId, employeeId, operatorId, remark) {
+  await connection.execute(
+    `UPDATE hr_work_task
+     SET task_status=3,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+     WHERE company_id=:companyId AND employee_id=:employeeId AND task_status IN (0,1)`,
+    { companyId, employeeId, operatorId: operatorId || null }
+  );
+  await connection.execute(
+    `UPDATE hr_risk_alert
+     SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),handle_remark=:remark,updated_at=NOW()
+     WHERE company_id=:companyId AND employee_id=:employeeId AND handle_status IN (0,1)`,
+    { companyId, employeeId, operatorId: operatorId || null, remark }
+  );
+}
+
 // 新员工确认在职后，只建立劳动合同和雇主险两项核心入职合规。
 async function createOnboardingCompliance(connection, {
   companyId,
@@ -1145,22 +1160,19 @@ async function createOnboardingCompliance(connection, {
     });
   }
 
-  for (const task of [
-    { taskType: 'CONTRACT', taskTitle: `${employeeName}劳动合同待签`, taskContent: '登记劳动合同并确认签订状态' },
-    { taskType: 'INSURANCE', taskTitle: `${employeeName}雇主险待增保`, taskContent: '办理雇主险增保并登记结果' }
-  ]) {
-    await createWorkTask(connection, {
-      companyId,
-      employeeId,
-      projectId,
-      ...task,
-      sourceType: 'EMPLOYEE_ONBOARDING',
-      sourceId: employeeId,
-      riskLevel: 3,
-      assignedUserId: operatorId || null,
-      deadline: `${hireDate} 23:59:59`
-    });
-  }
+  await createWorkTask(connection, {
+    companyId,
+    employeeId,
+    projectId,
+    taskType: 'ONBOARDING_COMPLIANCE',
+    taskTitle: `${employeeName}合同和雇主险待确认`,
+    taskContent: '一键确认劳动合同已签和雇主险已增保',
+    sourceType: 'EMPLOYEE_ONBOARDING',
+    sourceId: employeeId,
+    riskLevel: 3,
+    assignedUserId: operatorId || null,
+    deadline: `${hireDate} 23:59:59`
+  });
 }
 
 async function linkExistingTalentToEmployee(connection, { companyId, employeeId, operatorId = 0 }) {
@@ -1232,7 +1244,7 @@ async function syncEmployeeToTalent(connection, {
   resignedAt = null,
   resignationReason = null
 }) {
-  if (!['INTERVIEW', 'UNJOINED', 'RESIGNED', 'REHIRED'].includes(sourceType)) {
+  if (!['INTERVIEW', 'INTERVIEW_REJECTED', 'UNJOINED', 'RESIGNED', 'REHIRED'].includes(sourceType)) {
     throw createError('人才库流转类型不正确');
   }
   const [[employee]] = await connection.execute(
@@ -1273,7 +1285,9 @@ async function syncEmployeeToTalent(connection, {
 
   const statusConfig = sourceType === 'RESIGNED'
     ? { candidateStatus: 1, availableStatus: 1, talentSourceType: 'RESIGNED' }
-    : sourceType === 'INTERVIEW'
+    : sourceType === 'INTERVIEW_REJECTED'
+      ? { candidateStatus: 5, availableStatus: 1, talentSourceType: 'INTERVIEW_REJECTED' }
+      : sourceType === 'INTERVIEW'
       ? { candidateStatus: 1, availableStatus: 1, talentSourceType: 'INTERVIEW' }
       : { candidateStatus: 2, availableStatus: 1, talentSourceType: 'UNJOINED' };
 
@@ -1404,9 +1418,16 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
       { companyId, employeeId: row.employee_id }
     );
     await connection.execute(
-      `UPDATE hr_risk_alert SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),handle_remark='离职事项全部完成',updated_at=NOW()
-       WHERE company_id=:companyId AND risk_key=:riskKey AND handle_status IN (0,1)`,
-      { companyId, operatorId, riskKey: `resign_followup:${resignationId}` }
+      `UPDATE hr_work_task SET task_status=3,completed_by=:operatorId,
+         completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId AND task_status IN (0,1)`,
+      { companyId, employeeId: row.employee_id, operatorId: operatorId || null }
+    );
+    await connection.execute(
+      `UPDATE hr_risk_alert SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),
+         handle_remark='员工已离职，相关风险关闭',updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId AND handle_status IN (0,1)`,
+      { companyId, employeeId: row.employee_id, operatorId: operatorId || null }
     );
   } else {
     await connection.execute(
@@ -2210,6 +2231,7 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
     if (!employee) throw createError('员工不存在', 404);
     if (Number(employee.employee_status) === 3) throw createError('离职员工不能重新确认入职');
     if (Number(employee.employee_status) === 2) throw createError('员工已在职，无需重复确认');
+    if (Number(employee.employee_status) !== 1) throw createError('该员工已不在待到岗状态，请刷新列表');
     const missingFields = [];
     if (!decrypt(employee.id_card_no)) missingFields.push('身份证号');
     if (!employee.phone) missingFields.push('手机号');
@@ -2275,6 +2297,182 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
     });
 
     return { employeeId, employeeStatus: 2, hireDate };
+  });
+}
+
+async function handleInterviewResult(companyId, employeeId, body, operatorId = 0, user = null) {
+  return db.transaction(async connection => {
+    await assertEmployeeScope(companyId, employeeId, user, connection);
+    const [[employee]] = await connection.execute(
+      `SELECT e.id,e.name,e.employee_status,j.project_id
+       FROM hr_employee e
+       LEFT JOIN hr_employee_job j ON j.id=(
+         SELECT j2.id FROM hr_employee_job j2
+         WHERE j2.company_id=e.company_id AND j2.employee_id=e.id
+         ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+       )
+       WHERE e.company_id=:companyId AND e.id=:employeeId AND e.deleted_at IS NULL LIMIT 1`,
+      { companyId, employeeId }
+    );
+    if (!employee) throw createError('员工不存在', 404);
+    if (Number(employee.employee_status) !== 6) throw createError('该员工已不在面试状态，请刷新列表');
+
+    const result = String(body.result || '').trim().toUpperCase();
+    if (!['PENDING_ARRIVAL', 'REJECTED'].includes(result)) throw createError('面试结果不正确');
+
+    if (result === 'PENDING_ARRIVAL') {
+      await connection.execute(
+        "UPDATE hr_employee SET employee_status=1,lifecycle_status='PENDING_ARRIVAL',arrival_status='PENDING',updated_at=NOW() WHERE company_id=:companyId AND id=:employeeId",
+        { companyId, employeeId }
+      );
+      await connection.execute(
+        `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+         WHERE company_id=:companyId AND employee_id=:employeeId AND task_type='ARRIVAL' AND task_status IN (0,1)`,
+        { companyId, employeeId, operatorId: operatorId || null }
+      );
+      await createWorkTask(connection, {
+        companyId,
+        employeeId,
+        projectId: employee.project_id || null,
+        taskType: 'ARRIVAL',
+        taskTitle: `${employee.name}待确认到岗`,
+        taskContent: body.remark || '确认员工是否到岗入职',
+        sourceType: 'EMPLOYEE_INTERVIEW',
+        sourceId: employeeId,
+        riskLevel: 2,
+        assignedUserId: operatorId || null,
+        deadline: null
+      });
+    } else {
+      await connection.execute(
+        "UPDATE hr_employee SET employee_status=5,lifecycle_status='NOT_JOINED',arrival_status='NO_SHOW',updated_at=NOW() WHERE company_id=:companyId AND id=:employeeId",
+        { companyId, employeeId }
+      );
+      await closeEmployeeOpenItems(connection, companyId, employeeId, operatorId, '面试未通过或不做');
+      await syncEmployeeToTalent(connection, { companyId, employeeId, sourceType: 'INTERVIEW_REJECTED', operatorId });
+    }
+
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
+       VALUES (:companyId,:operatorId,'员工生命周期','employee',:employeeId,'update',:beforeData,:afterData)`,
+      {
+        companyId,
+        operatorId: operatorId || null,
+        employeeId,
+        beforeData: JSON.stringify({ employeeStatus: 6 }),
+        afterData: JSON.stringify({ result, remark: body.remark || '' })
+      }
+    );
+    return { employeeId, result, employeeStatus: result === 'PENDING_ARRIVAL' ? 1 : 5 };
+  });
+}
+
+async function handleArrivalResult(companyId, employeeId, body, operatorId = 0, user = null) {
+  return db.transaction(async connection => {
+    await assertEmployeeScope(companyId, employeeId, user, connection);
+    const [[employee]] = await connection.execute(
+      `SELECT id,employee_status FROM hr_employee
+       WHERE company_id=:companyId AND id=:employeeId AND deleted_at IS NULL LIMIT 1`,
+      { companyId, employeeId }
+    );
+    if (!employee) throw createError('员工不存在', 404);
+    if (Number(employee.employee_status) !== 1) throw createError('该员工已不在待到岗状态，请刷新列表');
+    const result = String(body.result || '').trim().toUpperCase();
+    if (result !== 'UNJOINED') throw createError('到岗结果不正确');
+
+    await connection.execute(
+      "UPDATE hr_employee SET employee_status=5,lifecycle_status='NOT_JOINED',arrival_status='NO_SHOW',updated_at=NOW() WHERE company_id=:companyId AND id=:employeeId",
+      { companyId, employeeId }
+    );
+    await closeEmployeeOpenItems(connection, companyId, employeeId, operatorId, '待到岗员工未入职');
+    await syncEmployeeToTalent(connection, { companyId, employeeId, sourceType: 'UNJOINED', operatorId });
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
+       VALUES (:companyId,:operatorId,'员工生命周期','employee',:employeeId,'update',:beforeData,:afterData)`,
+      {
+        companyId,
+        operatorId: operatorId || null,
+        employeeId,
+        beforeData: JSON.stringify({ employeeStatus: 1 }),
+        afterData: JSON.stringify({ result, remark: body.remark || '' })
+      }
+    );
+    return { employeeId, result, employeeStatus: 5 };
+  });
+}
+
+async function confirmOnboardingCompliance(companyId, employeeId, body, operatorId = 0, user = null) {
+  return db.transaction(async connection => {
+    await assertEmployeeScope(companyId, employeeId, user, connection);
+    const [[employee]] = await connection.execute(
+      `SELECT id,name,employee_status FROM hr_employee
+       WHERE company_id=:companyId AND id=:employeeId AND deleted_at IS NULL LIMIT 1`,
+      { companyId, employeeId }
+    );
+    if (!employee) throw createError('员工不存在', 404);
+    if (Number(employee.employee_status) !== 2) throw createError('只有正常在职员工可以办理入职合规');
+
+    const contractDate = body.contractDate || today();
+    const insuranceStartDate = body.insuranceStartDate || today();
+    const contractNo = `HT${String(contractDate).replace(/-/g, '')}${employeeId}${String(Date.now()).slice(-6)}`;
+    const [contractResult] = await connection.execute(
+      `INSERT INTO hr_labor_contract
+       (company_id,employee_id,contract_no,contract_type,sign_status,sign_date,start_date,renewal_count)
+       VALUES (:companyId,:employeeId,:contractNo,2,1,:contractDate,:contractDate,0)`,
+      { companyId, employeeId, contractNo, contractDate }
+    );
+
+    const [[social]] = await connection.execute(
+      'SELECT id FROM hr_social_security WHERE company_id=:companyId AND employee_id=:employeeId ORDER BY id DESC LIMIT 1',
+      { companyId, employeeId }
+    );
+    if (social) {
+      await connection.execute(
+        `UPDATE hr_social_security SET employer_insurance_status=1,employer_start_date=:insuranceStartDate,
+           employer_end_date=NULL,remark=COALESCE(:remark,remark),updated_at=NOW()
+         WHERE company_id=:companyId AND id=:socialId`,
+        { companyId, socialId: social.id, insuranceStartDate, remark: body.remark || null }
+      );
+    } else {
+      await connection.execute(
+        `INSERT INTO hr_social_security
+         (company_id,employee_id,employer_insurance_status,employer_start_date,remark)
+         VALUES (:companyId,:employeeId,1,:insuranceStartDate,:remark)`,
+        { companyId, employeeId, insuranceStartDate, remark: body.remark || null }
+      );
+    }
+
+    await connection.execute(
+      `UPDATE hr_employee SET contract_status='SIGNED',insurance_status='ACTIVE',lifecycle_status='ACTIVE',updated_at=NOW()
+       WHERE company_id=:companyId AND id=:employeeId`,
+      { companyId, employeeId }
+    );
+    await connection.execute(
+      `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId
+         AND task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE') AND task_status IN (0,1)`,
+      { companyId, employeeId, operatorId: operatorId || null }
+    );
+    await connection.execute(
+      `UPDATE hr_risk_alert SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),
+         handle_remark='合同和雇主险已一键确认',updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId AND risk_type IN (1,7) AND handle_status IN (0,1)`,
+      { companyId, employeeId, operatorId: operatorId || null }
+    );
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+       VALUES (:companyId,:operatorId,'入职合规','onboarding_compliance',:employeeId,'confirm',:afterData)`,
+      {
+        companyId,
+        operatorId: operatorId || null,
+        employeeId,
+        afterData: JSON.stringify({ contractId: contractResult.insertId, contractDate, insuranceStartDate, remark: body.remark || '' })
+      }
+    );
+    return { employeeId, contractId: contractResult.insertId, contractDate, insuranceStartDate };
   });
 }
 
@@ -2758,6 +2956,9 @@ module.exports = {
   createEmployeesBatch,
   updateEmployee,
   transferJob,
+  handleInterviewResult,
+  handleArrivalResult,
+  confirmOnboardingCompliance,
   onboardEmployee,
   resignEmployee,
   createContract,

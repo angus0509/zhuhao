@@ -20,11 +20,12 @@ const allMiniWxml = fs.readdirSync(path.join(root, 'wechat-miniprogram/miniprogr
   .map(file => read(`wechat-miniprogram/miniprogram/pages/${file}`))
   .join('\n');
 
-for (const stage of ['', 'pending', 'interview', 'unjoined', 'active', 'offboarding', 'left']) {
+for (const stage of ['', 'interview', 'pending', 'active', 'left']) {
   const marker = stage ? `data-stage="${stage}"` : 'data-stage=""';
   if (!onsiteWxml.includes(marker)) throw new Error(`蓝色驻厂面板缺少人员状态入口：${stage || '全部'}`);
 }
-if ((onsiteWxml.match(/bindtap="filterByStage"/g) || []).length < 7) throw new Error('蓝色驻厂面板状态卡仍不可点击');
+if ((onsiteWxml.match(/bindtap="filterByStage"/g) || []).length !== 5) throw new Error('蓝色驻厂面板应只保留五个可点击状态');
+if (/data-stage="(?:unjoined|offboarding)"/.test(onsiteWxml)) throw new Error('蓝色驻厂面板仍展示已取消的未入职或离职办理状态');
 if (onsiteWxml.includes('vertical-stage-grid')) throw new Error('人员状态仍在蓝色面板外重复展示');
 if (!onsiteWxml.includes('site-customer-switch')) throw new Error('客户切换未合并进驻厂人员管理面板');
 if (!onsiteWxss.includes('.site-status-grid')) throw new Error('驻厂人员管理缺少一体化状态网格布局');

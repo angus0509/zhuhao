@@ -162,7 +162,7 @@ async function listTalents(companyId, user) {
      ORDER BY t.id DESC`, params
   );
   const statusNames = { 1: '待联系', 2: '跟进中', 3: '待入职', 4: '已入职', 5: '已淘汰' };
-  const sourceTypeNames = { MANUAL: '手工录入', UNJOINED: '未入职回流', RESIGNED: '离职回流' };
+  const sourceTypeNames = { MANUAL: '手工录入', INTERVIEW: '面试登记', INTERVIEW_REJECTED: '面试未通过', UNJOINED: '未入职回流', RESIGNED: '离职回流' };
   const employeeStatusNames = { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' };
   const availableStatusNames = { 1: '可联系', 2: '暂不考虑', 3: '已重新入职' };
   return rows.map(row => ({

@@ -6,6 +6,7 @@ const TASK_TYPE_NAMES = {
   ARRIVAL: '待确认到岗',
   INSURANCE: '待办理雇主险增保',
   CONTRACT: '待签劳动合同',
+  ONBOARDING_COMPLIANCE: '一键确认合同和雇主险',
   DOCUMENT: '待补员工资料',
   OFFBOARD: '待完成离职交接',
   INSURANCE_TERMINATION: '离职待雇主险减保',
@@ -64,7 +65,7 @@ async function listTasks(companyId, query, user) {
        AND t.task_type<>'PAYROLL_SETTLEMENT'
        AND (
          (t.task_type='ARRIVAL' AND e.employee_status=1)
-         OR (t.task_type IN ('CONTRACT','INSURANCE') AND e.employee_status=2 AND COALESCE(e.lifecycle_status,'')<>'OFFBOARDING')
+         OR (t.task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE') AND e.employee_status=2 AND COALESCE(e.lifecycle_status,'')<>'OFFBOARDING')
          OR (t.task_type IN ('OFFBOARD','INSURANCE_TERMINATION') AND e.lifecycle_status='OFFBOARDING')
          OR (t.task_type='DOCUMENT' AND e.employee_status IN (1,2,6))
          OR t.task_type='TRANSFER_ACCEPTANCE'

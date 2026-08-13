@@ -17,7 +17,8 @@ if (fs.existsSync(miniRoot)) {
   const miniJs = fs.readFileSync(path.join(miniRoot, 'index.js'), 'utf8');
   const miniWxml = fs.readFileSync(path.join(miniRoot, 'index.wxml'), 'utf8');
   if (!miniJs.includes('insuranceGapCount') || !miniJs.includes('activeCount')) throw new Error('小程序客户分类缺少运营指标');
-  if (!miniWxml.includes('siteInsurancePendingCount') || !miniWxml.includes('onCustomerChange')) throw new Error('小程序当前客户驾驶舱缺少雇主险统计或客户切换');
+  if (!miniWxml.includes('onCustomerChange') || !miniWxml.includes('site-status-grid')) throw new Error('小程序当前客户驾驶舱缺少客户切换或生命周期状态');
+  if (miniWxml.includes('filterByInsurance')) throw new Error('驻厂主页面不应恢复已取消的独立雇主险筛选');
 }
 
 console.log('roster-customer-grouping-tests-ok');

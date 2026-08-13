@@ -72,6 +72,28 @@ exports.update = asyncHandler(async (req, res) => {
   success(res, data, '保存成功');
 });
 
+exports.handleInterviewResult = asyncHandler(async (req, res) => {
+  const data = await employeeService.handleInterviewResult(
+    req.companyId,
+    Number(req.params.id),
+    req.body,
+    req.operatorId,
+    req.user
+  );
+  success(res, data, data.result === 'PENDING_ARRIVAL' ? '已转为待到岗' : '已流转到人才库');
+});
+
+exports.handleArrivalResult = asyncHandler(async (req, res) => {
+  const data = await employeeService.handleArrivalResult(
+    req.companyId,
+    Number(req.params.id),
+    req.body,
+    req.operatorId,
+    req.user
+  );
+  success(res, data, '已标记未入职并流转到人才库');
+});
+
 exports.transferJob = asyncHandler(async (req, res) => {
   const data = await employeeService.transferJob(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
   success(res, data, '调岗成功');
@@ -86,6 +108,17 @@ exports.handleTransfer = asyncHandler(async (req, res) => {
 exports.onboard = asyncHandler(async (req, res) => {
   const data = await employeeService.onboardEmployee(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
   success(res, data, '入职确认成功');
+});
+
+exports.confirmOnboardingCompliance = asyncHandler(async (req, res) => {
+  const data = await employeeService.confirmOnboardingCompliance(
+    req.companyId,
+    Number(req.params.id),
+    req.body,
+    req.operatorId,
+    req.user
+  );
+  success(res, data, '合同和雇主险已确认办理');
 });
 
 exports.resign = asyncHandler(async (req, res) => {

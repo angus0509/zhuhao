@@ -126,6 +126,7 @@ REQUIRED=(
   "sql/migrate-onsite-contract-permission-20260811.mysql.sql"
   "sql/migrate-employee-address-interview-20260811.mysql.sql"
   "sql/migrate-simplified-resignation-20260811.mysql.sql"
+  "sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -240,8 +241,9 @@ M14="sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
 M15="sql/migrate-onsite-contract-permission-20260811.mysql.sql"
 M16="sql/migrate-employee-address-interview-20260811.mysql.sql"
 M17="sql/migrate-simplified-resignation-20260811.mysql.sql"
+M18="sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 
@@ -254,6 +256,15 @@ for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$
   # DELETE FROM / TRUNCATE 直接失败
   if echo "$content" | grep -qiE '\bDELETE\b.*\bFROM\b|\bTRUNCATE\b'; then
     echo "  失败: $(basename "$mp") 包含 DELETE/TRUNCATE" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M18：只合并开放待办，旧合同、雇主险记录和历史待办不得删除。
+C18="$(cat "$WORKDIR/$M18")"
+for required in "'ONBOARDING_COMPLIANCE'" "task_type IN ('CONTRACT','INSURANCE')" 'task_status=3' 'ON DUPLICATE KEY UPDATE'; do
+  if ! echo "$C18" | grep -q "$required"; then
+    echo "  失败: $M18 缺少驻厂简化流程迁移项 — $required" >&2
     VERIFY_PASS=false
   fi
 done
