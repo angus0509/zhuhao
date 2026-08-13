@@ -14,7 +14,7 @@ assert.match(js, /onsite_customer_id/, '工作台应读取驻厂页共享的当�
 assert.match(js, /employees\/onsite-overview/, '工作台客户统计必须复用已隔离的驻厂概览接口');
 assert.match(js, /customerChanged/, '工作台返回时应识别驻厂客户切换并跳过旧缓存');
 assert.match(onsiteJs, /markDirty\('home'\)/, '驻厂切换客户后必须标记工作台数据已变化');
-assert.match(wxml, /当前驻厂客户/, '工作台应明确显示当前驻厂客户');
+assert.match(wxml, /当前客户范围/, '工作台应明确显示当前驻厂客户范围');
 assert.match(wxml, /待到岗/, '工作台与驻厂页应统一使用“待到岗”');
 assert.match(onsiteWxml, /page-title[^>]*>驻厂管理</, '驻厂页面标题缺失');
 assert.match(onsiteWxss, /\.onsite-page \.page-title\s*\{[^}]*white-space:\s*nowrap/s, '驻厂管理四字必须保持单行对齐');

@@ -44,8 +44,8 @@ assert.match(
 );
 assert.match(
   service,
-  /handleArrivalResult[\s\S]*employee_status\)\s*!==\s*1[\s\S]*employee_status=5,lifecycle_status='NOT_JOINED',arrival_status='NO_SHOW'[\s\S]*sourceType: 'UNJOINED'/,
-  '待到岗未入职必须校验状态并流转人才库'
+  /handleArrivalResult[\s\S]*!\[1, 6\]\.includes\(Number\(employee\.employee_status\)\)[\s\S]*employee_status=5,lifecycle_status='NOT_JOINED',arrival_status='NO_SHOW'[\s\S]*sourceType: 'UNJOINED'/,
+  '待到岗与历史面试人员标记未入职时必须校验状态并流转人才库'
 );
 assert.ok(
   (service.match(/'员工生命周期'[\s\S]{0,220}'employee'[\s\S]{0,220}'update'/g) || []).length >= 2,

@@ -54,7 +54,10 @@ assertIncludes(employeeService, 'riskType: 7', '新员工雇主险提醒仍使�
 assertIncludes(employeeService, 'riskKey: `contract_missing:${employeeId}`', '入职提醒与扫描的合同风险键不一致');
 assertIncludes(employeeService, 'riskKey: `employer_insurance_missing:${employeeId}`', '入职提醒与扫描的雇主险风险键不一致');
 assertIncludes(employeeService, "taskType: 'ONBOARDING_COMPLIANCE'", '新员工入职未生成合同与雇主险合并待办');
-assertIncludes(employeeService, "if (employeeStatus === 2)", '直接入职未初始化合同和雇主险合规');
+const onboardBlock = employeeService.match(/async function onboardEmployee[\s\S]*?\n}\n\nasync function handleInterviewResult/)?.[0] || '';
+if (/createOnboardingCompliance|ONBOARDING_COMPLIANCE/.test(onboardBlock)) {
+  throw new Error('驻厂确认入职仍自动生成合同和雇主险合规待办');
+}
 assertIncludes(employeeService, "SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),handle_remark='劳动合同已签订'", '签订合同后未自动关闭合同风险');
 assertIncludes(employeeService, "SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),handle_remark='雇主险已增保'", '雇主险增保后未使用正确字段关闭风险');
 

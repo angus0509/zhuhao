@@ -141,6 +141,7 @@ run_migration "$STAGE_DIR/sql/migrate-talent-employee-flow-20260810.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-unified-risk-center-20260810.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onsite-fast-processing-20260813.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"

@@ -9,11 +9,9 @@ const assertIncludes = (source, expected, message) => {
 
 const homeJs = read('wechat-miniprogram/miniprogram/pages/home/index.js');
 const homeWxml = read('wechat-miniprogram/miniprogram/pages/home/index.wxml');
-assertIncludes(homeJs, 'onsiteOperationalTotal:', '小程序首页未单独统计驻厂现场待办');
-assertIncludes(homeJs, "!['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'].includes(item.taskType)", '驻厂待办未排除合规事项');
-assertIncludes(homeWxml, '<text>驻厂待处理</text>', '首页未将重复的未处理风险改为驻厂待处理');
-assertIncludes(homeWxml, 'data-mode="operations"', '驻厂待处理未进入非重复业务队列');
-if (homeWxml.includes('<text>未处理风险</text>')) throw new Error('首页仍显示与合规待办重复的未处理风险');
+assertIncludes(homeJs, "request({ url: '/employees/onsite-overview' })", '小程序首页未使用驻厂员工概览');
+assertIncludes(homeWxml, '<text>驻厂快速办理</text>', '首页未切换到驻厂快速办理');
+if (/驻厂待处理|合规待办|驻厂处理队列|\/work-tasks/.test(homeJs + homeWxml)) throw new Error('首页仍保留驻厂待办或合规队列');
 
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 assertIncludes(taskJs, "['risk', 'compliance', 'all', 'operations']", '待办页未支持驻厂业务专用模式');

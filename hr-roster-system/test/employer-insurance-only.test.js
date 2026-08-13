@@ -27,7 +27,7 @@ assert.ok(roster.includes('Number(row.employerInsuranceStatus) !== 1'), '花名�
 assert.ok(dashboard.includes('compliance.employerInsuranceRate'), '驾驶舱合规率未切换为雇主险');
 assert.ok(employeeService.includes("employerInsuranceAction === 'ADD' ? 1 : 2"), '后端未将增减动作映射为雇主险状态');
 assert.ok(employeeService.includes("'雇主险','employer_insurance'"), '雇主险增减未记录独立审计日志');
-assert.ok(employeeService.includes('const insuranceDone = Number(row.employer_insurance_status || 0) !== 1;'), '离职闭环仍依赖已取消的社保状态');
+assert.ok(employeeService.includes('const insuranceDone = true;'), '快速离职仍被雇主险台账状态阻塞');
 assert.ok(!riskService.includes('async function scanSocialSecurity('), '风险扫描仍生成社保异常');
 assert.ok(riskService.includes('r.risk_type IN (1,7)'), '风险中心未限制为合同和雇主险两项');
 assert.ok(riskService.includes('s.employer_end_date IS NOT NULL AND s.employer_end_date<:current'), '雇主险有效性判断未按实际失效日期处理');

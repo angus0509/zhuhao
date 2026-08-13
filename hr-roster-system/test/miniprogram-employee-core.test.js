@@ -27,19 +27,11 @@ if (fs.existsSync(miniAppPath)) {
 
   const homeJs = read('wechat-miniprogram/miniprogram/pages/home/index.js');
   const homeWxml = read('wechat-miniprogram/miniprogram/pages/home/index.wxml');
-  assertIncludes(homeJs, "request({ url: '/work-tasks?taskStatus=0' })", '小程序首页未加载待处理驻厂队列');
-  assertIncludes(homeJs, "request({ url: '/work-tasks?taskStatus=1' })", '小程序首页遗漏处理中的驻厂待办');
+  assertIncludes(homeJs, "request({ url: '/employees/onsite-overview' })", '小程序首页未加载驻厂员工概览');
   assertIncludes(homeJs, "wx.setStorageSync('onsite_employee_stage'", '小程序首页无法直达员工生命周期筛选');
-  assertIncludes(homeJs, "item.taskType === 'CONTRACT'", '小程序驻厂待办未识别合同签署任务');
-  assertIncludes(homeJs, "hasPermission(session.user, 'contract:manage')", '小程序工作台未校验合同登记权限');
-  assertIncludes(homeJs, '/pages/employees/compliance/index?id=', '小程序合同和雇主险待办不能直达合并办理页面');
-  assertIncludes(homeJs, "item.taskType === 'TRANSFER_ACCEPTANCE'", '小程序首页未识别转岗接收任务');
-  assertIncludes(homeJs, "wx.setStorageSync('onsite_transfer_task'", '小程序未向转岗处理页传递待办信息');
-  assertIncludes(homeJs, '/pages/employees/transfer-handle/index?changeId=', '小程序转岗待办不能直达处理页面');
-  assertIncludes(homeWxml, '驻厂人员管理', '小程序首页缺少驻厂人员管理主入口');
-  assertIncludes(homeWxml, '驻厂处理队列', '小程序首页缺少现场待办队列');
-  assertIncludes(homeWxml, 'bindtap="goRiskCenter"', '未处理风险和合规待办统计卡片无法点击');
-  assertIncludes(homeWxml, 'bindtap="goTodo"', '首页具体待办事项无法点击');
+  assertIncludes(homeWxml, '驻厂快速办理', '小程序首页缺少驻厂快速办理入口');
+  for (const label of ['录入新员工', '待到岗', '在职员工', '已离职']) assertIncludes(homeWxml, label, `首页缺少快速入口：${label}`);
+  if (/驻厂处理队列|合规待办|goRiskCenter|goTodo/.test(homeJs + homeWxml)) throw new Error('首页仍保留旧驻厂待办流程');
 
   const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
   const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
@@ -54,12 +46,11 @@ if (fs.existsSync(miniAppPath)) {
   assertIncludes(taskWxml, 'bindtap="handleItem"', '具体风险事项缺少直接处理按钮');
 
   const addJs = read('wechat-miniprogram/miniprogram/pages/employees/add/index.js');
-  assertIncludes(addJs, 'employeeStatusIndex: 0', '新增员工必须默认选中第一项面试状态');
+  assertIncludes(addJs, 'employeeStatus: 1', '新增员工必须固定进入待到岗');
   assertIncludes(addJs, 'workTypeIndex: 0', '新增员工工资类型应与网页端一致默认计时');
   assertIncludes(addJs, 'function sortPositionsForEmployeeForm', '新增员工岗位缺少普工优先排序逻辑');
   assertIncludes(addJs, "item.positionCode === 'OP' || item.positionName === '普工'", '新增员工未默认定位普工岗位');
-  assertIncludes(addJs, 'const EMPLOYEE_STATUS_VALUES = [6, 1, 2, 5];', '新增员工未将面试设为第一项');
-  assertIncludes(addJs, 'employeeStatus,', '新增员工未提交录入状态');
+  if (/EMPLOYEE_STATUS_VALUES|employeeStatusIndex/.test(addJs)) throw new Error('新增员工仍允许选择生命周期状态');
   if (addJs.includes("if (!f.channelSource.trim())")) throw new Error('招聘渠道仍被强制必填');
   assertIncludes(addJs, 'channelSource: f.channelSource.trim()', '新增员工未提交自由文本招聘渠道');
   assertIncludes(addJs, 'editingEmployeeId', '小程序新增员工页未支持编辑模式');
@@ -82,14 +73,14 @@ if (fs.existsSync(miniAppPath)) {
 
   const onboardJs = read('wechat-miniprogram/miniprogram/pages/employees/onboard/index.js');
   assertIncludes(onboardJs, "url: `/employees/${this.data.employeeId}/onboard`", '确认入职未调用员工入职接口');
-  assertIncludes(onboardJs, "markDirty('employees', 'home', 'tasks', 'advances')", '确认入职后未刷新合并合规待办');
+  assertIncludes(onboardJs, "markDirty('employees', 'home', 'tasks', 'advances')", '确认入职后未刷新人员数据');
 
   const listJs = read('wechat-miniprogram/miniprogram/pages/employees/index.js');
   assertIncludes(listJs, 'customerStats', '员工列表缺少客户分类统计');
   assertIncludes(listJs, 'insuranceComplete: employerCovered', '员工列表未按雇主险判断完成状态');
   if (listJs.includes('activeInsurance')) throw new Error('驻厂人员页仍保留已取消的独立雇主险筛选');
   assertIncludes(listJs, "activeStage: ''", '驻厂人员页应默认展示当前客户全部人员');
-  assertIncludes(listJs, "stage === 'interview'", '驻厂人员页缺少面试筛选');
+  assertIncludes(listJs, 'Number(item.employeeStatus) === 1 || Number(item.employeeStatus) === 6', '驻厂人员页未将历史面试并入待到岗');
   assertIncludes(listJs, "stage === 'left'", '驻厂人员页缺少已离职筛选');
   assertIncludes(listJs, 'goOnboard(event)', '驻厂人员列表缺少快捷确认入职');
   assertIncludes(listJs, 'goResign(event)', '驻厂人员列表缺少快捷离职管理');
@@ -109,15 +100,12 @@ if (fs.existsSync(miniAppPath)) {
   const detailWxml = read('wechat-miniprogram/miniprogram/pages/employees/detail/index.wxml');
   assertIncludes(detailJs, 'goEdit()', '小程序员工详情缺少编辑入口');
   assertIncludes(detailJs, "hasPermission(session.user, 'employee:update')", '员工详情缺少入职权限判断');
-  assertIncludes(detailJs, "hasPermission(session.user, 'contract:manage')", '员工详情缺少合同登记权限判断');
-  assertIncludes(detailJs, 'goContract()', '小程序员工详情缺少合同登记入口');
-  assertIncludes(detailWxml, '登记合同', '小程序员工详情未显示合同登记操作');
-  assertIncludes(detailJs, "hasPermission(session.user, 'social:manage')", '员工详情缺少保险权限判断');
+  if (/goContract|goInsurance|contract:manage|social:manage/.test(detailJs) || /登记合同|雇主险增减/.test(detailWxml)) throw new Error('员工详情仍保留驻厂合同或雇主险办理入口');
   assertIncludes(detailJs, "hasPermission(session.user, 'employee:resign')", '员工详情缺少离职权限判断');
   assertIncludes(detailJs, "hasPermission(session.user, 'employee:transfer')", '员工详情缺少转岗权限判断');
   assertIncludes(detailJs, 'onShow()', '员工详情返回后不会自动刷新');
   assertIncludes(detailJs, "basic.lifecycleStatus === 'OFFBOARDING'", '员工详情未识别离职交接状态');
-  assertIncludes(detailJs, "isOffboarding ? (employerInsuranceCovered ? 75 : 90)", '员工生命周期进度未按简化离职流程计算');
+  assertIncludes(detailJs, 'isOffboarding ? 80', '员工生命周期进度未按快速离职流程计算');
 
   const transferJs = read('wechat-miniprogram/miniprogram/pages/employees/transfer/index.js');
   assertIncludes(transferJs, 'newProjectId', '小程序转岗缺少目标项目');
@@ -157,8 +145,7 @@ if (fs.existsSync(miniAppPath)) {
   }
   assertIncludes(resignJs, 'progressMode', '小程序离职页面缺少历史交接兼容模式');
   assertIncludes(resignJs, '`/resignations/${this.data.resignationId}/progress`', '小程序无法更新离职交接进度');
-  assertIncludes(resignJs, 'employerInsuranceCovered', '离职进度未关联雇主险减保状态');
-  assertIncludes(resignJs, 'terminateEmployerInsurance', '离职页面未在同页提交雇主险减保');
+  if (/employerInsuranceCovered|terminateEmployerInsurance/.test(resignJs)) throw new Error('离职页面仍要求雇主险减保');
   assertIncludes(resignJs, '确认离职并归档', '离职页面缺少一次办结确认');
   if (/payroll:manage|settlementStatus|工资结算/.test(resignJs)) throw new Error('小程序离职仍包含薪资结算环节');
 }
@@ -172,12 +159,12 @@ assertIncludes(routeSource, "requirePermission('employee:resign')", '离职进�
 
 const serviceSource = read('src/services/employee.service.js');
 assertIncludes(serviceSource, 'async function onboardEmployee', '缺少确认入职业务逻辑');
-assertIncludes(serviceSource, 'contract_missing:', '确认入职未生成合同提醒');
-assertIncludes(serviceSource, 'employer_insurance_missing:', '确认入职未生成雇主险提醒');
-assertIncludes(serviceSource, 'riskType: 7', '确认入职雇主险提醒仍错误使用历史社保类型');
-assertIncludes(serviceSource, 'terminateEmployerInsuranceForResignation', '离职未同步办理雇主险减保');
+const onboardBlock = serviceSource.match(/async function onboardEmployee[\s\S]*?\n}\n\nasync function handleInterviewResult/)?.[0] || '';
+if (/createOnboardingCompliance|contract_missing:|employer_insurance_missing:/.test(onboardBlock)) throw new Error('确认入职仍生成合同或雇主险待办');
+const resignBlock = serviceSource.match(/async function resignEmployee[\s\S]*?\n}\n\nasync function updateResignationProgress/)?.[0] || '';
+if (resignBlock.includes('terminateEmployerInsuranceForResignation')) throw new Error('快速离职仍强制办理雇主险减保');
 assertIncludes(serviceSource, "['ADD', 'REMOVE'].includes(employerInsuranceAction)", '后端未限制雇主险增保减保动作');
-assertIncludes(serviceSource, 'const insuranceDone = Number(row.employer_insurance_status || 0) !== 1;', '历史社保状态仍会阻塞离职完成');
+assertIncludes(serviceSource, 'const insuranceDone = true;', '快速离职仍被雇主险台账状态阻塞');
 if (serviceSource.includes("taskType: 'PAYROLL_SETTLEMENT'")) throw new Error('离职仍创建工资结算待办');
 assertIncludes(serviceSource, "if (crossCustomer && !targetProjectId) throw createError('跨客户转岗必须选择目标项目')", '跨客户转岗仍可能丢失目标项目');
 assertIncludes(serviceSource, "if (!targetPosition) throw createError('目标岗位不存在或已停用')", '调岗未校验目标岗位归属与状态');

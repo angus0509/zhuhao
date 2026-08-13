@@ -12,12 +12,11 @@ if (!appJson.pages.includes('pages/tasks/index')) throw new Error('小程序未�
 
 const homeJs = read('wechat-miniprogram/miniprogram/pages/home/index.js');
 const homeWxml = read('wechat-miniprogram/miniprogram/pages/home/index.wxml');
-assertIncludes(homeJs, 'goRiskCenter(event)', '首页缺少风险与合规处理跳转');
-assertIncludes(homeJs, 'goTodo(event)', '首页缺少具体待办跳转');
-assertIncludes(homeJs, 'taskType=${encodeURIComponent(taskType)}', '生命周期待办未将具体任务类型传入处理页');
-assertIncludes(homeWxml, 'bindtap="goRiskCenter" data-mode="operations"', '驻厂待处理指标不可点击');
-assertIncludes(homeWxml, 'bindtap="goRiskCenter" data-mode="compliance"', '合规待办指标不可点击');
-assertIncludes(homeWxml, 'bindtap="goTodo"', '具体待办行不可点击');
+assertIncludes(homeJs, 'goEmployeeStage(event)', '首页缺少驻厂状态直达入口');
+assertIncludes(homeWxml, 'data-stage="pending"', '首页缺少待到岗入口');
+assertIncludes(homeWxml, 'data-stage="active"', '首页缺少在职员工入口');
+assertIncludes(homeWxml, 'data-stage="left"', '首页缺少已离职入口');
+if (/goRiskCenter|goTodo|驻厂待处理|合规待办|驻厂处理队列/.test(homeJs + homeWxml)) throw new Error('小程序工作台仍保留已取消的待办处理入口');
 
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');

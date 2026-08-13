@@ -42,12 +42,12 @@ assertIncludes(service, "sourceType: 'INTERVIEW'", '面试员工未同步人才�
 assertIncludes(service, "throw createError(`请先编辑并补齐入职资料", '确认入职前未校验资料完整性');
 assertIncludes(service, 'address: encrypt(body.address)', '地址未加密写入');
 
-assertIncludes(miniAddJs, 'const EMPLOYEE_STATUS_VALUES = [6, 1, 2, 5];', '小程序未将面试放在第一位');
-assertIncludes(miniAddJs, 'const isInterview = employeeStatus === 6;', '小程序未支持面试简登');
+assertIncludes(miniAddJs, 'employeeStatus: 1', '小程序新增员工未固定进入待到岗');
+if (/EMPLOYEE_STATUS_VALUES|isInterview/.test(miniAddJs)) throw new Error('小程序驻厂新增仍保留面试状态选择');
 assertIncludes(miniAddJs, 'address: f.address.trim() || null', '小程序未提交地址');
 assertIncludes(miniAddJs, "'form.address': result.address", '小程序身份证OCR未回填地址');
 if (/住宅/.test(html + miniAddWxml)) throw new Error('员工地址字段仍显示为“住宅”');
-assertIncludes(miniListJs, "stage === 'interview'", '小程序员工列表缺少面试筛选');
+assertIncludes(miniListJs, 'Number(item.employeeStatus) === 1 || Number(item.employeeStatus) === 6', '小程序未将历史面试人员并入待到岗');
 assertIncludes(miniOnboardJs, 'missingFieldsText', '小程序入职前未提示缺失资料');
 
 assertIncludes(schema, 'address VARCHAR(512)', '数据库缺少地址字段');

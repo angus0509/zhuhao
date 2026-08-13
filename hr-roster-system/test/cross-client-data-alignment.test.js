@@ -61,8 +61,8 @@ if (fs.existsSync(miniRoot)) {
   assertIncludes(miniAdvances, "url: '/advances?page=1&pageSize=200'", '小程序预支未使用共享预支接口');
   assertIncludes(miniAdvances, "recordMode: 'onsite'", '小程序预支未使用共享驻厂登记模式');
   assertIncludes(miniAdvances, "url: '/employees?page=1&pageSize=200'", '小程序预支员工选择未关联共享花名册');
-  assertIncludes(miniAdd, 'employeeStatusIndex: 0', '小程序新增员工未默认第一项状态');
-  assertIncludes(miniAdd, 'const EMPLOYEE_STATUS_VALUES = [6, 1, 2, 5];', '小程序未将面试放在状态第一位');
+  assertIncludes(miniAdd, 'employeeStatus: 1', '小程序新增员工未固定进入待到岗');
+  if (/EMPLOYEE_STATUS_VALUES|employeeStatusIndex/.test(miniAdd)) throw new Error('小程序新增员工仍允许选择生命周期状态');
   assertIncludes(miniAdd, 'workTypeIndex: 0', '小程序新增员工工资类型未与 Web 一致默认计时');
   assertIncludes(miniAdd, 'sortPositionsForEmployeeForm', '小程序岗位列表缺少普工优先排序保护');
   assertIncludes(miniAdd, 'positionIndex: defaultPositionIndex >= 0', '小程序新增员工未默认选择普工岗位');
@@ -70,9 +70,8 @@ if (fs.existsSync(miniRoot)) {
   assertIncludes(miniAdd, 'channelSource: f.channelSource.trim()', '小程序新增员工未提交招聘渠道');
   assertIncludes(miniInsurance, 'employerInsuranceAction', '小程序未提交雇主险增减动作');
 
-  for (const endpoint of ['/summary', '/operations/home', '/work-tasks']) {
-    assertIncludes(miniHome, endpoint, `小程序首页缺少共享业务接口：${endpoint}`);
-  }
+  assertIncludes(miniHome, '/employees/onsite-overview', '小程序首页未使用共享驻厂人员概览接口');
+  if (/\/work-tasks|\/operations\/home|\/summary/.test(miniHome)) throw new Error('小程序快速工作台仍加载非核心待办或运营数据');
   assertIncludes(miniPayroll, '/payroll/overview', '小程序工资页未使用共享工资接口');
   assertIncludes(miniAdd, '/bootstrap', '小程序员工录入未使用共享基础数据接口');
   assertIncludes(miniAdd, '/recruitment-channels', '小程序员工录入未使用共享招聘渠道接口');

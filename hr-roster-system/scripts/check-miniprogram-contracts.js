@@ -23,8 +23,9 @@ for (const page of appJson.pages || []) {
 
 const homeWxml = read('wechat-miniprogram/miniprogram/pages/home/index.wxml');
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
-assert(homeWxml.includes('bindtap="goRiskCenter"'), '首页未处理风险和合规待办无可操作入口');
-assert(homeWxml.includes('bindtap="goTodo"'), '首页具体待办无法点击');
+assert(homeWxml.includes('bindtap="goAddEmployee"'), '首页缺少录入新员工入口');
+assert(homeWxml.includes('data-stage="pending"') && homeWxml.includes('data-stage="active"') && homeWxml.includes('data-stage="left"'), '首页缺少驻厂快速流转入口');
+assert(!homeWxml.includes('驻厂处理队列') && !homeWxml.includes('合规待办'), '首页仍保留已取消的驻厂队列或合规待办');
 assert(taskJs.includes("request({ url: '/risk-alerts' })"), '风险处理页未关联风险数据');
 assert(taskJs.includes("request({ url: '/work-tasks?taskStatus=0' })"), '合规处理页未关联待处理工作任务');
 assert(taskJs.includes('/pages/employees/compliance/index?id='), '合同和雇主险待办无法直达合并办理');
@@ -45,9 +46,7 @@ const requiredRoutes = [
   ["get", '/employees/onsite-overview'],
   ["post", '/ocr/idcard'],
   ["post", '/employees/:id/onboard'],
-  ["put", '/employees/:id/interview-result'],
   ["put", '/employees/:id/arrival-result'],
-  ["post", '/employees/:id/onboarding-compliance/confirm'],
   ["post", '/employees/:id/resign'],
   ["put", '/employees/:id/social-security'],
   ["get", '/advances'],

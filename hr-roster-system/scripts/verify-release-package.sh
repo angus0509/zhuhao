@@ -127,6 +127,7 @@ REQUIRED=(
   "sql/migrate-employee-address-interview-20260811.mysql.sql"
   "sql/migrate-simplified-resignation-20260811.mysql.sql"
   "sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
+  "sql/migrate-onsite-fast-processing-20260813.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -242,8 +243,9 @@ M15="sql/migrate-onsite-contract-permission-20260811.mysql.sql"
 M16="sql/migrate-employee-address-interview-20260811.mysql.sql"
 M17="sql/migrate-simplified-resignation-20260811.mysql.sql"
 M18="sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
+M19="sql/migrate-onsite-fast-processing-20260813.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 
@@ -256,6 +258,15 @@ for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$
   # DELETE FROM / TRUNCATE 直接失败
   if echo "$content" | grep -qiE '\bDELETE\b.*\bFROM\b|\bTRUNCATE\b'; then
     echo "  失败: $(basename "$mp") 包含 DELETE/TRUNCATE" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M19：关闭驻厂旧合规入口并将历史面试人员并入待到岗，不删除历史数据。
+C19="$(cat "$WORKDIR/$M19")"
+for required in "task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE')" 'task_status IN (0,1)' 'employee_status=1' "lifecycle_status='PENDING_ARRIVAL'" 'employee_status=6'; do
+  if ! echo "$C19" | grep -q "$required"; then
+    echo "  失败: $M19 缺少驻厂快速办理迁移项 — $required" >&2
     VERIFY_PASS=false
   fi
 done

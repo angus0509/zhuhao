@@ -1368,8 +1368,8 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
   const handoverCount = ['badge_returned', 'tools_returned', 'dorm_cleared', 'attendance_confirmed']
     .filter(field => Number(row[field]) === 1).length;
   const handoverDone = true;
-  // 合规模块仅保留雇主险增减；历史社保状态不得继续阻塞员工离职闭环。
-  const insuranceDone = Number(row.employer_insurance_status || 0) !== 1;
+  // 驻厂一键离职不再要求同步办理雇主险减保；保险台账由独立业务入口维护。
+  const insuranceDone = true;
 
   await connection.execute(
     'UPDATE hr_resignation SET handover_status=:handoverStatus,updated_at=NOW() WHERE company_id=:companyId AND id=:resignationId',
@@ -1397,7 +1397,7 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
       { companyId, resignationId, operatorId }
     );
     await connection.execute(
-      "UPDATE hr_employee SET employee_status=3,lifecycle_status='LEFT',insurance_status='TERMINATED',updated_at=NOW() WHERE company_id=:companyId AND id=:employeeId",
+      "UPDATE hr_employee SET employee_status=3,lifecycle_status='LEFT',updated_at=NOW() WHERE company_id=:companyId AND id=:employeeId",
       { companyId, employeeId: row.employee_id }
     );
     await syncEmployeeToTalent(connection, {
@@ -1577,17 +1577,6 @@ async function createEmployee(companyId, body, operatorId = 0, user = null) {
         riskLevel: 1,
         assignedUserId: operatorId || null,
         deadline: body.plannedArrivalAt || `${body.hireDate} 18:00:00`
-      });
-    }
-
-    if (employeeStatus === 2) {
-      await createOnboardingCompliance(connection, {
-        companyId,
-        employeeId,
-        employeeName: body.name,
-        projectId: normalizedBody.projectId ? Number(normalizedBody.projectId) : null,
-        operatorId,
-        hireDate: body.hireDate
       });
     }
 
@@ -2099,14 +2088,6 @@ async function resignEmployee(companyId, employeeId, body, operatorId = 0, user 
     );
     if (currentJob && body.leaveDate < currentJob.hire_date) throw createError('离职日期不能早于入职日期');
 
-    await terminateEmployerInsuranceForResignation(connection, {
-      companyId,
-      employeeId,
-      leaveDate: body.leaveDate,
-      terminateEmployerInsurance: body.terminateEmployerInsurance,
-      operatorId
-    });
-
     const [resignationResult] = await connection.execute(
       `
       INSERT INTO hr_resignation
@@ -2185,13 +2166,6 @@ async function updateResignationProgress(companyId, resignationId, body, operato
       attendanceConfirmed: value('attendanceConfirmed', resignation.attendance_confirmed),
       riskRemark: body.riskRemark === undefined ? resignation.risk_remark : (body.riskRemark || null)
     };
-    await terminateEmployerInsuranceForResignation(connection, {
-      companyId,
-      employeeId: resignation.employee_id,
-      leaveDate: resignation.leave_date,
-      terminateEmployerInsurance: body.terminateEmployerInsurance,
-      operatorId
-    });
     await connection.execute(
       `UPDATE hr_resignation
        SET badge_returned=:badgeReturned,tools_returned=:toolsReturned,dorm_cleared=:dormCleared,
@@ -2231,7 +2205,7 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
     if (!employee) throw createError('员工不存在', 404);
     if (Number(employee.employee_status) === 3) throw createError('离职员工不能重新确认入职');
     if (Number(employee.employee_status) === 2) throw createError('员工已在职，无需重复确认');
-    if (Number(employee.employee_status) !== 1) throw createError('该员工已不在待到岗状态，请刷新列表');
+    if (![1, 6].includes(Number(employee.employee_status))) throw createError('该员工已不在待到岗状态，请刷新列表');
     const missingFields = [];
     if (!decrypt(employee.id_card_no)) missingFields.push('身份证号');
     if (!employee.phone) missingFields.push('手机号');
@@ -2248,7 +2222,7 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
 
     await connection.execute(
       `UPDATE hr_employee
-       SET employee_status=2,lifecycle_status='ONBOARDING',arrival_status='CONFIRMED',source_locked=1,
+       SET employee_status=2,lifecycle_status='ACTIVE',arrival_status='CONFIRMED',source_locked=1,
            source_confirmed_at=NOW(),risk_level=3,updated_at=NOW()
        WHERE company_id=:companyId AND id=:employeeId`,
       { companyId, employeeId }
@@ -2257,15 +2231,6 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
       'UPDATE hr_employee_job SET hire_date=:hireDate, remark=:remark, updated_at=NOW() WHERE id=:jobId',
       { hireDate, remark: body.remark || null, jobId: employee.job_id }
     );
-
-    await createOnboardingCompliance(connection, {
-      companyId,
-      employeeId,
-      employeeName: employee.name,
-      projectId: employee.project_id || null,
-      operatorId,
-      hireDate
-    });
 
     // 入职状态与到岗待办必须在同一事务完成，避免页面仍显示“确认入职”。
     await connection.execute(
@@ -2377,7 +2342,7 @@ async function handleArrivalResult(companyId, employeeId, body, operatorId = 0, 
       { companyId, employeeId }
     );
     if (!employee) throw createError('员工不存在', 404);
-    if (Number(employee.employee_status) !== 1) throw createError('该员工已不在待到岗状态，请刷新列表');
+    if (![1, 6].includes(Number(employee.employee_status))) throw createError('该员工已不在待到岗状态，请刷新列表');
     const result = String(body.result || '').trim().toUpperCase();
     if (result !== 'UNJOINED') throw createError('到岗结果不正确');
 
@@ -2395,7 +2360,7 @@ async function handleArrivalResult(companyId, employeeId, body, operatorId = 0, 
         companyId,
         operatorId: operatorId || null,
         employeeId,
-        beforeData: JSON.stringify({ employeeStatus: 1 }),
+        beforeData: JSON.stringify({ employeeStatus: Number(employee.employee_status) }),
         afterData: JSON.stringify({ result, remark: body.remark || '' })
       }
     );

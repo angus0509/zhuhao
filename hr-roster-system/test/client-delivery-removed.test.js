@@ -27,7 +27,7 @@ if (fs.existsSync(miniHomePath)) {
   const miniHome = fs.readFileSync(miniHomePath, 'utf8');
   assert(!miniHome.includes('待交付工单'), '小程序首页不应继续展示待交付工单');
   assert(!miniHome.includes('处理中工单'), '小程序首页不应继续展示处理中工单');
-  assert(miniHome.includes('运营概览'), '小程序首页应保留不含工单的运营概览');
+  assert(miniHome.includes('驻厂快速办理'), '小程序首页应保留不含工单的驻厂快速办理入口');
 }
 
 console.log('client-delivery-removed-tests-ok');
