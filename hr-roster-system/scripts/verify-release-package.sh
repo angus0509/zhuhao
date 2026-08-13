@@ -264,7 +264,7 @@ done
 
 # M19：关闭驻厂旧合规入口并将历史面试人员并入待到岗，不删除历史数据。
 C19="$(cat "$WORKDIR/$M19")"
-for required in "task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE')" 'task_status IN (0,1)' 'employee_status=1' "lifecycle_status='PENDING_ARRIVAL'" 'employee_status=6'; do
+for required in "task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE')" "source_type='LEGACY_CLOSED'" 'source_id=t.id' 'task_status IN (0,1)' 'employee_status=1' "lifecycle_status='PENDING_ARRIVAL'" 'employee_status=6'; do
   if ! echo "$C19" | grep -q "$required"; then
     echo "  失败: $M19 缺少驻厂快速办理迁移项 — $required" >&2
     VERIFY_PASS=false

@@ -65,5 +65,6 @@ assert.doesNotMatch(completionBlock, /insurance_status='TERMINATED'/, '快速离
 assert.match(service, /handleArrivalResult[\s\S]*!\[1, 6\]\.includes/, '历史面试人员无法按待到岗标记未入职');
 assert.match(migration, /UPDATE hr_work_task[\s\S]*task_type IN \('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE'\)[\s\S]*task_status IN \(0,1\)/, '迁移未关闭全部开放旧合规待办');
 assert.doesNotMatch(migration, /completed\.company_id IS NULL/, '迁移会因历史完成记录而漏掉仍开放的重复待办');
+assert.match(migration, /source_type='LEGACY_CLOSED'[\s\S]*source_id=t\.id[\s\S]*task_status=3/, '迁移未通过独立归档来源避免历史待办唯一键冲突');
 
 console.log('miniprogram-onsite-fast-processing-tests-ok');
