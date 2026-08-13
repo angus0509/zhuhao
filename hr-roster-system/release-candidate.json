@@ -9,12 +9,12 @@
   },
   "miniprogram": {
     "project": "/Users/zhuhao/Documents/moluo/hr-roster-system/wechat-miniprogram",
-    "version": "1.1.6",
+    "version": "1.1.7",
     "appid": "wxc6bb140d2393e557",
-    "description": "统一苹果安卓版本更新机制，增加实际运行版本和环境显示",
-    "verificationStatus": "uploaded-trial-pending-uat",
-    "uploadedAt": "2026-08-12T17:34:50.165Z",
-    "packageSizeBytes": 251175,
+    "description": "简化驻厂面试入职离职流程，合同与雇主险合并办理并同步网页端",
+    "verificationStatus": "verified-pending-upload",
+    "uploadedAt": null,
+    "packageSizeBytes": null,
     "reviewStatus": "not-submitted"
   },
   "deploymentOrder": [
