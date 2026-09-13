@@ -5,6 +5,7 @@ const { maskPhone } = require('../utils/mask');
 const { customerScope, employeeScope, projectScope } = require('../utils/data-scope');
 const operationsService = require('./operations.service');
 const { assertEmployeeScope } = require('./employee.service');
+const { dictionaries } = require('../utils/dictionaries');
 
 const serviceTypeNames = { 1: '劳务派遣', 2: '岗位外包', 3: '灵活用工', 4: 'RPO招聘' };
 const employmentTypeNames = { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' };
@@ -349,17 +350,40 @@ function auditLogScope(user, params) {
   )`;
 }
 
+const AUDIT_DETAIL_NOISE_KEYS = new Set(['fileSha256', 'userAgent', 'ipAddress', 'deviceInfo', 'signatureSha256']);
+
+function formatAuditDetail(afterData) {
+  if (!afterData) return '';
+  let data = afterData;
+  if (typeof data === 'string') {
+    try { data = JSON.parse(data); } catch (_error) { return afterData; }
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => (item && typeof item === 'object') ? JSON.stringify(item) : String(item)).join('；');
+  }
+  if (data === null || typeof data !== 'object') return String(data);
+  return Object.entries(data)
+    .filter(([key, value]) => value != null && value !== '' && !AUDIT_DETAIL_NOISE_KEYS.has(key))
+    .map(([key, value]) => `${key}=${(value && typeof value === 'object') ? JSON.stringify(value) : String(value)}`)
+    .join('；');
+}
+
 async function auditLogs(companyId, user) {
   const params = { companyId };
   const scope = auditLogScope(user, params);
   const rows = await db.query(
-    `SELECT id, operator_name operatorName, module_name moduleName, action_type actionType,
-      biz_id bizId, after_data afterData, created_at createdAt
-     FROM hr_operation_log l WHERE l.company_id=:companyId${scope} ORDER BY l.id DESC LIMIT 200`, params
+    `SELECT l.id, l.module_name moduleName, l.action_type actionType, l.biz_id bizId,
+      l.after_data afterData, l.created_at createdAt,
+      COALESCE(NULLIF(u.real_name,''), u.username, '系统管理员') operatorName
+     FROM hr_operation_log l
+     LEFT JOIN sys_user u ON u.id=l.operator_id
+     WHERE l.company_id=:companyId${scope} ORDER BY l.id DESC LIMIT 200`, params
   );
   return rows.map(row => ({
-    ...row, operatorName: row.operatorName || '系统管理员',
-    detail: row.afterData ? (typeof row.afterData === 'string' ? row.afterData : JSON.stringify(row.afterData)) : ''
+    ...row,
+    operatorName: row.operatorName || '系统管理员',
+    actionName: dictionaries.actionType[row.actionType] || row.actionType,
+    detail: formatAuditDetail(row.afterData)
   }));
 }
 

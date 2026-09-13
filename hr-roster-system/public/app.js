@@ -1044,16 +1044,6 @@ function renderCertificates(rows) {
     .join('');
 }
 
-const actionNames = {
-  create: '新增',
-  update: '编辑',
-  transfer: '调岗',
-  resign: '离职',
-  upsert: '维护',
-  handle: '处理',
-  change_password: '修改密码'
-};
-
 async function loadAuditLogs() {
   setPanelLoading('#auditTableBody');
   try {
@@ -1067,11 +1057,11 @@ async function loadAuditLogs() {
     .map(row => `
       <tr>
         <td>${new Date(row.createdAt).toLocaleString('zh-CN', { hour12: false })}</td>
-        <td>${row.operatorName}</td>
-        <td>${row.moduleName}</td>
-        <td>${badge(actionNames[row.actionType] || row.actionType, 'blue')}</td>
+        <td>${escapeHtml(row.operatorName)}</td>
+        <td>${escapeHtml(row.moduleName)}</td>
+        <td>${badge(row.actionName || row.actionType, 'blue')}</td>
         <td>${row.bizId || '-'}</td>
-        <td>${row.detail || '-'}</td>
+        <td>${escapeHtml(row.detail || '-')}</td>
       </tr>
     `)
     .join('');

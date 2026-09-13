@@ -1,6 +1,6 @@
 const express = require('express');
 const controller = require('../controllers/portal.controller');
-const { requireAuth, requirePermission } = require('../middlewares/auth.middleware');
+const { requireAuth, requirePermission, requireCompanyAdmin } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,7 +13,7 @@ router.put('/client-service-requests/:id/status', requirePermission('customer:ma
 router.get('/talents', requirePermission('employee:view'), controller.talents);
 router.post('/talents', requirePermission('employee:create'), controller.createTalent);
 router.get('/employment-records', requirePermission('employee:view'), controller.employmentRecords);
-router.get('/audit-logs', requirePermission('audit:view'), controller.auditLogs);
+router.get('/audit-logs', requireCompanyAdmin, controller.auditLogs);
 router.get('/analytics/dashboard', requirePermission('employee:view'), controller.dashboard);
 
 module.exports = router;
