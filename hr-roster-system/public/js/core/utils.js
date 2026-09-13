@@ -13,7 +13,12 @@ function toast(message, type = '') {
   el.textContent = message;
   el.className = 'toast show';
   if (type) el.classList.add(type);
+  // 模态框(dialog)通过 showModal 位于浏览器顶层(top layer)，普通 z-index 无法覆盖，
+  // 需将 toast 挂载到当前打开的模态框内，确保提示显示在台前。
+  const openDialog = document.querySelector('dialog[open]');
+  (openDialog || document.body).appendChild(el);
   window.clearTimeout(toast.timer);
+  if (type === 'loading') return;
   toast.timer = window.setTimeout(() => {
     el.classList.remove('show');
   }, type === 'error' ? 4000 : 2200);

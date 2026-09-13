@@ -2083,22 +2083,31 @@ function renderPayrollBatchEmployeeRows() {
 async function exportPayrollBatchDetail(type) {
   const batch = state.payrollBatchDetail?.batch;
   if (!batch?.id) throw new Error('工资批次信息无效，请重新打开详情');
+  const suffix = type === 'receipt' ? '签收记录' : '发放明细';
   const ext = type === 'receipt' ? 'pdf' : 'csv';
   const requestSessionVersion = state.sessionVersion;
-  const response = await fetch(`/api/payroll/batches/${batch.id}/${type}-export.${ext}`, {
-    credentials: 'same-origin',
-    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
-  });
-  assertCurrentSession(requestSessionVersion);
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.message || '工资条记录导出失败');
+  const exportButtons = document.querySelectorAll('[data-payroll-detail-export]');
+  toast(`正在导出${suffix}，请稍等…`, 'loading');
+  exportButtons.forEach(button => { button.disabled = true; });
+  try {
+    const response = await fetch(`/api/payroll/batches/${batch.id}/${type}-export.${ext}`, {
+      credentials: 'same-origin',
+      headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
+    });
+    assertCurrentSession(requestSessionVersion);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.message || '工资条记录导出失败');
+    }
+    const blob = await response.blob();
+    assertCurrentSession(requestSessionVersion);
+    triggerBlobDownload(blob, `${batch.salaryMonth || '工资条'}-${suffix}.${ext}`);
+    toast(`${suffix}已导出`, 'success');
+  } catch (error) {
+    toast(error.message || `导出${suffix}失败`, 'error');
+  } finally {
+    exportButtons.forEach(button => { button.disabled = false; });
   }
-  const suffix = type === 'receipt' ? '签收记录' : '发放明细';
-  const blob = await response.blob();
-  assertCurrentSession(requestSessionVersion);
-  triggerBlobDownload(blob, `${batch.salaryMonth || '工资条'}-${suffix}.${ext}`);
-  toast(`${suffix}已导出`, 'success');
 }
 
 async function openPayrollBatchDetail(batchId, page = 1) {
