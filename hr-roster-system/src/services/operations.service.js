@@ -1240,7 +1240,8 @@ async function exportPayrollReceiptPdf(companyId, batchId, user, audit = {}) {
   const fontBytes = await loadPdfFontBytes();
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
-  const font = await pdfDoc.embedFont(fontBytes, { subset: true });
+  // 嵌入完整字体而非子集：fontkit 子集化会损坏部分 CJK 字形数据导致乱码。
+  const font = await pdfDoc.embedFont(fontBytes, { subset: false });
 
   const normalized = [];
   let signedCount = 0;
