@@ -8,11 +8,7 @@ function normalizeChannel(body = {}) {
   const channelName = String(body.channelName || '').trim();
   if (!channelName) throw createError('招聘渠道名称不能为空');
   if (channelName.length > 100) throw createError('招聘渠道名称最多100个字符');
-  const channelType = CHANNEL_TYPES[Number(body.channelType)] ? Number(body.channelType) : 9;
-  const recruiterId = body.recruiterId ? Number(body.recruiterId) : null;
-  const supplierId = body.supplierId ? Number(body.supplierId) : null;
-  if (recruiterId && supplierId) throw createError('一个招聘渠道不能同时关联招聘人和供应商');
-  return { channelName, channelType, recruiterId, supplierId, status: Number(body.status) === 0 ? 0 : 1, remark: String(body.remark || '').trim() || null };
+  return { channelName, status: Number(body.status) === 0 ? 0 : 1, remark: String(body.remark || '').trim() || null };
 }
 
 async function listChannels(companyId, user = null) {
@@ -85,7 +81,7 @@ async function createChannel(companyId, body, operatorId) {
     const result = await db.query(
       `INSERT INTO hr_recruitment_channel
        (company_id,channel_name,channel_type,recruiter_id,supplier_id,status,remark,created_by)
-       VALUES (:companyId,:channelName,:channelType,:recruiterId,:supplierId,:status,:remark,:operatorId)`,
+       VALUES (:companyId,:channelName,9,NULL,NULL,:status,:remark,:operatorId)`,
       { companyId, operatorId, ...item }
     );
     return { channelId: result.insertId };
@@ -98,8 +94,8 @@ async function createChannel(companyId, body, operatorId) {
 async function updateChannel(companyId, channelId, body) {
   const item = normalizeChannel(body);
   const result = await db.query(
-    `UPDATE hr_recruitment_channel SET channel_name=:channelName,channel_type=:channelType,
-       recruiter_id=:recruiterId,supplier_id=:supplierId,status=:status,remark=:remark,updated_at=NOW()
+    `UPDATE hr_recruitment_channel SET channel_name=:channelName,
+       status=:status,remark=:remark,updated_at=NOW()
      WHERE company_id=:companyId AND id=:channelId`,
     { companyId, channelId, ...item }
   );

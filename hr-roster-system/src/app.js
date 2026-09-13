@@ -7,6 +7,9 @@ const apiRoutes = require('./routes');
 const { attachContext } = require('./middlewares/context.middleware');
 const { fail, logApiError } = require('./utils/response');
 const { globalLimiter } = require('./middlewares/rate-limit.middleware');
+const { renderPayslipLandingPage } = require('./services/wechat-landing.service');
+
+const exceljsBrowserPath = require.resolve('exceljs/dist/exceljs.min.js');
 
 env.assertProductionSecurityConfig();
 
@@ -30,6 +33,9 @@ app.use((_req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (env.nodeEnv === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  }
   next();
 });
 
@@ -59,23 +65,10 @@ app.get('/api/health', async (_req, res) => {
   try {
     const database = await db.first('SELECT 1 AS ok');
     if (Number(database?.ok) !== 1) throw new Error('database_unavailable');
-    res.json({
-      code: 0,
-      message: 'ok',
-      data: {
-        service: 'hr-roster-system',
-        mode: 'express-mysql',
-        database: 'connected',
-        uptimeSeconds: Math.floor(process.uptime())
-      }
-    });
+    res.status(200).end();
   } catch (_error) {
-    // 健康检查不返回数据库地址、账号或错误原文，避免向公网泄露基础设施信息。
-    res.status(503).json({
-      code: 503,
-      message: 'service unavailable',
-      data: { service: 'hr-roster-system', database: 'unavailable' }
-    });
+    // 公网健康检查只用状态码表达结果，不暴露服务、技术栈或数据库细节。
+    res.status(503).end();
   }
 });
 
@@ -84,6 +77,16 @@ app.use('/api', apiRoutes);
 // API 未匹配时必须返回 JSON，避免前端把 SPA 首页 HTML 当成 JSON 解析。
 app.use('/api', (req, res) => {
   res.status(404).json({ code: 404, message: `接口不存在：${req.method} ${req.path}`, data: null });
+});
+
+app.get('/vendor/exceljs.min.js', (_req, res) => {
+  res.type('application/javascript');
+  res.sendFile(exceljsBrowserPath);
+});
+
+app.get('/wx/payslip', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.type('html').send(renderPayslipLandingPage(env.wechatMini.urlScheme));
 });
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -100,7 +103,7 @@ app.use((error, req, res, next) => {
 
 if (require.main === module) {
   app.listen(env.port, () => {
-    console.log(`优益数字化管理系统生产服务已启动：http://localhost:${env.port}`);
+    console.log(`优企云数字化管理系统生产服务已启动：http://localhost:${env.port}`);
     if (env.nodeEnv === 'production') require('./scheduler').startScheduler();
   });
 }

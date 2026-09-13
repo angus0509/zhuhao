@@ -21,6 +21,7 @@ const paths = [
   '/customers?page=1&pageSize=2',
   '/projects?page=1&pageSize=2',
   '/factory-staff?page=1&pageSize=2'
+  ,'/advances?page=1&pageSize=2&month=2026-08'
 ];
 
 async function request(path) {

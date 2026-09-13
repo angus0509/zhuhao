@@ -14,7 +14,7 @@ function assert(condition, message) {
 
 // 校验 app.json 声明的每个页面都具备微信小程序要求的四类文件。
 const appJson = JSON.parse(read('wechat-miniprogram/miniprogram/app.json'));
-assert(appJson.pages.includes('pages/tasks/index'), '小程序未注册风险与合规处理页');
+assert(appJson.pages.includes('pages/tasks/index'), '小程序未注册驻厂待办页');
 for (const page of appJson.pages || []) {
   for (const extension of ['js', 'json', 'wxml', 'wxss']) {
     assert(fs.existsSync(path.join(miniRoot, `${page}.${extension}`)), `页面文件缺失：${page}.${extension}`);
@@ -26,9 +26,9 @@ const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 assert(homeWxml.includes('bindtap="goAddEmployee"'), '首页缺少录入新员工入口');
 assert(homeWxml.includes('data-stage="pending"') && homeWxml.includes('data-stage="active"') && homeWxml.includes('data-stage="left"'), '首页缺少驻厂快速流转入口');
 assert(!homeWxml.includes('驻厂处理队列') && !homeWxml.includes('合规待办'), '首页仍保留已取消的驻厂队列或合规待办');
-assert(taskJs.includes("request({ url: '/risk-alerts' })"), '风险处理页未关联风险数据');
-assert(taskJs.includes("request({ url: '/work-tasks?taskStatus=0' })"), '合规处理页未关联待处理工作任务');
-assert(taskJs.includes('/pages/employees/compliance/index?id='), '合同和雇主险待办无法直达合并办理');
+assert(!taskJs.includes("request({ url: '/risk-alerts' })"), '驻厂待办仍请求已下线的风险数据');
+assert(taskJs.includes("request({ url: '/work-tasks?taskStatus=0' })"), '驻厂待办未关联待处理工作任务');
+assert(!/CONTRACT|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs), '驻厂待办仍保留已取消的合规办理入口');
 
 const routeSources = [
   read('src/routes/auth.routes.js'),
@@ -70,8 +70,10 @@ function listFilesRecursive(directory) {
   });
 }
 
+const registeredPageDirectories = new Set((appJson.pages || []).map(page => path.join(miniRoot, page)));
 const miniScripts = listFilesRecursive(path.join(miniRoot, 'pages'))
   .filter(filePath => filePath.endsWith('.js'))
+  .filter(filePath => [...registeredPageDirectories].some(directory => filePath.startsWith(`${directory}.`) || filePath.startsWith(`${directory}${path.sep}`)))
   .map(filePath => fs.readFileSync(filePath, 'utf8'))
   .join('\n');
 

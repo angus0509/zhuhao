@@ -1,5 +1,5 @@
 /*
- * 优益数字化管理系统 · 工业数字驾驶舱 2.0
+ * 优企云数字化管理系统 · 工业数字驾驶舱 2.0
  * 统一电脑端与手机 Web：克制的科技感、清晰的业务层级、高密度但不拥挤。
  */
 
@@ -80,7 +80,7 @@ button, input, select, textarea { font-family: var(--youyi-font); }
   letter-spacing: .18em;
 }
 
-.login-panel h1 { color: #0b2744; font: 800 30px/1.2 var(--youyi-font); letter-spacing: -.04em; }
+.login-panel h1 { color: #0b2744; font: 700 30px/1.2 var(--youyi-font); letter-spacing: -.04em; }
 .login-brand .brand-mark { color: #eaffff; background: linear-gradient(145deg, #0d3959, #18aebf); border-color: #3fd1dd; }
 .login-panel input { min-height: 48px; border-radius: 10px; background: #f7fafc; }
 
@@ -102,8 +102,8 @@ button, input, select, textarea { font-family: var(--youyi-font); }
 
 .sidebar .brand-block { padding: 4px 4px 18px; border-bottom: 1px solid rgba(135, 199, 219, .12); }
 .brand-mark { width: 48px; height: 48px; border-radius: 15px; }
-.brand-block strong { font-size: 15px; letter-spacing: 0; }
-.brand-block span { margin-top: 3px; font-size: 10px; letter-spacing: .08em; }
+.brand-block strong { font-size: 14px; letter-spacing: 0; }
+.brand-block span { margin-top: 3px; font-size: 11px; letter-spacing: .08em; }
 .nav-stack { gap: 2px; margin-top: 15px; }
 .nav-item {
   min-height: 48px;
@@ -111,8 +111,8 @@ button, input, select, textarea { font-family: var(--youyi-font); }
   border: 1px solid transparent;
   border-radius: 10px;
 }
-.nav-item span { font-size: 9px; letter-spacing: .12em; }
-.nav-item strong { font-size: 14px; font-weight: 650; }
+.nav-item span { font-size: 11px; letter-spacing: .12em; }
+.nav-item strong { font-size: 14px; font-weight: 600; }
 .nav-item::before { top: 10px; bottom: 10px; width: 3px; }
 .nav-item::after {
   content: "";
@@ -135,14 +135,14 @@ button, input, select, textarea { font-family: var(--youyi-font); }
 
 .workspace { padding: 18px 22px 34px; }
 .topbar { min-height: 60px; align-items: center; margin-bottom: 12px; }
-.topbar h1 { font: 800 clamp(25px, 2.4vw, 34px)/1.08 var(--youyi-font); letter-spacing: -.045em; }
-.eyebrow { color: #087f99; font-size: 10px; letter-spacing: .16em; }
+.topbar h1 { font: 700 clamp(25px, 2.4vw, 34px)/1.08 var(--youyi-font); letter-spacing: -.045em; }
+.eyebrow { color: #087f99; font-size: 11px; letter-spacing: .16em; }
 .topbar-actions { justify-content: flex-end; }
 
 .user-pill, .primary-button, .secondary-button, .danger-button, .export-link {
   min-height: 38px;
   border-radius: 10px;
-  font-weight: 650;
+  font-weight: 600;
 }
 .primary-button { background: linear-gradient(135deg, #107f9a, #18b5bf); border-color: #159aaa; box-shadow: 0 8px 20px rgba(16, 143, 158, .17); }
 .secondary-button, .export-link { background: rgba(255,255,255,.86); border-color: #ccdbe8; }
@@ -163,7 +163,7 @@ button, input, select, textarea { font-family: var(--youyi-font); }
 .metric-cell::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: #5ba1e9; }
 .metric-cell.danger::before { background: var(--youyi-danger); }
 .metric-cell span { color: var(--youyi-muted); font-size: 11px; }
-.metric-cell strong { margin-top: 9px; color: #13385b; font: 800 27px/1 "DIN Alternate", var(--youyi-font); letter-spacing: -.03em; }
+.metric-cell strong { margin-top: 9px; color: #13385b; font: 700 27px/1 "DIN Alternate", var(--youyi-font); letter-spacing: -.03em; }
 
 .office-view { grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; }
 .office-main, .office-rail { gap: 14px; }
@@ -181,12 +181,12 @@ button, input, select, textarea { font-family: var(--youyi-font); }
   background-image: linear-gradient(rgba(126,220,232,.055) 1px, transparent 1px), linear-gradient(90deg, rgba(126,220,232,.055) 1px, transparent 1px);
   background-size: 24px 24px;
 }
-.office-welcome h2, .module-hero h2, .dashboard-masthead h2 { font: 800 clamp(25px,3vw,35px)/1.12 var(--youyi-font); letter-spacing: -.04em; }
+.office-welcome h2, .module-hero h2, .dashboard-masthead h2 { font: 700 clamp(25px,3vw,35px)/1.12 var(--youyi-font); letter-spacing: -.04em; }
 .office-date { padding-left: 22px; border-left: 1px solid rgba(166, 231, 239, .2); }
 
 .office-statline { border-radius: 12px; border-color: var(--youyi-line); background: var(--youyi-line); }
 .office-statline article { min-height: 80px; background: rgba(255,255,255,.96); }
-.office-statline strong { color: #13385b; font: 800 24px/1 "DIN Alternate", var(--youyi-font); }
+.office-statline strong { color: #13385b; font: 700 24px/1 "DIN Alternate", var(--youyi-font); }
 
 .operations-pulse, .office-section, .rail-panel, .business-panel, .chart-panel, .main-panel, .detail-panel, .risk-panel, .role-card {
   border-color: var(--youyi-line);
@@ -196,7 +196,7 @@ button, input, select, textarea { font-family: var(--youyi-font); }
 }
 .operations-pulse { padding: 18px; }
 .pulse-heading { padding-bottom: 13px; margin-bottom: 14px; }
-.pulse-heading-main h3, .section-title h3, .rail-head h3, .panel-head h2, .panel-head h3 { color: #112e4a; font-family: var(--youyi-font); font-weight: 800; }
+.pulse-heading-main h3, .section-title h3, .rail-head h3, .panel-head h2, .panel-head h3 { color: #112e4a; font-family: var(--youyi-font); font-weight: 700; }
 .pulse-grid { gap: 10px; }
 .pulse-card {
   min-height: 248px;
@@ -223,8 +223,8 @@ button, input, select, textarea { font-family: var(--youyi-font); }
 }
 .office-action:hover { transform: translateY(-2px); }
 .office-icon { width: 40px; height: 40px; border-radius: 12px; font-family: var(--youyi-font); }
-.office-action strong { font-size: 13px; }
-.office-action small { font-size: 9px; }
+.office-action strong { font-size: 12px; }
+.office-action small { font-size: 11px; }
 .todo-item { border-radius: 10px; background: #fbfdff; }
 
 /* 表格、筛选与弹窗 */
@@ -260,8 +260,8 @@ input:focus, select:focus, textarea:focus { border-color: #36a1c3; box-shadow: 0
   }
   .sidebar .brand-block { padding: 0; border: 0; }
   .sidebar .brand-mark { width: 42px; height: 42px; border-radius: 13px; }
-  .sidebar .brand-block strong { font-size: 15px; }
-  .sidebar .brand-block span { font-size: 9px; }
+  .sidebar .brand-block strong { font-size: 14px; }
+  .sidebar .brand-block span { font-size: 11px; }
   .sidebar-footer, .nav-stack { display: none; }
 
   .workspace { padding: 13px 13px 18px; }
@@ -332,8 +332,8 @@ input:focus, select:focus, textarea:focus { border-color: #36a1c3; box-shadow: 0
     backdrop-filter: blur(18px);
   }
   .mobile-tabbar button { min-height: 50px; color: #8ba4b9; border-radius: 14px; }
-  .mobile-tabbar button span { font-size: 17px; }
-  .mobile-tabbar button strong { font-size: 10px; font-weight: 700; }
+  .mobile-tabbar button span { font-size: 16px; }
+  .mobile-tabbar button strong { font-size: 11px; font-weight: 700; }
   .mobile-tabbar button.active { color: #ddffff; background: linear-gradient(145deg, rgba(25,129,168,.72), rgba(16,104,132,.34)); box-shadow: inset 0 0 0 1px rgba(86,221,224,.2); }
 
   #mobileEmployeeModal .modal-panel { background: #f4f8fb; }

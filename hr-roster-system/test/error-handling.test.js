@@ -26,6 +26,16 @@ async function main() {
   fail(validationResponse, createError('姓名不能为空', 400));
   assert.strictEqual(validationResponse.statusCode, 400);
   assert.strictEqual(validationResponse.payload.message, '姓名不能为空');
+  assert.strictEqual(validationResponse.payload.businessCode, undefined);
+
+  const businessResponse = responseRecorder();
+  fail(
+    businessResponse,
+    createError('请完成微信手机号授权', 400, 'EMPLOYEE_PHONE_AUTH_REQUIRED')
+  );
+  assert.strictEqual(businessResponse.statusCode, 400);
+  assert.strictEqual(businessResponse.payload.code, 400, '现有数字 code 必须保持兼容');
+  assert.strictEqual(businessResponse.payload.businessCode, 'EMPLOYEE_PHONE_AUTH_REQUIRED');
 
   const expectedError = new Error('database failed');
   let forwardedError = null;

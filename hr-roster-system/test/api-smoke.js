@@ -4,6 +4,7 @@ const db = require('../src/db');
 const baseUrl = process.env.SMOKE_BASE_URL || 'http://127.0.0.1:3100/api';
 const userId = Number(process.env.SMOKE_USER_ID || 1);
 const companyId = Number(process.env.SMOKE_COMPANY_ID || 1);
+const employeeSmokeUserId = Number(process.env.EMPLOYEE_SMOKE_USER_ID || 0);
 let token = '';
 const paths = [
   '/auth/me',
@@ -20,8 +21,9 @@ const paths = [
   '/employees?page=1&pageSize=2',
   '/employees?page=invalid&pageSize=NaN',
   '/employees/mine?page=1&pageSize=2',
-  '/advances?page=1&pageSize=2',
+  '/advances?page=1&pageSize=2&month=2026-08',
   '/payroll/overview',
+  '/payroll/disputes?handleStatus=0&page=1&pageSize=20',
   '/risk-alerts',
   '/risk-cases',
   '/talents',
@@ -71,6 +73,41 @@ async function main() {
       throw new Error(`${detailPath} 回归失败：HTTP ${response.status} / ${payload.message || payload.code}`);
     }
     console.log(`${detailPath} ok`);
+  }
+
+  // 可选员工端只读回归：仅在显式提供员工测试账号ID时执行，不在脚本中保存真实凭据。
+  if (employeeSmokeUserId > 0) {
+    const employeeUser = await db.first(
+      `SELECT id,company_id companyId,username,employee_id employeeId,
+              token_version tokenVersion,account_type accountType
+       FROM sys_user
+       WHERE id=:userId AND company_id=:companyId AND status=1
+         AND account_type='EMPLOYEE'`,
+      { userId: employeeSmokeUserId, companyId }
+    );
+    if (!employeeUser || !employeeUser.employeeId) throw new Error('员工 smoke 账号不存在、已停用或未绑定档案');
+    const employeeToken = signToken({
+      userId: employeeUser.id,
+      companyId: employeeUser.companyId,
+      username: employeeUser.username,
+      employeeId: employeeUser.employeeId,
+      accountType: 'EMPLOYEE',
+      tokenVersion: Number(employeeUser.tokenVersion || 0)
+    });
+    for (const employeePath of ['/me/profile', '/me/payslips?year=2026&page=1&pageSize=20']) {
+      const response = await fetch(`${baseUrl}${employeePath}`, {
+        headers: { Authorization: `Bearer ${employeeToken}` }
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.code !== 0) {
+        throw new Error(`${employeePath} 员工端回归失败：HTTP ${response.status} / ${payload.message || payload.code}`);
+      }
+      if (employeePath.startsWith('/me/payslips')
+        && (!Array.isArray(payload.data?.list) || !Number.isInteger(Number(payload.data?.total)))) {
+        throw new Error(`${employeePath} 员工工资条分页响应格式无效`);
+      }
+      console.log(`${employeePath} employee ok`);
+    }
   }
 }
 

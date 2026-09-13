@@ -16,6 +16,11 @@ assert.match(migration, /'ONBOARDING_COMPLIANCE'/, '迁移缺少合并合规待�
 assert.match(migration, /task_type IN \('CONTRACT','INSURANCE'\)[\s\S]*task_status=3/, '迁移未关闭旧开放合规待办');
 assert.match(migration, /NOT EXISTS \([\s\S]*task_type='ONBOARDING_COMPLIANCE'[\s\S]*task_status IN \(0,1\)/, '迁移未避免重复插入已存在的合并合规待办');
 assert.match(migration, /LEFT JOIN \([\s\S]*task_status=3[\s\S]*completed\.company_id IS NULL/, '迁移未避免关闭旧待办时撞击已完成唯一键');
+assert.doesNotMatch(
+  migration,
+  /SELECT company_id,employee_id,project_id,task_type,source_type,source_id[\s\S]*completed\.project_id/,
+  '已完成待办的判重条件必须与 uk_active_task 一致，不得额外使用 project_id'
+);
 assert.match(migration, /ON DUPLICATE KEY UPDATE/, '迁移缺少重复执行保护');
 assert.match(schema, /ONBOARDING_COMPLIANCE/, '主数据库结构注释未登记合并待办类型');
 assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${migrationPath}"`), '生产部署未执行简化流程迁移');

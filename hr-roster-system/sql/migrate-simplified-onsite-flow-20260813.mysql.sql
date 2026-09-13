@@ -43,13 +43,13 @@ JOIN (
   GROUP BY company_id,employee_id
 ) merged ON merged.company_id=legacy.company_id AND merged.employee_id=legacy.employee_id
 LEFT JOIN (
-  SELECT company_id,employee_id,project_id,task_type,source_type,source_id
+  -- 判重字段必须与 uk_active_task 一致；project_id 不在唯一键中。
+  SELECT company_id,employee_id,task_type,source_type,source_id
   FROM hr_work_task
   WHERE task_status=3
-  GROUP BY company_id,employee_id,project_id,task_type,source_type,source_id
+  GROUP BY company_id,employee_id,task_type,source_type,source_id
 ) completed ON completed.company_id=legacy.company_id
   AND completed.employee_id=legacy.employee_id
-  AND completed.project_id <=> legacy.project_id
   AND completed.task_type=legacy.task_type
   AND completed.source_type=legacy.source_type
   AND completed.source_id <=> legacy.source_id

@@ -34,7 +34,11 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 // 三、工资批次员工必须同时属于当前企业和当前项目。
 {
   const service = read('src/services/operations.service.js');
-  assert.match(service, /j\.project_id=:projectId/, '工资批次仍可混入同客户其他项目员工');
+  assert.match(service, /e\.company_id=:companyId/, '工资批次员工查询未限制当前企业');
+  assert.match(service, /EXISTS[\s\S]*project_job\.customer_id=:customerId[\s\S]*project_job\.project_id=:projectId/,
+    '工资批次仍可混入其他客户或其他项目员工');
+  assert.match(service, /e\.employee_status IN \(2,3\)/,
+    '工资批次应仅允许在职和已离职员工');
   assert.match(service, /projectId:\s*project\.id/, '工资员工查询未绑定当前项目参数');
 }
 
@@ -42,23 +46,41 @@ const read = relativePath => fs.readFileSync(path.join(root, relativePath), 'utf
 {
   const routes = read('src/routes/payslip.routes.js');
   const service = read('src/services/payslip.service.js');
+  const operationsService = read('src/services/operations.service.js');
   const schema = read('sql/schema.mysql.sql');
   assert.match(routes, /router\.get\('\/me\/payslips'/, '缺少员工本人工资条列表接口');
   assert.match(routes, /router\.get\('\/me\/payslips\/:id'/, '缺少员工本人工资条详情接口');
   assert.match(routes, /router\.post\('\/me\/payslips\/:id\/receipt'/, '缺少工资条签收接口');
+  assert.match(routes, /router\.post\('\/me\/payslips\/:id\/signature'/, '缺少工资条手写签名接口');
+  assert.match(routes, /router\.post\('\/me\/payslips\/:id\/dispute'/, '缺少工资异议接口');
+  assert.match(routes, /requireEmployeeAccount/, '员工工资条接口缺少员工账号类型守卫');
   assert.match(service, /d\.employee_id=:employeeId/, '工资条查询未强制绑定当前员工');
   assert.match(service, /b\.batch_status=5/, '员工端可能读取未发布工资数据');
   assert.match(service, /salary_receipt_log/, '工资条查看和签收没有证据日志');
   assert.match(schema, /CREATE TABLE salary_receipt_log/, '数据库缺少工资条证据日志表');
+  assert.match(schema, /CREATE TABLE salary_signature/, '数据库缺少工资条手写签名表');
+  assert.match(schema, /CREATE TABLE salary_dispute/, '数据库缺少工资异议表');
+  assert.match(routes, /sensitiveLimiter[\s\S]*receiptMine/, '工资条签收接口缺少敏感操作限流');
+  const operationsRoutes = read('src/routes/operations.routes.js');
+  assert.match(operationsRoutes, /router\.get\('\/payroll\/disputes',\s*requirePermission\('payroll:view'\)/,
+    '工资异议列表缺少工资查看权限');
+  assert.match(operationsRoutes, /router\.put\('\/payroll\/disputes\/:id\/handle',\s*sensitiveLimiter,\s*requirePermission\('payroll:manage'\)/,
+    '工资异议处理缺少限流或工资管理权限');
+  assert.match(operationsRoutes, /router\.get\('\/payroll\/batches\/:id\/details',\s*requirePermission\('payroll:view'\)/,
+    '工资批次员工签收详情缺少工资查看权限');
+  assert.match(operationsRoutes, /router\.post\('\/payroll\/batches\/preview',\s*sensitiveLimiter,\s*requirePermission\('payroll:manage'\)/,
+    '工资表预校验接口缺少敏感操作限流或工资管理权限');
+  assert.match(operationsService, /e\.id_card_hash=:idCardHash/, '工资导入仍可能使用完整身份证号查询');
+  assert.match(operationsService, /params\.idCardHash\s*=\s*sha256\(row\.idCardNo\)/, '工资导入身份证匹配未使用不可逆摘要');
 }
 
-// 五、离职闭环必须停用员工关联账号。
+// 五、离职闭环必须停用管理账号，并仅保留受限员工端工资条账号。
 {
   const employeeService = read('src/services/employee.service.js');
   assert.match(
     employeeService,
-    /UPDATE sys_user SET status=0[^;]+employee_id=:employeeId/s,
-    '离职完成后未停用关联员工账号'
+    /UPDATE sys_user SET status=CASE WHEN account_type='EMPLOYEE' THEN 1 ELSE 0 END,[\s\S]*token_version=token_version\+1[\s\S]*employee_id=:employeeId/s,
+    '离职完成后未保留受限员工账号、停用管理账号或使旧 Token 失效'
   );
 }
 

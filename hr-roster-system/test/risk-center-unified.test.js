@@ -19,28 +19,22 @@ const verifyRelease = read('scripts/verify-release-package.sh');
 const packageJson = JSON.parse(read('package.json'));
 
 if ((html.match(/data-view="riskCases"/g) || []).length) throw new Error('风险预警和用工风险管理仍是两个菜单入口');
-assertIncludes(html, '新员工入职合规', '风险中心未简化为新员工入职合规');
-assertIncludes(html, '劳动合同', '风险中心缺少劳动合同检查项');
-assertIncludes(html, '雇主险', '风险中心缺少雇主险检查项');
-assertIncludes(html, 'id="riskDetailPanel"', '风险中心缺少统一详情面板');
-assertIncludes(html, 'id="riskComplianceFilter"', '风险中心缺少简洁合规状态筛选');
+if (/用工风险清单|id="riskStatusFilter"|id="riskTableBody"|id="riskDetailModal"/.test(html)) throw new Error('网页端仍保留已下线风险页面');
 if (html.includes('class="risk-workflow"')) throw new Error('风险中心仍保留复杂整改流程条');
 if (html.includes('id="riskCategoryFilter"') || html.includes('id="riskLevelFilter"')) throw new Error('风险中心仍保留不必要的多维筛选');
-assertIncludes(html, 'id="riskCenterScanButton" type="button" data-action-perm="risk:scan"', '风险扫描按钮未按扫描权限隔离');
+if (/riskCenterScanButton|riskCaseForm|contractForm|socialForm|complianceForm/.test(html)) throw new Error('网页风险中心仍保留已取消的扫描或办理入口');
 
 assertIncludes(state, 'risks: []', '前端状态未统一保存风险数据');
-assertIncludes(state, 'riskCases: []', '前端状态未统一保存整改任务');
+if (state.includes('riskCases: []')) throw new Error('前端仍保存已取消的整改任务状态');
 assertIncludes(app, 'async function loadRiskCenter()', '缺少统一风险中心加载函数');
-assertIncludes(app, 'function buildOnboardingComplianceRows', '风险中心未按员工合并合同与雇主险状态');
-assertIncludes(app, 'function renderRiskDetail', '风险点击后缺少详情渲染');
-assertIncludes(app, 'data-risk-detail', '风险列表项没有详情点击入口');
+assertIncludes(app, 'buildRiskWorkbench(state.risks', '风险中心未使用统一筛选模型');
+assertIncludes(app, 'data-risk-row', '风险列表项缺少选中状态');
+assertIncludes(app, 'data-risk-employee', '风险列表项缺少员工档案入口');
 assertIncludes(app, 'data-risk-preset', '风险指标卡没有快捷筛选入口');
-assertIncludes(app, "$('#unresolvedRiskTotal').closest('.metric-cell')", '顶部未处理风险指标没有绑定点击');
-assertIncludes(app, "$('#unsignedTotal').closest('.metric-cell')", '顶部未签合同指标没有绑定点击');
-assertIncludes(app, "data-action=\"contract\"", '未签合同时缺少直接登记合同入口');
-assertIncludes(app, "data-action=\"social\"", '未增保时缺少直接办理雇主险入口');
+if (!/id="unresolvedRiskTotal"[\s\S]{0,80}|metric-cell danger metric-action hidden/.test(html)) throw new Error('顶部历史风险指标未保持隐藏兼容');
+if (/openContractModal|openSocialModal|submitOnboardingCompliance/.test(app)) throw new Error('网页仍保留合同或雇主险办理流程');
 
-assertIncludes(router, "riskCases: 'risk'", '历史风险整改入口没有兼容跳转到统一风险中心');
+assertIncludes(router, "riskCases: 'office'", '历史风险整改入口未安全回到办公中心');
 assertIncludes(service, 'customer_name', '风险接口缺少客户单位上下文');
 assertIncludes(service, "r.risk_type IN (1,7)", '风险接口仍返回非合同/雇主险风险');
 assertIncludes(service, "e.lifecycle_status <> 'OFFBOARDING'", '离职交接员工仍会进入新员工入职合规');
@@ -82,4 +76,4 @@ if (packageJson.scripts['test:risk-center'] !== 'node test/risk-center-unified.t
   throw new Error('package.json 缺少风险中心专项测试命令');
 }
 
-console.log('新员工合同与雇主险入职合规检查通过。');
+console.log('简化用工风险中心与后端历史风险兼容检查通过。');

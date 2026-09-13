@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
-const { requireAuth, requirePermission } = require('../src/middlewares/auth.middleware');
+const fs = require('node:fs');
+const path = require('node:path');
+const { requireAuth, requirePermission, requireCompanyAdmin } = require('../src/middlewares/auth.middleware');
 const { verifyToken } = require('../src/utils/token');
 const authService = require('../src/services/auth.service');
 const systemService = require('../src/services/system.service');
@@ -104,6 +106,20 @@ function captureNextError() {
 // 二、多权限要求（requirePermission 链式调用模拟）
 // -------------------------------------------------------------------
 
+// 只有企业管理员可以执行系统账号和角色权限写操作。
+{
+  const req = makeReq({ roles: [{ roleCode: 'company_admin' }] });
+  const { next, getError } = captureNextError();
+  requireCompanyAdmin(req, makeRes(), next);
+  assert.equal(getError(), null, '企业管理员应通过系统管理写操作校验');
+}
+{
+  const req = makeReq({ roles: [{ roleCode: 'hr_manager' }], permissions: ['system:role'] });
+  const { next, getError } = captureNextError();
+  requireCompanyAdmin(req, makeRes(), next);
+  assert.equal(getError()?.statusCode || 403, 403, 'HR主管即使误配 system:role 也不能修改系统账号或角色权限');
+}
+
 // 离职由驻厂或HR一次办结，薪资权限不再进入离职流程。
 {
   const req = makeReq({ permissions: ['employee:resign'] });
@@ -206,6 +222,35 @@ function captureNextError() {
 {
   const expected = ['company_admin', 'hr_manager', 'onsite_staff', 'payroll_staff'];
   assert.deepStrictEqual(systemService.MANAGED_ROLE_CODES, expected, 'MANAGED_ROLE_CODES 必须只有四类业务角色');
+}
+
+// 多薪资专员通过账号项目授权分工；新建项目不强制选择薪资专员。
+{
+  const root = path.resolve(__dirname, '..');
+  const read = file => fs.readFileSync(path.join(root, file), 'utf8');
+  const html = read('public/index.html');
+  const app = read('public/app.js');
+  const systemSource = read('src/services/system.service.js');
+  const operationsSource = read('src/services/operations.service.js');
+
+  assert.match(html, /薪资专员由管理员在此分配对应项目/, '必须说明薪资专员项目由管理员配置');
+  assert.match(html, /同一项目可同时授权给多个薪资专员/, '同一项目必须支持多个薪资专员');
+  assert.match(html, /新建项目时无需选择薪资专员/, '新建项目不得强制选择薪资专员');
+  assert.match(app, /renderUserProjects\(user\.projects,\s*user\.roles\)/, '账号项目显示必须结合角色判断');
+  assert.match(
+    app,
+    /roleCode\s*===\s*['"]company_admin['"][\s\S]*全部项目[\s\S]*未分配项目/,
+    '只有企业管理员可显示全部项目，普通账号空授权应显示未分配项目'
+  );
+  assert.match(systemSource, /INSERT INTO sys_user_project \(user_id, project_id\)/, '管理员必须按账号配置项目');
+  assert.doesNotMatch(operationsSource, /薪资专员不能为空|payrollUserId\s*\|\|\s*.*不能为空/, '项目创建不得要求薪资专员');
+  for (const functionName of ['createPayrollBatch', 'publishPayrollBatch', 'withdrawPayrollBatch']) {
+    const start = operationsSource.indexOf(`async function ${functionName}`);
+    assert.ok(start >= 0, `缺少工资条操作函数 ${functionName}`);
+    const next = operationsSource.indexOf('\nasync function ', start + 1);
+    const block = operationsSource.slice(start, next < 0 ? undefined : next);
+    assert.match(block, /projectScope\(user,/, `${functionName} 必须按授权项目隔离`);
+  }
 }
 
 // expandPermissionIds: 勾选子权限时自动包含上级菜单权限

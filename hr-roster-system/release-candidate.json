@@ -1,21 +1,24 @@
 {
-  "generatedAt": "2026-08-13T05:38:20Z",
+  "generatedAt": "2026-09-08T05:52:05Z",
   "webApi": {
-    "archive": "/tmp/hr-roster-deploy-20260813-133759.tar.gz",
-    "sha256": "3110f18718c2ea93ca010195c6553c4d72169db859fb7da00badb8efccad0d17",
+    "archive": "/tmp/hr-roster-deploy-20260908-134901.tar.gz",
+    "sha256": "0ce555e840c4ee43ced8648146c9124d12c5317ebc17e9d3f90c81a82d46344a",
     "publicBaseUrl": "https://lczpt.com",
     "verificationStatus": "deployed-and-public-regression-passed",
-    "deployedAt": "2026-08-13T05:37:45Z"
+    "deployedAt": "2026-09-08T05:52:05Z"
   },
   "miniprogram": {
     "project": "/Users/zhuhao/Documents/moluo/hr-roster-system/wechat-miniprogram",
-    "version": "1.1.7",
+    "version": "1.1.20",
     "appid": "wxc6bb140d2393e557",
-    "description": "简化驻厂面试入职离职流程，合同与雇主险合并办理并同步网页端",
+    "description": "优化员工登录页，突出手机号快捷登录与验证码登录",
     "verificationStatus": "uploaded-successfully-pending-review",
-    "uploadedAt": "2026-08-13T05:27:45Z",
-    "packageSizeBytes": 256067,
-    "reviewStatus": "not-submitted"
+    "uploadedAt": "2026-08-28T09:36:00Z",
+    "packageSizeBytes": 338006,
+    "reviewStatus": "not-submitted",
+    "localChangesStatus": "uploaded",
+    "localChangesVerifiedAt": "2026-08-28T09:36:00Z",
+    "localChangesDescription": "当前源码已完成登录页、角色菜单、员工与工资条流程同步，并已上传 1.1.20 体验版"
   },
   "deploymentOrder": [
     "web-api-deploy",

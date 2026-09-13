@@ -9,7 +9,7 @@ RUN npm ci --omit=dev
 COPY . .
 
 # Web/API 镜像不包含独立发布的小程序源码，因此执行 Web/API 专用检查。
-RUN npm run check:web
+RUN npm run check:web && node test/manager-remember-login.test.js && node test/system-user-delete.test.js
 
 ENV NODE_ENV=production
 EXPOSE 3100

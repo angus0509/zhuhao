@@ -12,6 +12,7 @@ const html = read('public/index.html');
 const roster = read('public/js/views/roster.js');
 const channels = read('wechat-miniprogram/miniprogram/pages/channels/index.js');
 const channelsWxml = read('wechat-miniprogram/miniprogram/pages/channels/index.wxml');
+const riskWorkbench = read('public/js/core/risk-workbench.js');
 
 function block(source, start, end) {
   const startIndex = source.indexOf(start);
@@ -24,27 +25,18 @@ for (const deadReference of ['loadFactoryStaff', 'factoryProjectFilter', 'factor
   if (app.includes(deadReference)) throw new Error(`仍保留已删除驻厂页面的死代码：${deadReference}`);
 }
 
-for (const [start, end] of [
-  ['async function submitContract', 'async function submitSocial'],
-  ['async function submitSocial', 'async function submitCertificate'],
-  ['async function submitCertificate', 'async function scanRisks']
-]) {
-  if (block(app, start, end).includes('scanRisks()')) throw new Error(`${start} 保存成功后仍强制调用风险扫描权限`);
-}
+if (/scanRisks|submitContract|submitSocial|submitOnboardingCompliance/.test(app)) throw new Error('网页仍保留已取消的风险扫描或合规办理流程');
 
-const refreshBlock = block(app, 'async function refreshAll', 'function bindMetricRiskNavigation');
-if (!refreshBlock.includes("permissions.includes('risk:view')")) throw new Error('refreshAll 未按 risk:view 权限决定是否加载风险');
-if (refreshBlock.includes('Promise.all([loadSummary(), loadEmployees(), loadRisks()])')) throw new Error('refreshAll 仍无条件调用风险接口');
+const refreshBlock = block(app, 'async function refreshAll', 'function bindEvents');
+if (refreshBlock.includes('loadRisks()')) throw new Error('员工工作区刷新仍加载已下线的风险页面数据');
 
-if (!app.includes("if (action === 'goto-risk')")) throw new Error('项目查看风险按钮缺少处理器');
-if (!app.includes("$('#riskKeywordInput').value = project?.projectName || ''")) throw new Error('项目查看风险未自动按项目名称筛选');
-if (!app.includes('state.selectedRiskProjectId = Number(project?.id || 0) || null')) throw new Error('项目查看风险未记录精确项目ID');
-if (!app.includes('Number(row.projectId) !== Number(state.selectedRiskProjectId)')) throw new Error('风险中心仍未按项目ID精确筛选');
+if (/data-action="goto-risk"|未关闭风险|未结风险/.test(app)) throw new Error('客户项目页面仍显示风险指标或入口');
+if (!riskWorkbench.includes('Number(row.projectId) !== projectId')) throw new Error('风险中心仍未按项目ID精确筛选');
 if (!state.includes('selectedRiskProjectId: null')) throw new Error('全局状态缺少风险项目筛选ID');
 if (!riskService.includes('j.project_id project_id')) throw new Error('风险接口未返回员工当前项目ID');
 if (!employeeService.includes('projectId: row.project_id || null')) throw new Error('风险格式化结果未输出项目ID');
 
-for (const legacyView of ["riskCases: 'risk'", "insurance: 'risk'", "factory: 'roster'", "factoryStaff: 'roster'"]) {
+for (const legacyView of ["riskCases: 'office'", "insurance: 'office'", "factory: 'roster'", "factoryStaff: 'roster'"]) {
   if (!router.includes(legacyView)) throw new Error(`缺少历史页面兼容映射：${legacyView}`);
 }
 if (!router.includes('if (!viewElements[view])')) throw new Error('未知页面没有安全回退，仍可能出现空白页');
@@ -54,10 +46,10 @@ if (!app.includes('function canRunOfficeAction(action)')) throw new Error('办�
 if (!app.includes('.filter(([, , , , action]) => canRunOfficeAction(action))')) throw new Error('办公中心仍向无权限角色显示全部入口');
 if (!app.includes("if (!canRunOfficeAction(action))")) throw new Error('办公快捷入口点击时未二次校验权限');
 if (!html.includes('data-office-action="payroll-create" data-action-perm="payroll:manage"')) throw new Error('创建工资批次按钮缺少 payroll:manage 权限');
-if (!html.includes('data-office-action="risk" data-action-perm="risk:view"')) throw new Error('办公中心合规卡缺少 risk:view 权限');
+if (html.includes('data-office-action="risk"')) throw new Error('办公中心仍显示已下线的风险入口');
 if (!app.includes('data-notice-view=')) throw new Error('消息中心通知仍不可点击跳转');
 if (!app.includes("event.target.closest('[data-notice-view]')")) throw new Error('消息通知缺少点击处理器');
-if (!app.includes('function configureMetricRiskAccess()')) throw new Error('顶部风险指标未按权限调整交互状态');
+if (app.includes('function configureMetricRiskAccess()')) throw new Error('已下线的顶部风险指标仍保留旧交互逻辑');
 if (!html.includes('id="exportLink" href="/api/export/employees.csv" data-action-perm="employee:export"')) throw new Error('CSV 导出入口缺少 employee:export 权限');
 if (!html.includes('id="exportXlsxLink" href="/api/export/employees.xlsx" data-action-perm="employee:export"')) throw new Error('XLSX 导出入口缺少 employee:export 权限');
 if (!html.includes('id="mobileAddEmployeeBtn" data-action-perm="employee:create"')) throw new Error('手机 Web 新增员工入口缺少 employee:create 权限');
@@ -69,7 +61,7 @@ if (bootBlock.includes('.catch(() => {})')) throw new Error('登录后的核心�
 if (!bootBlock.includes('Promise.allSettled')) throw new Error('登录启动未对并行数据加载结果进行明确反馈');
 if (!app.includes('async function refreshEmployeeWorkspace()')) throw new Error('员工业务保存后缺少花名册与办公中心统一刷新');
 if (channelsWxml.includes('catchtap="noop"') && !channels.includes('noop() {}')) throw new Error('招聘渠道详情弹窗缺少 noop 冒泡拦截处理器');
-for (const mutation of ['saveEmployee', 'submitTransfer', 'submitResign', 'submitContract', 'submitSocial', 'submitCertificate']) {
+for (const mutation of ['saveEmployee', 'submitTransfer', 'submitResign', 'submitCertificate']) {
   const start = `async function ${mutation}`;
   const startIndex = app.indexOf(start);
   const nextIndex = app.indexOf('\nasync function ', startIndex + start.length);

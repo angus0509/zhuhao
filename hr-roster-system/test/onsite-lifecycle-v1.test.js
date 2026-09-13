@@ -33,7 +33,7 @@ if (!service.includes('validateRecruitmentSource')) throw new Error('缺少招�
 if (!service.includes('r.handle_status IN (0, 1) AND r.risk_level = 3')) throw new Error('汇总风险字段必须使用表别名，避免员工风险等级字段引发歧义');
 if ((service.match(/LEFT JOIN hr_recruiter rec/g) || []).length < 2) throw new Error('员工列表和详情均必须关联招聘人');
 if ((service.match(/LEFT JOIN hr_recruitment_supplier rs/g) || []).length < 2) throw new Error('员工列表和详情均必须关联招聘供应商');
-if (!service.includes("taskType: 'ONBOARDING_COMPLIANCE'")) throw new Error('到岗未生成合同和雇主险合并待办');
+if (service.includes("taskType: 'ONBOARDING_COMPLIANCE'")) throw new Error('到岗不应再生成已取消的合同和雇主险合并待办');
 if (!service.includes('terminateEmployerInsuranceForResignation')) throw new Error('离职未在同一事务办理雇主险减保');
 if (!service.includes("task_type='INSURANCE_TERMINATION'")) throw new Error('退保保存后未自动关闭待办');
 if (!service.includes("contract_status='SIGNED'")) throw new Error('合同签署后未同步员工合规状态');
@@ -46,16 +46,16 @@ for (const route of ["router.get('/work-tasks'", "router.put('/work-tasks/:id/st
   if (!taskRoutes.includes(route)) throw new Error(`缺少待办接口：${route}`);
 }
 if (!operationsService.includes('lifecycleTodos')) throw new Error('办公首页尚未接入生命周期待办');
-if (!page.includes('id="tasksView"') || !page.includes('id="recruitmentSourcesView"')) throw new Error('缺少待办或招聘来源管理页面');
+if (page.includes('id="tasksView"') || !page.includes('id="recruitmentSourcesView"')) throw new Error('网页驻厂待办应取消，招聘来源管理页面应保留');
 if (!page.includes('id="transferProjectSelect"')) throw new Error('调岗表单缺少目标项目');
-if (!app.includes('loadWorkTasks') || !app.includes('loadRecruitmentSources')) throw new Error('缺少待办或招聘来源页面加载逻辑');
-if (!app.includes('data-handle-transfer')) throw new Error('待办中心缺少转岗接收操作');
+if (app.includes('loadWorkTasks') || !app.includes('loadRecruitmentSources')) throw new Error('网页驻厂待办加载应取消，招聘来源加载应保留');
+if (app.includes('data-handle-transfer')) throw new Error('网页仍保留已取消的待办转岗操作');
 if (!dataScope.includes('function workTaskScope')) throw new Error('待办数据范围未区分目标项目和当前项目');
 if (!dataScope.includes('task_up.project_id = ${taskAlias}.project_id')) throw new Error('目标项目驻厂账号无法看到转岗接收待办');
 if (!workTaskService.includes("workTaskScope(user, params, 't', 'e', 'j')")) throw new Error('待办查询未使用目标项目数据范围');
 if (!workTaskService.includes('targetProjectName')) throw new Error('转岗待办未返回目标项目信息');
 if (!seed.includes("'employee:transfer', 'employee:resign', 'contract:manage', 'social:manage'")) throw new Error('驻厂角色默认权限缺少合同登记');
 if (!onsiteContractMigration.includes("permission_code='contract:manage'")) throw new Error('现有驻厂角色缺少合同权限升级迁移');
-if (!app.includes('data-open-offboard') || app.includes('data-complete-settlement')) throw new Error('待办中心未统一进入离职办理页面');
+if (app.includes('data-open-offboard') || app.includes('data-complete-settlement')) throw new Error('网页仍保留已取消的待办离职操作');
 
 console.log('onsite-lifecycle-v1-tests-ok');

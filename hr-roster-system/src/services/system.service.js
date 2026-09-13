@@ -29,7 +29,7 @@ async function listUsers(companyId) {
     `SELECT u.id, u.username, u.real_name realName, u.phone, u.status, u.employee_id employeeId,
             u.created_at createdAt
      FROM sys_user u
-     WHERE u.company_id = :companyId
+     WHERE u.company_id = :companyId AND u.account_type='MANAGER' AND u.deleted_at IS NULL
      ORDER BY u.id`,
     { companyId }
   );
@@ -58,9 +58,11 @@ async function listUsers(companyId) {
 
   // 查项目授权
   const projRows = await db.query(
-    `SELECT up.user_id userId, p.id projectId, p.project_name projectName
+    `SELECT up.user_id userId, p.id projectId, p.project_name projectName,
+            c.customer_name customerName
      FROM sys_user_project up
      JOIN labor_project p ON p.id = up.project_id
+     LEFT JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
      WHERE up.user_id IN (${userIds.map((_, i) => `:uid${i}`).join(',')})`,
     Object.fromEntries(userIds.map((id, i) => [`uid${i}`, id]))
   );
@@ -90,7 +92,8 @@ async function listUsers(companyId) {
       })),
       projects: projRows.filter(p => p.userId === user.id).map(p => ({
         id: p.projectId,
-        projectName: p.projectName
+        projectName: p.projectName,
+        customerName: p.customerName || '未关联客户'
       }))
     };
   });
@@ -99,7 +102,7 @@ async function listUsers(companyId) {
 async function getUserDetail(companyId, userId) {
   const user = await db.first(
     `SELECT id, username, real_name realName, phone, status, employee_id employeeId
-     FROM sys_user WHERE id = :userId AND company_id = :companyId`,
+     FROM sys_user WHERE id = :userId AND company_id = :companyId AND deleted_at IS NULL`,
     { userId, companyId }
   );
   if (!user) throw createError('用户不存在', 404);
@@ -158,7 +161,7 @@ async function createUser(companyId, body) {
 
   // 检查用户名是否已存在
   const existing = await db.first(
-    'SELECT id FROM sys_user WHERE company_id = :companyId AND username = :username',
+    'SELECT id FROM sys_user WHERE company_id = :companyId AND username = :username AND deleted_at IS NULL',
     { companyId, username: body.username }
   );
   if (existing) throw createError('账号已存在');
@@ -207,7 +210,7 @@ async function createUser(companyId, body) {
 
 async function updateUser(companyId, userId, body) {
   const user = await db.first(
-    'SELECT id,username FROM sys_user WHERE id = :userId AND company_id = :companyId',
+    'SELECT id,username FROM sys_user WHERE id = :userId AND company_id = :companyId AND deleted_at IS NULL',
     { userId, companyId }
   );
   if (!user) throw createError('用户不存在', 404);
@@ -285,7 +288,7 @@ async function updateUser(companyId, userId, body) {
 
 async function toggleUserStatus(companyId, userId, status) {
   const user = await db.first(
-    'SELECT id, username FROM sys_user WHERE id = :userId AND company_id = :companyId',
+    'SELECT id, username FROM sys_user WHERE id = :userId AND company_id = :companyId AND deleted_at IS NULL',
     { userId, companyId }
   );
   if (!user) throw createError('用户不存在', 404);
@@ -305,7 +308,7 @@ async function resetPassword(companyId, userId, body) {
     throw createError('新密码至少8位且包含字母和数字');
 
   const user = await db.first(
-    'SELECT id FROM sys_user WHERE id = :userId AND company_id = :companyId',
+    'SELECT id FROM sys_user WHERE id = :userId AND company_id = :companyId AND deleted_at IS NULL',
     { userId, companyId }
   );
   if (!user) throw createError('用户不存在', 404);
@@ -315,6 +318,83 @@ async function resetPassword(companyId, userId, body) {
     { userId, companyId, hash: hashPassword(body.newPassword) }
   );
   return null;
+}
+
+async function deleteUser(companyId, userId, operator = null) {
+  const operatorId = Number(operator?.id || 0);
+  if (!operatorId) throw createError('未识别当前登录账号', 401);
+  if (operatorId === Number(userId)) throw createError('不能删除当前登录账号');
+
+  const operatorAdmin = await db.first(
+    `SELECT u.id FROM sys_user u
+     JOIN sys_user_role ur ON ur.user_id=u.id
+     JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id AND r.status=1
+     WHERE u.id=:operatorId AND u.company_id=:companyId AND u.status=1 AND u.deleted_at IS NULL
+       AND u.account_type='MANAGER' AND r.role_code='company_admin' LIMIT 1`,
+    { companyId, operatorId }
+  );
+  if (!operatorAdmin) throw createError('只有企业管理员可以删除系统账号', 403);
+
+  const user = await db.first(
+    `SELECT id,username,real_name realName,account_type accountType
+     FROM sys_user
+     WHERE id=:userId AND company_id=:companyId AND deleted_at IS NULL LIMIT 1`,
+    { userId, companyId }
+  );
+  if (!user) throw createError('用户不存在或已删除', 404);
+  if (user.username === 'admin') throw createError('不能删除超级管理员账号');
+  if (user.accountType === 'EMPLOYEE') throw createError('员工账号不能在系统账号管理中删除');
+
+  const targetAdmin = await db.first(
+    `SELECT ur.user_id id FROM sys_user_role ur
+     JOIN sys_role r ON r.id=ur.role_id AND r.company_id=:companyId AND r.status=1
+     WHERE ur.user_id=:userId AND r.role_code='company_admin' LIMIT 1`,
+    { companyId, userId }
+  );
+
+  return db.transaction(async connection => {
+    if (targetAdmin) {
+      const [remainingAdmins] = await connection.execute(
+        `SELECT DISTINCT u.id
+         FROM sys_user u
+         JOIN sys_user_role ur ON ur.user_id=u.id
+         JOIN sys_role r ON r.id=ur.role_id AND r.company_id=u.company_id AND r.status=1
+         WHERE u.company_id=:companyId AND u.id<>:userId AND u.status=1 AND u.deleted_at IS NULL
+           AND u.account_type='MANAGER' AND r.role_code='company_admin'
+         FOR UPDATE`,
+        { companyId, userId }
+      );
+      if (!remainingAdmins.length) throw createError('必须至少保留一个启用的企业管理员');
+    }
+    await connection.execute(
+      `UPDATE sys_user
+       SET status=0,token_version=token_version+1,
+           username=CONCAT('deleted_',id,'_',UNIX_TIMESTAMP()),deleted_at=NOW(),updated_at=NOW()
+       WHERE id=:userId AND company_id=:companyId AND deleted_at IS NULL`,
+      { companyId, userId }
+    );
+    await connection.execute('DELETE FROM sys_user_role WHERE user_id=:userId', { userId });
+    await connection.execute('DELETE FROM sys_user_project WHERE user_id=:userId', { userId });
+    await connection.execute(
+      `UPDATE manager_login_device
+       SET revoked_at=COALESCE(revoked_at,NOW()),updated_at=NOW()
+       WHERE company_id=:companyId AND user_id=:userId`,
+      { companyId, userId }
+    );
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
+       VALUES (:companyId,:operatorId,'权限管理','system_user',:userId,'delete',:beforeData,:afterData)`,
+      {
+        companyId,
+        operatorId,
+        userId,
+        beforeData: JSON.stringify({ username: user.username, realName: user.realName, accountType: user.accountType }),
+        afterData: JSON.stringify({ status: 0, deleted: true })
+      }
+    );
+    return { userId };
+  });
 }
 
 // ============================================================
@@ -581,6 +661,7 @@ module.exports = {
   updateUser,
   toggleUserStatus,
   resetPassword,
+  deleteUser,
   listRoles,
   updateRolePermissions,
   updateRoleDepartments,

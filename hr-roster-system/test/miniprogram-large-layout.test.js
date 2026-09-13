@@ -28,8 +28,8 @@ assertIncludes(employeeStyle, 'min-height: 72rpx', '员工卡片操作按钮过�
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
 const taskStyle = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxss');
-assertIncludes(taskJs, 'contractCount:', '待办页未统计合同具体数量');
-assertIncludes(taskWxml, '合同和雇主险 {{contractCount}}', '待办筛选未显示合并合规人数');
+if (/合同|雇主险|入职合规/.test(taskJs + taskWxml)) throw new Error('驻厂待办仍显示已取消的合规内容');
+assertIncludes(taskWxml, 'class="task-list"', '驻厂待办缺少大字任务列表');
 assertIncludes(taskStyle, 'min-height: 96rpx', '待办处理按钮点击区域过小');
 assertIncludes(taskStyle, 'font-size: 32rpx', '待办事项标题字号过小');
 

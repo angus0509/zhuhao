@@ -34,7 +34,7 @@ assert(miniWxml.includes('<checkbox-group bindchange="onHandoverChange">'), '离
 assert(!/已减保|雇主险减保/.test(miniWxml), '驻厂快速离职仍要求雇主险减保');
 assert(!/请确认完成全部交接项|every\(Boolean\)/.test(miniJs), '小程序仍强制全选交接项');
 
-assert(webPage.includes('name="terminateEmployerInsurance"'), '网页离职弹窗缺少雇主险减保选项');
+assert(!webPage.includes('name="terminateEmployerInsurance"'), '网页离职弹窗仍包含已取消的雇主险减保选项');
 assert(!/离职工资已结算|name="settlementStatus"/.test(webPage), '网页离职弹窗仍包含工资结算');
 assert(!/data-complete-settlement|确认工资结算|离职工资待结算/.test(webApp), '网页待办中心仍包含离职工资结算操作');
 

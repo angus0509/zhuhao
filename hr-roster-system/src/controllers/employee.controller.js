@@ -1,6 +1,7 @@
 const employeeService = require('../services/employee.service');
 const { success, asyncHandler, createError } = require('../utils/response');
 const attachmentService = require('../services/attachment.service');
+const employeeAuthService = require('../services/employee-auth.service');
 
 exports.bootstrap = asyncHandler(async (req, res) => {
   const data = await employeeService.getBootstrap(req.companyId, req.user);
@@ -21,7 +22,7 @@ exports.onsiteOverview = asyncHandler(async (req, res) => {
 });
 
 exports.precheck = asyncHandler(async (req, res) => {
-  const data = await employeeService.precheckEmployee(req.companyId, req.body);
+  const data = await employeeService.precheckEmployee(req.companyId, req.body, req.user);
   success(res, data, data.allowOnboarding ? '预检查通过' : '存在入职限制');
 });
 
@@ -70,6 +71,27 @@ exports.batchCreate = asyncHandler(async (req, res) => {
 exports.update = asyncHandler(async (req, res) => {
   const data = await employeeService.updateEmployee(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
   success(res, data, '保存成功');
+});
+
+exports.reactivate = asyncHandler(async (req, res) => {
+  const data = await employeeService.reactivateEmployee(
+    req.companyId,
+    Number(req.params.id),
+    req.body,
+    req.operatorId,
+    req.user
+  );
+  success(res, data, '员工已重新录用并进入待到岗');
+});
+
+exports.createBindCode = asyncHandler(async (req, res) => {
+  const data = await employeeAuthService.createBindCode(
+    req.companyId,
+    Number(req.params.id),
+    req.operatorId,
+    req.user
+  );
+  success(res, data, '绑定码已生成，10分钟内有效');
 });
 
 exports.handleInterviewResult = asyncHandler(async (req, res) => {

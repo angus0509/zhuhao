@@ -4,14 +4,14 @@
     dashboard: ['HR数字驾驶舱', '经营与合规数据'],
     roster: ['员工花名册', '客户单位人员管理'],
     tasks: ['驻厂待办中心', '现场交付任务'],
-    recruitmentSources: ['招聘来源管理', '渠道与供应商归档'],
+    recruitmentSources: ['招聘渠道管理', '渠道与员工归档'],
     blacklist: ['公司黑名单', '全公司风险共享'],
     projects: ['客户项目', '客户与项目经营'],
     talents: ['人才库', '招聘线索沉淀'],
     advances: ['驻厂预支记录', '时间、金额与用途台账'],
-    payroll: ['工资发放', '工资批次与签收'],
-    risk: ['用工风险中心', '发现、整改、举证与复核闭环'],
-    riskCases: ['用工风险中心', '发现、整改、举证与复核闭环'],
+    payroll: ['工资条发放', '工资条发放与签收'],
+    risk: ['业务事项清单', '业务事项集中查看与快速处理'],
+    riskCases: ['业务事项清单', '业务事项集中查看与快速处理'],
     audit: ['操作日志', '关键操作留痕'],
     permissions: ['权限管理', '角色与数据范围']
   };
@@ -20,12 +20,12 @@
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function updateViewHeading(view) {
-    const meta = viewMeta[view] || ['优益数字化管理系统', '劳务运营全生命周期'];
+    const meta = viewMeta[view] || ['优企云数字化管理系统', '运营管理'];
     const title = document.querySelector('#currentViewTitle');
     const context = document.querySelector('#currentViewContext');
     const topbar = document.querySelector('.topbar');
     if (title) title.textContent = meta[0];
-    if (context) context.textContent = `优益数字化管理系统 · ${meta[1]}`;
+    if (context) context.textContent = `优企云数字化管理系统 · ${meta[1]}`;
     if (topbar && !reducedMotion) {
       topbar.classList.remove('ui-title-change');
       requestAnimationFrame(() => topbar.classList.add('ui-title-change'));

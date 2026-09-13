@@ -16,6 +16,8 @@ function addDays(dateText, days) {
 }
 
 async function createRiskIfNotExists(connection, risk) {
+  // 合同与雇主险风险中心已停用：保留历史记录，但禁止再次生成风险或通知。
+  if ([1, 2, 3, 7].includes(Number(risk.riskType))) return 0;
   const [result] = await connection.execute(
     `
     INSERT IGNORE INTO hr_risk_alert
@@ -41,23 +43,47 @@ async function createRiskIfNotExists(connection, risk) {
   return result.affectedRows > 0 ? 1 : 0;
 }
 
-async function scanMissingContracts(connection, companyId) {
+function riskEmployeeScope(user, params, employeeIdExpression = 'r.employee_id') {
+  const scope = employeeScope(user, params, 'scan_scope_e', 'scan_scope_j');
+  if (!scope) return '';
+  return ` AND EXISTS (
+    SELECT 1 FROM hr_employee scan_scope_e
+    LEFT JOIN hr_employee_job scan_scope_j ON scan_scope_j.id=(
+      SELECT scan_scope_j2.id FROM hr_employee_job scan_scope_j2
+      WHERE scan_scope_j2.company_id=scan_scope_e.company_id
+        AND scan_scope_j2.employee_id=scan_scope_e.id
+      ORDER BY (scan_scope_j2.job_status=1) DESC,scan_scope_j2.id DESC LIMIT 1
+    )
+    WHERE scan_scope_e.company_id=:companyId
+      AND scan_scope_e.id=${employeeIdExpression}${scope}
+  )`;
+}
+
+async function scanMissingContracts(connection, companyId, user = null) {
+  const params = { companyId };
+  const scope = employeeScope(user, params, 'scan_scope_e', 'scan_scope_j');
   const [employees] = await connection.execute(
     `
-    SELECT e.id, e.name
-    FROM hr_employee e
-    WHERE e.company_id = :companyId
-      AND e.employee_status = 2
-      AND e.lifecycle_status <> 'OFFBOARDING'
-      AND e.deleted_at IS NULL
+    SELECT scan_scope_e.id, scan_scope_e.name
+    FROM hr_employee scan_scope_e
+    LEFT JOIN hr_employee_job scan_scope_j ON scan_scope_j.id=(
+      SELECT scan_scope_j2.id FROM hr_employee_job scan_scope_j2
+      WHERE scan_scope_j2.company_id=scan_scope_e.company_id
+        AND scan_scope_j2.employee_id=scan_scope_e.id
+      ORDER BY (scan_scope_j2.job_status=1) DESC,scan_scope_j2.id DESC LIMIT 1
+    )
+    WHERE scan_scope_e.company_id = :companyId
+      AND scan_scope_e.employee_status = 2
+      AND scan_scope_e.lifecycle_status <> 'OFFBOARDING'
+      AND scan_scope_e.deleted_at IS NULL${scope}
       AND NOT EXISTS (
         SELECT 1 FROM hr_labor_contract c
-        WHERE c.company_id = e.company_id
-          AND c.employee_id = e.id
+        WHERE c.company_id = scan_scope_e.company_id
+          AND c.employee_id = scan_scope_e.id
           AND c.sign_status = 1
       )
     `,
-    { companyId }
+    params
   );
 
   let created = 0;
@@ -182,18 +208,27 @@ async function scanSpecialWorkCertificate(connection, companyId) {
   return created;
 }
 
-async function scanEmployerInsurance(connection, companyId) {
+async function scanEmployerInsurance(connection, companyId, user = null) {
   const current = today();
+  const params = { companyId, current };
+  const scope = employeeScope(user, params, 'scan_scope_e', 'scan_scope_j');
   const [employees] = await connection.execute(
-    `SELECT e.id,e.name,s.id social_id,s.employer_insurance_status,s.employer_end_date
-     FROM hr_employee e
+    `SELECT scan_scope_e.id,scan_scope_e.name,s.id social_id,s.employer_insurance_status,s.employer_end_date
+     FROM hr_employee scan_scope_e
+     LEFT JOIN hr_employee_job scan_scope_j ON scan_scope_j.id=(
+       SELECT scan_scope_j2.id FROM hr_employee_job scan_scope_j2
+       WHERE scan_scope_j2.company_id=scan_scope_e.company_id
+         AND scan_scope_j2.employee_id=scan_scope_e.id
+       ORDER BY (scan_scope_j2.job_status=1) DESC,scan_scope_j2.id DESC LIMIT 1
+     )
      LEFT JOIN hr_social_security s ON s.id=(
        SELECT s2.id FROM hr_social_security s2
-       WHERE s2.company_id=e.company_id AND s2.employee_id=e.id ORDER BY s2.id DESC LIMIT 1
+       WHERE s2.company_id=scan_scope_e.company_id AND s2.employee_id=scan_scope_e.id ORDER BY s2.id DESC LIMIT 1
      )
-     WHERE e.company_id=:companyId AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
+     WHERE scan_scope_e.company_id=:companyId AND scan_scope_e.employee_status=2
+       AND scan_scope_e.lifecycle_status<>'OFFBOARDING' AND scan_scope_e.deleted_at IS NULL${scope}
        AND (COALESCE(s.employer_insurance_status,0)<>1 OR (s.employer_end_date IS NOT NULL AND s.employer_end_date<:current))`,
-    { companyId, current }
+    params
   );
   let created = 0;
   for (const employee of employees) {
@@ -214,62 +249,17 @@ async function scanEmployerInsurance(connection, companyId) {
   return created;
 }
 
-async function scanRisks(companyId) {
+async function scanRisks(companyId, user = null) {
   return db.transaction(async connection => {
-    // 简化后的入职合规只保留未签劳动合同和未生效雇主险两项。
+    const params = { companyId };
+    const scope = riskEmployeeScope(user, params);
+    // 合同/雇主险风险通知已停用。仅关闭仍开放的历史提醒，不删除历史数据。
     await connection.execute(
-      `UPDATE hr_risk_alert SET handle_status=2,handle_time=NOW(),handle_remark='已移出入职合规中心'
-       WHERE company_id=:companyId AND risk_type NOT IN (1,7) AND handle_status IN (0,1)`,
-      { companyId }
+      `UPDATE hr_risk_alert r SET handle_status=2,handle_time=COALESCE(handle_time,NOW()),handle_remark='功能已停用：合同/雇主险风险通知已关闭',updated_at=NOW()
+       WHERE r.company_id=:companyId AND r.risk_type IN (1,2,3,7) AND r.handle_status IN (0,1)${scope}`,
+      params
     );
-    // 修复历史关联状态：实际已经签订合同或雇主险有效时，自动关闭遗留提醒。
-    await connection.execute(
-      `UPDATE hr_risk_alert r
-       SET r.handle_status=2,r.handle_time=NOW(),r.handle_remark='系统核验：劳动合同已签订'
-       WHERE r.company_id=:companyId AND r.risk_type=1 AND r.handle_status IN (0,1)
-         AND EXISTS (SELECT 1 FROM hr_labor_contract c
-           WHERE c.company_id=r.company_id AND c.employee_id=r.employee_id AND c.sign_status=1)`,
-      { companyId }
-    );
-    // 若合同被撤销、雇主险减保或已经失效，重新打开此前系统办结的核心提醒。
-    await connection.execute(
-      `UPDATE hr_risk_alert r
-       JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
-       SET r.handle_status=0,r.handler_id=NULL,r.handle_time=NULL,r.handle_remark='系统复查：劳动合同当前未签订'
-       WHERE r.company_id=:companyId AND r.risk_type=1 AND r.handle_status=2
-         AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM hr_labor_contract c
-           WHERE c.company_id=r.company_id AND c.employee_id=r.employee_id AND c.sign_status=1)`,
-      { companyId }
-    );
-    await connection.execute(
-      `UPDATE hr_risk_alert r
-       JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
-       SET r.handle_status=0,r.handler_id=NULL,r.handle_time=NULL,r.handle_remark='系统复查：雇主险当前未生效'
-       WHERE r.company_id=:companyId AND r.risk_type=7 AND r.handle_status=2
-         AND e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at IS NULL
-         AND NOT EXISTS (SELECT 1 FROM hr_social_security s
-           WHERE s.id=(SELECT s2.id FROM hr_social_security s2
-             WHERE s2.company_id=r.company_id AND s2.employee_id=r.employee_id ORDER BY s2.id DESC LIMIT 1)
-           AND s.employer_insurance_status=1
-           AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE()))`,
-      { companyId }
-    );
-    await connection.execute(
-      `UPDATE hr_risk_alert r
-       SET r.handle_status=2,r.handle_time=NOW(),r.handle_remark='系统核验：雇主险保障中'
-       WHERE r.company_id=:companyId AND r.risk_type=7 AND r.handle_status IN (0,1)
-         AND EXISTS (SELECT 1 FROM hr_social_security s
-           WHERE s.id=(SELECT s2.id FROM hr_social_security s2
-             WHERE s2.company_id=r.company_id AND s2.employee_id=r.employee_id ORDER BY s2.id DESC LIMIT 1)
-           AND s.employer_insurance_status=1
-           AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE()))`,
-      { companyId }
-    );
-    let created = 0;
-    created += await scanMissingContracts(connection, companyId);
-    created += await scanEmployerInsurance(connection, companyId);
-    return { created };
+    return { created: 0, disabled: true };
   });
 }
 

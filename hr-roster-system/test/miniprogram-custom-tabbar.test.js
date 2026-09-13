@@ -15,8 +15,13 @@ if ((appJson.tabBar.list || []).length !== 5) throw new Error('底部菜单数�
 for (const marker of ['getCurrentPages()', 'wx.switchTab', 'syncSelected']) {
   if (!tabJs.includes(marker)) throw new Error(`自定义底部菜单缺少逻辑：${marker}`);
 }
-for (const label of ['工作台', '驻厂', '预支', '工资', '我的']) {
+for (const label of ['工作台', '驻厂', '预支', '工资条', '我的']) {
   if (!tabWxml.includes(label) && !tabJs.includes(label)) throw new Error(`底部菜单缺少：${label}`);
+}
+if (!tabWxml.includes('tab-count-{{list.length}}')) throw new Error('底部菜单未按实际菜单数量自动等分');
+if (!tabWxss.includes('.tab-count-3') || !tabWxss.includes('.tab-count-5')) throw new Error('底部菜单缺少员工端三栏和管理端五栏布局');
+for (const marker of ['aria-role="tab"', 'aria-selected="{{selected === index}}"', 'aria-label="{{item.text}}"']) {
+  if (!tabWxml.includes(marker)) throw new Error(`底部菜单缺少无障碍状态：${marker}`);
 }
 if (!/\.tab-label\s*\{[^}]*font-size:\s*(2[6-9]|[3-9][0-9])rpx/s.test(tabWxss)) throw new Error('底部菜单文字需保持清晰可读');
 if (!tabWxss.includes('.tab-item.active')) throw new Error('底部菜单缺少稳定的当前页标识');

@@ -26,7 +26,7 @@ assertIncludes(operationsService, 'advance-approved:', '预支审批未生成动
 assertIncludes(operationsService, 'payroll-published:', '工资发布未生成动态通知');
 
 const employeeService = read('src/services/employee.service.js');
-for (const key of ['resign:', 'dedupeKey: `notice:${reminder.riskKey}`', 'contract:', 'insurance:']) {
+for (const key of ['resign:']) {
   assertIncludes(employeeService, key, `员工核心流程未生成通知：${key}`);
 }
 

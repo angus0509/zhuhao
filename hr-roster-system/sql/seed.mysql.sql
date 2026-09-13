@@ -107,6 +107,7 @@ VALUES
 (20, '项目管理', 'project:manage', 2, 0, NULL, '/api/projects', 43, 1),
 (21, '驻厂人员查看', 'factory:view', 2, 0, NULL, '/api/factory-staff', 44, 1),
 (22, '驻厂人员管理', 'factory:manage', 2, 0, NULL, '/api/factory-staff', 45, 1),
+(56, '派遣驻厂', 'factory:assign', 2, 0, NULL, '/api/system/projects/:id/onsite-assignees', 46, 1),
 (23, '黑名单查看', 'blacklist:view', 2, 0, NULL, '/api/blacklist', 50, 1),
 (24, '黑名单管理', 'blacklist:manage', 2, 0, NULL, '/api/blacklist', 51, 1),
 (25, '预支查看', 'advance:view', 2, 0, NULL, '/api/advances', 60, 1),
@@ -140,7 +141,7 @@ WHERE permission_code IN (
   'employee:menu', 'employee:view', 'employee:create', 'employee:update', 'employee:transfer',
   'employee:batch', 'employee:resign', 'employee:export', 'contract:manage', 'social:manage', 'cert:manage',
   'employee:sensitive:view', 'risk:menu', 'risk:view', 'risk:scan', 'risk:handle',
-  'customer:view', 'project:view', 'factory:view', 'blacklist:view',
+  'customer:view', 'project:view', 'factory:view', 'factory:assign', 'blacklist:view',
   'advance:view', 'advance:approve', 'payroll:view', 'payroll:review',
   'audit:view'
 );
@@ -150,6 +151,7 @@ SELECT 3, id FROM sys_permission
 WHERE permission_code IN (
   'employee:menu', 'employee:view', 'employee:create', 'employee:batch', 'employee:update',
   'employee:transfer', 'employee:resign', 'contract:manage', 'social:manage',
+  'employee:sensitive:view',
   'customer:view', 'customer:manage', 'project:view', 'project:manage',
   'factory:view', 'factory:manage', 'blacklist:view',
   'advance:view', 'advance:create'

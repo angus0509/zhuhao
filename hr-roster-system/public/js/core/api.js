@@ -1,5 +1,54 @@
 // API 请求、缓存与表格加载状态。logout 在入口脚本加载后才会被实际调用。
 const _cache = new Map();
+const WEB_AUTH_MESSAGE_KEY = 'hrRosterAuthMessage';
+
+function rememberAuthMessage(message) {
+  sessionStorage.setItem(WEB_AUTH_MESSAGE_KEY, String(message || '登录已过期，请重新登录'));
+}
+
+function consumeAuthMessage() {
+  const message = sessionStorage.getItem(WEB_AUTH_MESSAGE_KEY) || '';
+  sessionStorage.removeItem(WEB_AUTH_MESSAGE_KEY);
+  return message;
+}
+
+function normalizeRequestOptions(options = {}) {
+  const normalized = { ...options };
+  const context = String(normalized.context || '').trim();
+  delete normalized.context;
+  const isFormData = typeof FormData !== 'undefined' && normalized.body instanceof FormData;
+  const isBlob = typeof Blob !== 'undefined' && normalized.body instanceof Blob;
+  if (normalized.body && typeof normalized.body === 'object' && !isFormData && !isBlob) {
+    normalized.body = JSON.stringify(normalized.body);
+  }
+  normalized.headers = {
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+    ...(normalized.headers || {})
+  };
+  return { normalized, context };
+}
+
+function operationErrorMessage(message, context = '') {
+  const cleanMessage = String(message || '请求失败').trim();
+  return context ? `${context}：${cleanMessage}` : cleanMessage;
+}
+
+function createSessionSupersededError() {
+  const error = new Error('登录账号已切换，已忽略上一账号的过期响应');
+  error.code = 'SESSION_SUPERSEDED';
+  return error;
+}
+
+function isSessionSupersededError(error) {
+  return error?.code === 'SESSION_SUPERSEDED';
+}
+
+function assertCurrentSession(requestSessionVersion) {
+  if (Number(state.sessionVersion) !== Number(requestSessionVersion)) {
+    throw createSessionSupersededError();
+  }
+}
 
 function cachedApi(path, ttl = 30000) {
   const entry = _cache.get(path);
@@ -27,30 +76,49 @@ function withTableLoading(wrapSelector, fn) {
 }
 
 async function api(path, options = {}) {
+  const requestSessionVersion = state.sessionVersion;
   showLoading();
+  const { normalized, context } = normalizeRequestOptions(options);
   try {
     const response = await fetch(path, {
       credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
-        ...(options.headers || {})
-      },
-      ...options
+      ...normalized
     });
+    assertCurrentSession(requestSessionVersion);
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
-      throw new Error(`接口返回异常（${response.status}），请刷新页面后重试`);
+      if (response.status === 401) {
+        const message = '登录已过期，请重新登录';
+        setSystemStatus('auth');
+        rememberAuthMessage(message);
+        logout(false, false);
+        if (typeof setLoginError === 'function') setLoginError(message);
+        throw new Error(operationErrorMessage(message, context));
+      }
+      setSystemStatus('error');
+      throw new Error(operationErrorMessage(`接口返回异常（${response.status}），请刷新页面后重试`, context));
     }
     const payload = await response.json();
+    assertCurrentSession(requestSessionVersion);
     if (!response.ok || payload.code !== 0) {
-      if (response.status === 401) logout(false, false);
-      throw new Error(payload.message || `请求失败（${response.status}）`);
+      const message = payload.message || `请求失败（${response.status}）`;
+      if (response.status === 401) {
+        setSystemStatus('auth');
+        rememberAuthMessage(message);
+        logout(false, false);
+        if (typeof setLoginError === 'function') setLoginError(message);
+      } else if (response.status >= 500) {
+        setSystemStatus('error');
+      }
+      throw new Error(operationErrorMessage(message, context));
     }
     return payload.data;
   } catch (error) {
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error('网络连接失败，请检查网络后重试');
+    if (isSessionSupersededError(error)) throw error;
+    assertCurrentSession(requestSessionVersion);
+    if (error.name === 'TypeError') {
+      setSystemStatus('error');
+      throw new Error(operationErrorMessage('网络连接失败，请检查网络后重试', context));
     }
     throw error;
   } finally {

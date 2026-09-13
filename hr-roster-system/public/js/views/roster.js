@@ -1,6 +1,9 @@
 // 花名册列表视图：筛选、导出、客户分组与表格渲染。
 async function loadEmployees() {
-  const query = [getQueryString(), 'view=activeRoster'].filter(Boolean).join('&');
+  const status = $('#statusSelect')?.value || '';
+  // 默认展示在职花名册；选择其他状态时切换为全量状态视图，避免筛选项可选但永远返回在职。
+  const view = !status || status === '2' ? 'activeRoster' : '';
+  const query = [getQueryString(), view ? `view=${view}` : ''].filter(Boolean).join('&');
   $('#exportLink').href = `/api/export/employees.csv${query ? `?${query}` : ''}`;
   $('#exportXlsxLink').href = `/api/export/employees.xlsx${query ? `?${query}` : ''}`;
   const wrap = $('.main-panel .table-wrap');
@@ -22,18 +25,29 @@ async function loadEmployees() {
 
 async function exportEmployees(event, format = 'csv') {
   event.preventDefault();
-  const query = [getQueryString(), 'view=activeRoster'].filter(Boolean).join('&');
+  const requestSessionVersion = state.sessionVersion;
+  const status = $('#statusSelect')?.value || '';
+  const view = !status || status === '2' ? 'activeRoster' : '';
+  const query = [getQueryString(), view ? `view=${view}` : ''].filter(Boolean).join('&');
   const response = await fetch(`/api/export/employees.${format}${query ? `?${query}` : ''}`, {
     credentials: 'same-origin',
     headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
   });
+  assertCurrentSession(requestSessionVersion);
 
   if (!response.ok) {
-    if (response.status === 401) logout(false);
-    throw new Error('导出失败');
+    const payload = await response.json().catch(() => null);
+    if (response.status === 401) {
+      const message = payload?.message || '登录已过期，请重新登录';
+      rememberAuthMessage(message);
+      logout(false, false);
+      setLoginError(message);
+    }
+    throw new Error(payload?.message || `员工数据导出失败（${response.status}）`);
   }
 
   const blob = await response.blob();
+  assertCurrentSession(requestSessionVersion);
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -95,12 +109,11 @@ function renderEmployees() {
     ? badge('离职交接中', 'amber')
     : badge(row.employeeStatusName, statusTone(row.employeeStatus));
   const leaveText = row => row.leaveDate || (row.employeeStatus === 3 ? '已离职' : '-');
-  const channelText = row => row.recruitmentChannelName || (row.recruitmentSourceType === 1
-    ? `招聘人｜${row.recruiterName || '-'}`
-    : row.recruitmentSourceType === 2 ? `供应商｜${row.supplierName || '-'}` : (row.channelSource || '-'));
+  const channelText = row => row.recruitmentChannelName || row.channelSource || row.recruiterName || row.supplierName || '-';
   const canEditEmployee = permissions.includes('employee:update');
   const canTransferEmployee = permissions.includes('employee:transfer');
   const canResignEmployee = permissions.includes('employee:resign');
+  const canRevealIdCard = permissions.includes('employee:sensitive:view');
 
   const renderRow = (row, index) => {
     const selected = row.id === state.selectedEmployeeId ? 'selected' : '';
@@ -110,7 +123,7 @@ function renderEmployees() {
         <td class="col-name"><strong>${escapeHtml(row.name)}</strong></td>
         <td class="col-gender">${escapeHtml(row.genderName)}</td>
         <td class="col-edu">${escapeHtml(row.education || '-')}</td>
-        <td class="col-idcard">${escapeHtml(row.idCardNo)}</td>
+        <td class="col-idcard"><span class="id-card-value">${escapeHtml(row.idCardNo)}</span>${canRevealIdCard ? `<button class="sensitive-reveal-button" type="button" data-action="reveal-id-card" data-id="${row.id}" data-masked-value="${escapeHtml(row.idCardNo)}" title="查看完整身份证号码">显示完整</button>` : ''}</td>
         <td class="col-phone">${escapeHtml(row.phone)}</td>
         <td class="col-customer">${escapeHtml(row.customerName || '-')}</td>
         <td class="col-position">${escapeHtml(row.positionName || '-')}</td>

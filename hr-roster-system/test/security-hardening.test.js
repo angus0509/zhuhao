@@ -33,7 +33,7 @@ const releaseVerifier = read('scripts/verify-release-package.sh');
 assertIncludes(releaseVerifier, 'LIBARCHIVE\\.xattr|SCHILY\\.(xattr|fflags)', '发布包验收未阻止 macOS 扩展属性');
 
 const postDeployVerify = read('scripts/post-deploy-verify.sh');
-for (const marker of ['优益数字化管理系统', '/layout-refine.css', '/js/views/roster.js', 'view=activeRoster']) {
+for (const marker of ['优企云数字化管理系统', '/layout-refine.css', '/js/views/roster.js', "'activeRoster'", 'view ? `view=${view}`']) {
   assertIncludes(postDeployVerify, marker, `上线后验证缺少页面标记：${marker}`);
 }
 assertIncludes(postDeployVerify, 'npm run smoke:onsite', '上线后验证未包含驻厂角色 smoke');

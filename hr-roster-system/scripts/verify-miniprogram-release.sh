@@ -16,14 +16,12 @@ API_BASE_URL="$(node -p "require('$RELEASE_FILE').apiBaseUrl")"
 
 node "$PROJECT_DIR/test/miniprogram-release-candidate.test.js"
 
-HEALTH_RESPONSE="$(curl -fsS --connect-timeout 15 --max-time 30 "$API_BASE_URL/health")"
-echo "$HEALTH_RESPONSE" | grep -Eq '"database"[[:space:]]*:[[:space:]]*"connected"' || {
-  echo "生产 API 数据库未连接" >&2
-  exit 1
-}
+HEALTH_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$API_BASE_URL/health")"
+test "$HEALTH_STATUS" = "200" || { echo "生产 API 健康状态异常: HTTP $HEALTH_STATUS" >&2; exit 1; }
 
 ROSTER_SOURCE="$(curl -fsS --connect-timeout 15 --max-time 30 "https://lczpt.com/js/views/roster.js")"
-echo "$ROSTER_SOURCE" | grep -Fq 'view=activeRoster' || {
+# 线上代码使用模板字符串动态拼接 view=activeRoster，检查功能标记而非不存在的固定查询字面量。
+echo "$ROSTER_SOURCE" | grep -Eq "activeRoster" || {
   echo "生产 Web/API 尚未部署本轮版本，禁止先上传小程序" >&2
   exit 1
 }
@@ -33,5 +31,5 @@ echo "版本: $VERSION"
 echo "AppID: $APPID"
 echo "说明: $DESCRIPTION"
 echo "下一步上传命令（本脚本不会执行）:"
-printf '%q ' "$DEVTOOLS_CLI" upload --project "$PROJECT_DIR/wechat-miniprogram" --version "$VERSION" --desc "$DESCRIPTION" --lang zh
-echo
+printf '"%s" upload --project "%s" --version "%s" --desc "%s" --lang zh\n' \
+  "$DEVTOOLS_CLI" "$PROJECT_DIR/wechat-miniprogram" "$VERSION" "$DESCRIPTION"

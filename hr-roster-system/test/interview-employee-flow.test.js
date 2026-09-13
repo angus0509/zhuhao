@@ -42,8 +42,13 @@ assertIncludes(service, "sourceType: 'INTERVIEW'", '面试员工未同步人才�
 assertIncludes(service, "throw createError(`请先编辑并补齐入职资料", '确认入职前未校验资料完整性');
 assertIncludes(service, 'address: encrypt(body.address)', '地址未加密写入');
 
-assertIncludes(miniAddJs, 'employeeStatus: 1', '小程序新增员工未固定进入待到岗');
-if (/EMPLOYEE_STATUS_VALUES|isInterview/.test(miniAddJs)) throw new Error('小程序驻厂新增仍保留面试状态选择');
+assertIncludes(miniAddJs, "entryMode: 'interview'", '小程序新增员工未默认进入面试模式');
+assertIncludes(miniAddJs, "employeeStatus: this.data.entryMode === 'interview' ? 6 : 1", '小程序两种录入方式未正确关联面试和待到岗');
+assertIncludes(miniAddWxml, 'data-mode="interview"', '小程序缺少面试录入选项');
+assertIncludes(miniAddWxml, 'data-mode="direct"', '小程序缺少待到岗选项');
+assertIncludes(html, '<option value="1">待到岗</option>', 'Web 缺少待到岗选项');
+assertIncludes(html, '保存后进入待到岗', 'Web 未明确保存后进入待到岗');
+assertIncludes(miniAddWxml, '>待到岗</view>', '小程序未显示待到岗文案');
 assertIncludes(miniAddJs, 'address: f.address.trim() || null', '小程序未提交地址');
 assertIncludes(miniAddJs, "'form.address': result.address", '小程序身份证OCR未回填地址');
 if (/住宅/.test(html + miniAddWxml)) throw new Error('员工地址字段仍显示为“住宅”');

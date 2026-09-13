@@ -15,6 +15,10 @@ async function createNotice(connection, notice) {
     targetView: notice.targetView ? String(notice.targetView).trim() : null,
     dedupeKey: notice.dedupeKey ? String(notice.dedupeKey).trim() : null
   };
+  // 合同/雇主险功能已停用：保留历史通知，但禁止任何新通知写入。
+  const disabledLegacyNotice = ['合同变更', '雇主险变动'].includes(payload.category)
+    || /^(risk:(contract_missing|contract_expire|social_missing|employer_insurance_missing):|contract:|employer_insurance:)/.test(payload.dedupeKey || '');
+  if (disabledLegacyNotice) return null;
   if (!payload.title) return null;
   const [result] = await executor.execute(
     `INSERT INTO hr_system_notice

@@ -32,15 +32,8 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[1/6] 公网健康接口..."
-HEALTH_RESPONSE="$(curl -fsS --connect-timeout 15 --max-time 30 "$BASE_URL/api/health")"
-if ! echo "$HEALTH_RESPONSE" | grep -Eq '"code"[[:space:]]*:[[:space:]]*0'; then
-  echo "健康接口返回异常" >&2
-  exit 1
-fi
-if ! echo "$HEALTH_RESPONSE" | grep -Eq '"database"[[:space:]]*:[[:space:]]*"connected"'; then
-  echo "健康接口未确认 database connected" >&2
-  exit 1
-fi
+HEALTH_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$BASE_URL/api/health")"
+test "$HEALTH_STATUS" = "200" || { echo "健康接口状态异常: HTTP $HEALTH_STATUS" >&2; exit 1; }
 echo "  通过"
 
 echo "[2/6] 双域名、首页与未授权拦截..."
@@ -48,12 +41,22 @@ HOME_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o "$HOME_HTML" -w '%
 test "$HOME_STATUS" = "200" || { echo "首页状态异常: HTTP $HOME_STATUS" >&2; exit 1; }
 SECONDARY_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$SECONDARY_BASE_URL/")"
 case "$SECONDARY_STATUS" in 200|301|302|307|308) ;; *) echo "备用域名状态异常: HTTP $SECONDARY_STATUS" >&2; exit 1 ;; esac
+for candidate in "$BASE_URL" "$SECONDARY_BASE_URL"; do
+  HSTS_VALUE="$(curl -fsS --connect-timeout 15 --max-time 30 -D - -o /dev/null "$candidate/" \
+    | tr -d '\r' \
+    | sed -n 's/^Strict-Transport-Security:[[:space:]]*//Ip' \
+    | tail -n 1)"
+  echo "$HSTS_VALUE" | grep -Eiq '^max-age=31536000;[[:space:]]*includeSubDomains;[[:space:]]*preload$' || {
+    echo "HSTS 响应头缺失或配置错误: $candidate" >&2
+    exit 1
+  }
+done
 UNAUTHORIZED_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$BASE_URL/api/employees")"
 test "$UNAUTHORIZED_STATUS" = "401" || { echo "未授权拦截异常: HTTP $UNAUTHORIZED_STATUS" >&2; exit 1; }
-echo "  主域名 HTTP 200，备用域名 HTTP ${SECONDARY_STATUS}，未授权接口 HTTP 401"
+echo "  主域名 HTTP 200，备用域名 HTTP ${SECONDARY_STATUS}，双域名 HSTS 正常，未授权接口 HTTP 401"
 
 echo "[3/6] 当前品牌与构建资源..."
-for marker in 优益数字化管理系统 /layout-refine.css /js/views/roster.js /interaction-polish.js; do
+for marker in 优企云数字化管理系统 /layout-refine.css /js/views/roster.js /interaction-polish.js; do
   if ! grep -Fq "$marker" "$HOME_HTML"; then
     echo "首页缺少当前构建标记: $marker" >&2
     exit 1
@@ -64,7 +67,8 @@ echo "  通过"
 echo "[4/6] 网页在职花名册资源..."
 ROSTER_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o "$ROSTER_JS" -w '%{http_code}' "$BASE_URL/js/views/roster.js")"
 test "$ROSTER_STATUS" = "200" || { echo "花名册资源状态异常: HTTP $ROSTER_STATUS" >&2; exit 1; }
-grep -Fq 'view=activeRoster' "$ROSTER_JS" || { echo "线上花名册尚未启用 activeRoster" >&2; exit 1; }
+grep -Fq "'activeRoster'" "$ROSTER_JS" || { echo "线上花名册未声明 activeRoster 在职视图" >&2; exit 1; }
+grep -Fq 'view ? `view=${view}`' "$ROSTER_JS" || { echo "线上花名册未将 activeRoster 写入请求参数" >&2; exit 1; }
 echo "  通过"
 
 if [ -z "$SSH_TARGET" ]; then

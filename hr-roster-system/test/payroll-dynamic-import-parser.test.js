@@ -1,0 +1,107 @@
+const assert = require('node:assert/strict');
+const parser = require('../public/js/core/payroll-import');
+
+const parsed = parser.parseFlexiblePayrollRows([
+  ['姓名', '底薪', '夜班奖', '住宿扣款', '实发工资', '班组'],
+  ['张三', '4500', '380', '150', '4730', 'A组']
+]);
+
+assert.deepStrictEqual(parser.parseDelimitedRows(
+  '姓名,实发工资,备注\n张三,5000,"夜班,A组"\n李四,5200,"包含""引号"""\n'
+), [
+  ['姓名', '实发工资', '备注'],
+  ['张三', '5000', '夜班,A组'],
+  ['李四', '5200', '包含"引号"']
+], 'CSV 引号内的逗号和双引号不得造成工资列错位');
+
+assert.deepStrictEqual(parser.parseDelimitedRows(
+  '姓名;实发工资;备注\n张三;5000;"夜班;A组"\n'
+), [
+  ['姓名', '实发工资', '备注'],
+  ['张三', '5000', '夜班;A组']
+], '分号分隔的工资 CSV 应自动识别且不拆分引号内容');
+
+assert.deepStrictEqual(parsed.rows[0].itemSnapshot, [
+  { label: '底薪', value: 4500, category: 'income', sortOrder: 1 },
+  { label: '夜班奖', value: 380, category: 'income', sortOrder: 2 },
+  { label: '住宿扣款', value: 150, category: 'deduction', sortOrder: 3 },
+  { label: '实发工资', value: 4730, category: 'summary', sortOrder: 4 },
+  { label: '班组', value: 'A组', category: 'display', sortOrder: 5 }
+]);
+assert.equal(parsed.rows[0].grossAmount, 4880, '未知收入项目必须计入应发合计');
+assert.equal(parsed.rows[0].otherDeduction, 150, '未知扣款项目必须计入其他扣款');
+assert.equal(parsed.rows[0].netAmount, 4730);
+assert.deepStrictEqual(parsed.rows[0].errors, []);
+assert.ok(!parsed.rows[0].itemSnapshot.some(item => item.label === '姓名'), '身份字段不得进入工资条快照');
+
+const realProjectSheet = parser.parseFlexiblePayrollRows([
+  ['姓名', '部门', '岗位', '出勤天数', '上班工时', '基本工资', '岗位工资', '加班工资', '绩效工资', '全勤奖', '交通补贴', '养老补贴', '应发合计', '考勤扣款', '个税代扣', '其他扣款', '实发'],
+  ['赵聚相', '生产部', '橡胶主管', 29, 319, 2180, 1000, 2200, 820, 300, 500, 1000, 8000, 0, 90, 0, 7910]
+]);
+assert.equal(realProjectSheet.rows[0].grossAmount, 8000, '明确提供应发合计时必须保留原表金额');
+assert.equal(realProjectSheet.rows[0].netAmount, 7910, '明确提供实发金额时必须保留原表金额');
+assert.equal(realProjectSheet.rows[0].otherDeduction, 90, '应按应发与实发差额保留扣款合计');
+assert.deepStrictEqual(realProjectSheet.rows[0].errors, []);
+assert.equal(realProjectSheet.columnMapping.find(item => item.sourceHeader === '出勤天数').category, 'display',
+  '出勤天数不得自动识别为收入');
+assert.equal(realProjectSheet.columnMapping.find(item => item.sourceHeader === '上班工时').category, 'display',
+  '上班工时不得自动识别为收入');
+assert.ok(!realProjectSheet.rows[0].warnings.some(message => /按收入明细计算/.test(message)),
+  '明确提供应发合计时不得再用明细覆盖');
+
+const mapping = parser.buildSuggestedMapping(
+  ['员工姓名', '自定义奖励', '实领工资'],
+  [['李四', '200', '5200']]
+);
+assert.deepStrictEqual(mapping.map(item => [item.target, item.category, item.includeInPayslip]), [
+  ['employeeName', '', false],
+  ['custom', 'income', true],
+  ['netAmount', 'summary', true]
+]);
+assert.doesNotThrow(() => parser.validateColumnMapping(mapping));
+
+const customCategories = parser.buildSuggestedMapping(
+  ['姓名', '收入项目', '扣除项目', '实际到账'],
+  [['赵七', '1000', '100', '900']]
+);
+assert.equal(customCategories[1].category, 'income', '自定义收入项目应自动归类为收入');
+assert.equal(customCategories[2].category, 'deduction', '自定义扣除项目应自动归类为扣款');
+assert.equal(customCategories[3].target, 'netAmount', '实际到账应自动识别为实发工资');
+
+assert.throws(
+  () => parser.validateColumnMapping(mapping.filter(item => item.target !== 'netAmount')),
+  /必须且只能指定一列实发工资/
+);
+assert.throws(
+  () => parser.validateColumnMapping([
+    ...mapping,
+    { columnIndex: 3, sourceHeader: '备用姓名', target: 'employeeName', category: '', includeInPayslip: false }
+  ]),
+  /关键字段.*重复/
+);
+
+const formula = parser.parseFlexiblePayrollRows([
+  ['姓名', '自定义奖金', '实发工资'],
+  ['王五', '=SUM(A1:A2)', '5000']
+]);
+assert.match(formula.rows[0].errors.join('；'), /不能使用公式/);
+
+assert.throws(
+  () => parser.buildSuggestedMapping(['姓名', '超'.repeat(51), '实发工资'], [['赵六', '100', '5100']]),
+  /工资项目名称最多50个字符/
+);
+
+const tooManyItems = [
+  { columnIndex: 0, sourceHeader: '姓名', target: 'employeeName', category: '', includeInPayslip: false },
+  { columnIndex: 1, sourceHeader: '实发工资', target: 'netAmount', category: 'summary', includeInPayslip: true },
+  ...Array.from({ length: 80 }, (_, index) => ({
+    columnIndex: index + 2,
+    sourceHeader: `项目${index + 1}`,
+    target: 'custom',
+    category: 'income',
+    includeInPayslip: true
+  }))
+];
+assert.throws(() => parser.validateColumnMapping(tooManyItems), /单人工资项目最多80项/);
+
+console.log('payroll-dynamic-import-parser-tests-ok');

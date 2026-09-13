@@ -16,6 +16,7 @@ const html = read('public/index.html');
 const webApp = read('public/app.js');
 const miniAdd = read('wechat-miniprogram/miniprogram/pages/employees/add/index.js');
 const miniList = read('wechat-miniprogram/miniprogram/pages/employees/index.js');
+const employeeBatch = read('public/js/core/employee-batch.js');
 
 for (const field of [
   'employee_id', 'customer_id', 'project_id', 'position_id', 'recruitment_channel_id',
@@ -33,7 +34,8 @@ assertIncludes(deploy, 'migrate-talent-employee-flow-20260810.mysql.sql', '生�
 
 assertIncludes(employeeService, 'async function syncEmployeeToTalent', '后端缺少统一人才库同步函数');
 assertIncludes(employeeService, 'async function linkExistingTalentToEmployee', '新增员工未关联已有手工人才');
-assertIncludes(employeeService, 'id_card_hash=:idCardHash) OR phone=:phone', '人才与员工未按身份证摘要或手机号匹配');
+assertIncludes(employeeService, "(:idCardHash IS NOT NULL AND id_card_hash=:idCardHash)", '人才与员工未按身份证摘要匹配');
+assertIncludes(employeeService, "(:phone IS NOT NULL AND :phone<>'' AND phone=:phone)", '已填写手机号时未用于关联人才库');
 assertIncludes(employeeService, "sourceType: 'UNJOINED'", '未入职员工未自动流转人才库');
 assertIncludes(employeeService, "sourceType: 'RESIGNED'", '离职完成未自动流转人才库');
 assertIncludes(employeeService, "sourceType: 'REHIRED'", '重新录用未更新人才状态');
@@ -46,12 +48,13 @@ assertIncludes(portalService, 'projectName: row.project_name', '人才库接口�
 assertIncludes(portalService, 'employeeStatusName:', '人才库接口缺少员工状态');
 assertIncludes(portalService, 'employeeScope(user, params', '人才库关联员工未应用员工数据权限');
 
-assertIncludes(html, '<option value="5">未入职（自动进入人才库）</option>', 'Web 新增员工缺少未入职选项');
+assertIncludes(html, '<option value="6" selected>面试（先简单登记）</option>', 'Web 新增员工缺少面试录入选项');
+assertIncludes(html, '<option value="1">待到岗</option>', 'Web 新增员工缺少待到岗选项');
 assertIncludes(webApp, 'item.talentSourceTypeName', 'Web 人才库未展示流转来源');
 assertIncludes(webApp, 'item.customerName', 'Web 人才库未展示客户单位');
-assertIncludes(webApp, "'employeeStatus'", 'Web 批量录入未支持未入职状态列');
-assertIncludes(employeeService, 'const employeeStatusMap = { 待入职: 1, 直接入职: 2, 在职: 2, 未入职: 5, 面试: 6 };', '后端批量录入未映射面试状态');
-assertIncludes(miniAdd, 'employeeStatus: 1', '小程序新增员工未固定进入待到岗');
+assertIncludes(employeeBatch, "key: 'employeeStatus'", 'Web 批量录入缺少录入状态列');
+assertIncludes(employeeService, 'const employeeStatusMap = { 待到岗: 1, 待入职: 1, 直接入职: 1, 在职: 2, 未入职: 5, 面试: 6 };', '后端批量录入未映射面试、待到岗和历史在职状态');
+assertIncludes(miniAdd, "employeeStatus: this.data.entryMode === 'interview' ? 6 : 1", '小程序新增员工未按面试或待到岗模式提交');
 assertIncludes(miniList, "isUnjoined", '小程序驻厂页面未识别未入职回流状态');
 assertIncludes(miniList, "'未入职·已入人才库'", '小程序未入职回流提示缺失');
 

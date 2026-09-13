@@ -15,10 +15,10 @@ assert.match(
   /UPDATE hr_work_task SET task_status=2[\s\S]*task_type='ARRIVAL'[\s\S]*task_status IN \(0,1\)/,
   '确认入职后必须关闭员工的到岗待办'
 );
-assert.match(
+assert.doesNotMatch(
   employeeService,
-  /createOnboardingCompliance\([\s\S]*projectId: employee\.project_id/,
-  '入职合规待办必须保留员工项目，确保驻厂数据范围一致'
+  /createOnboardingCompliance\(/,
+  '当前简化流程不应再创建入职合规待办'
 );
 assert.match(
   workTaskService,

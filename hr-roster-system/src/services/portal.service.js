@@ -4,6 +4,7 @@ const { encrypt, sha256 } = require('../utils/crypto');
 const { maskPhone } = require('../utils/mask');
 const { customerScope, employeeScope, projectScope } = require('../utils/data-scope');
 const operationsService = require('./operations.service');
+const { assertEmployeeScope } = require('./employee.service');
 
 const serviceTypeNames = { 1: '劳务派遣', 2: '岗位外包', 3: '灵活用工', 4: 'RPO招聘' };
 const employmentTypeNames = { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' };
@@ -27,6 +28,7 @@ async function listClients(companyId, user) {
     `SELECT c.id, c.customer_name clientName, c.contact_name contactName, c.contact_phone contactPhone,
       COALESCE(c.remark,'月结30天') settlementCycle,
       COUNT(DISTINCT p.id) projectCount,
+      COUNT(DISTINCT CASE WHEN p.status = 2 THEN p.id END) effectiveProjectCount,
       COUNT(DISTINCT CASE WHEN fs.onsite_status = 2 THEN fs.employee_id END) activeCount
      FROM crm_customer c
      LEFT JOIN labor_project p ON p.customer_id = c.id AND p.company_id = c.company_id
@@ -36,12 +38,36 @@ async function listClients(companyId, user) {
   );
 }
 
-async function createClient(companyId, body, operatorId = 0) {
+async function createClient(companyId, body, operatorId = 0, user = null) {
   const result = await operationsService.createCustomer(companyId, {
     ...body,
     customerName: body.clientName || body.customerName
-  }, operatorId);
+  }, operatorId, user);
   return { ...result, clientId: result.customerId };
+}
+
+async function assertCustomerAccess(companyId, customerId, user) {
+  const params = { companyId, customerId: Number(customerId) };
+  const customer = await db.first(
+    `SELECT c.id FROM crm_customer c
+     WHERE c.company_id=:companyId AND c.id=:customerId AND c.status=1
+       ${customerScope(user, params, 'c')} LIMIT 1`,
+    params
+  );
+  if (!customer) throw createError('客户单位不存在或无数据权限', 403);
+  return customer;
+}
+
+async function assertProjectAccess(companyId, projectId, customerId, user) {
+  const params = { companyId, projectId: Number(projectId), customerId: Number(customerId) };
+  const project = await db.first(
+    `SELECT p.id FROM labor_project p
+     WHERE p.company_id=:companyId AND p.id=:projectId AND p.customer_id=:customerId
+       ${projectScope(user, params, 'p')} LIMIT 1`,
+    params
+  );
+  if (!project) throw createError('项目不存在、不属于该客户或无数据权限', 403);
+  return project;
 }
 
 async function listClientServices(companyId, query = {}, user) {
@@ -86,16 +112,32 @@ async function listClientServices(companyId, query = {}, user) {
   }));
 }
 
-async function createClientService(companyId, body, operatorId) {
+async function createClientService(companyId, body, operatorId, user) {
   if (!body.customerId || !body.requestType || !body.requestDate || !body.deadline || !body.ownerName || !body.description) {
     throw createError('请完整填写客户单位、事项类型、日期、负责人和事项说明');
   }
   if (body.deadline < body.requestDate) throw createError('完成日期不能早于提交日期');
-  const customer = await db.first('SELECT id FROM crm_customer WHERE company_id=:companyId AND id=:customerId AND status=1', { companyId, customerId: Number(body.customerId) });
-  if (!customer) throw createError('客户单位不存在或已停用');
+  await assertCustomerAccess(companyId, Number(body.customerId), user);
   if (body.projectId) {
-    const project = await db.first('SELECT id FROM labor_project WHERE company_id=:companyId AND id=:projectId AND customer_id=:customerId', { companyId, projectId: Number(body.projectId), customerId: Number(body.customerId) });
-    if (!project) throw createError('所选项目不属于该客户单位');
+    await assertProjectAccess(companyId, Number(body.projectId), Number(body.customerId), user);
+  }
+  if (body.employeeId) {
+    await assertEmployeeScope(companyId, Number(body.employeeId), user);
+    const employee = await db.first(
+      `SELECT j.customer_id customerId,j.project_id projectId
+       FROM hr_employee e
+       LEFT JOIN hr_employee_job j ON j.id=(SELECT j2.id FROM hr_employee_job j2
+         WHERE j2.company_id=e.company_id AND j2.employee_id=e.id
+         ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1)
+       WHERE e.company_id=:companyId AND e.id=:employeeId AND e.deleted_at IS NULL`,
+      { companyId, employeeId: Number(body.employeeId) }
+    );
+    if (!employee || Number(employee.customerId) !== Number(body.customerId)) {
+      throw createError('所选员工不属于该客户单位');
+    }
+    if (body.projectId && Number(employee.projectId || 0) !== Number(body.projectId)) {
+      throw createError('所选员工不属于该项目');
+    }
   }
   const requestNo = `FW${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${String(Date.now()).slice(-6)}`;
   const result = await db.query(
@@ -119,9 +161,20 @@ async function createClientService(companyId, body, operatorId) {
   return { requestId: result.insertId, requestNo };
 }
 
-async function updateClientServiceStatus(companyId, requestId, body) {
+async function updateClientServiceStatus(companyId, requestId, body, user) {
   const status = Number(body.status);
   if (![1, 2, 3].includes(status)) throw createError('工单状态不正确');
+  const current = await db.first(
+    `SELECT id,customer_id customerId,project_id projectId,employee_id employeeId
+     FROM client_service_request WHERE company_id=:companyId AND id=:requestId LIMIT 1`,
+    { companyId, requestId }
+  );
+  if (!current) throw createError('客户交付工单不存在', 404);
+  await assertCustomerAccess(companyId, Number(current.customerId), user);
+  if (current.projectId) {
+    await assertProjectAccess(companyId, Number(current.projectId), Number(current.customerId), user);
+  }
+  if (current.employeeId) await assertEmployeeScope(companyId, Number(current.employeeId), user);
   const result = await db.query(
     `UPDATE client_service_request SET status=:status,
      completed_at=CASE WHEN :status=3 THEN NOW() ELSE NULL END, updated_at=NOW()
@@ -132,8 +185,10 @@ async function updateClientServiceStatus(companyId, requestId, body) {
   return { requestId, status };
 }
 
-async function listTalents(companyId, user) {
-  const params = { companyId, scopeUserId: Number(user?.id || 0) };
+async function listTalents(companyId, user, query = {}) {
+  const keyword = String(query.keyword || '').trim().slice(0, 80);
+  const keywordHash = /^\d{17}[\dXx]$/.test(keyword) ? sha256(keyword.toUpperCase()) : '';
+  const params = { companyId, scopeUserId: Number(user?.id || 0), keyword: `%${keyword}%`, keywordHash };
   const linkedEmployeeScope = !user || Number(user.dataScope) === 1
     ? ''
     : employeeScope(user, params, 'e', 'j').replace(/^\s*AND\s+/i, '');
@@ -158,6 +213,8 @@ async function listTalents(companyId, user) {
      LEFT JOIN hr_position pos ON pos.id=COALESCE(t.position_id,j.position_id) AND pos.company_id=t.company_id
      LEFT JOIN hr_recruitment_channel rc ON rc.id=COALESCE(t.recruitment_channel_id,e.recruitment_channel_id) AND rc.company_id=t.company_id
      WHERE t.company_id = :companyId
+       AND (:keyword = '%%' OR t.name LIKE :keyword OR t.phone LIKE :keyword
+            OR (:keywordHash <> '' AND t.id_card_hash = :keywordHash))
        ${scopeCondition}
      ORDER BY t.id DESC`, params
   );
@@ -170,6 +227,10 @@ async function listTalents(companyId, user) {
     intentionJob: row.intended_position || '', tags: row.remark ? row.remark.split(/[，,]/).filter(Boolean) : [],
     followStatus: statusNames[row.candidate_status] || '待联系', ownerName: row.owner_name || '企业管理员',
     employeeId: row.employee_id || null,
+    lifecycleStatus: row.lifecycle_status || '',
+    customerId: row.customer_id || null,
+    projectId: row.project_id || null,
+    positionId: row.position_id || null,
     talentSourceType: row.talent_source_type || 'MANUAL',
     talentSourceTypeName: sourceTypeNames[row.talent_source_type] || '手工录入',
     customerName: row.customer_name || '未关联客户',
@@ -225,11 +286,76 @@ async function employmentRecords(companyId, user) {
   );
 }
 
-async function auditLogs(companyId) {
+function auditLogScope(user, params) {
+  if (!user || Number(user.dataScope) === 1) return '';
+  params.auditUserId = Number(user.id || 0);
+  const employeeFilter = employeeScope(user, params, 'audit_e', 'audit_j');
+  const projectFilter = projectScope(user, params, 'audit_p');
+  const employeeJoin = `JOIN hr_employee audit_e ON audit_e.company_id=l.company_id
+    LEFT JOIN hr_employee_job audit_j ON audit_j.id=(SELECT audit_j2.id FROM hr_employee_job audit_j2
+      WHERE audit_j2.company_id=audit_e.company_id AND audit_j2.employee_id=audit_e.id
+      ORDER BY (audit_j2.job_status=1) DESC,audit_j2.id DESC LIMIT 1)`;
+  return ` AND (
+    l.operator_id=:auditUserId
+    OR (l.biz_type IN ('employee','onboarding_compliance') AND EXISTS (
+      SELECT 1 FROM hr_employee audit_e
+      LEFT JOIN hr_employee_job audit_j ON audit_j.id=(SELECT audit_j2.id FROM hr_employee_job audit_j2
+        WHERE audit_j2.company_id=audit_e.company_id AND audit_j2.employee_id=audit_e.id
+        ORDER BY (audit_j2.job_status=1) DESC,audit_j2.id DESC LIMIT 1)
+      WHERE audit_e.company_id=l.company_id AND audit_e.id=l.biz_id${employeeFilter}
+    ))
+    OR (l.biz_type='salary_advance' AND EXISTS (
+      SELECT 1 FROM salary_advance audit_advance ${employeeJoin}
+      WHERE audit_advance.company_id=l.company_id AND audit_advance.id=l.biz_id
+        AND audit_e.id=audit_advance.employee_id${employeeFilter}
+    ))
+    OR (l.biz_type='work_task' AND EXISTS (
+      SELECT 1 FROM hr_work_task audit_task ${employeeJoin}
+      WHERE audit_task.company_id=l.company_id AND audit_task.id=l.biz_id
+        AND audit_e.id=audit_task.employee_id${employeeFilter}
+    ))
+    OR (l.biz_type='attachment' AND EXISTS (
+      SELECT 1 FROM hr_attachment audit_attachment ${employeeJoin}
+      WHERE audit_attachment.company_id=l.company_id AND audit_attachment.id=l.biz_id
+        AND audit_e.id=audit_attachment.employee_id${employeeFilter}
+    ))
+    OR (l.biz_type='risk_case' AND EXISTS (
+      SELECT 1 FROM hr_risk_case audit_case
+      JOIN hr_risk_alert audit_risk ON audit_risk.id=audit_case.source_alert_id AND audit_risk.company_id=audit_case.company_id
+      ${employeeJoin}
+      WHERE audit_case.company_id=l.company_id AND audit_case.id=l.biz_id
+        AND audit_e.id=audit_risk.employee_id${employeeFilter}
+    ))
+    OR (l.biz_type IN ('salary_batch','project_onsite_assignment') AND EXISTS (
+      SELECT 1 FROM labor_project audit_p
+      LEFT JOIN salary_batch audit_batch ON audit_batch.project_id=audit_p.id AND audit_batch.company_id=audit_p.company_id
+      WHERE audit_p.company_id=l.company_id
+        AND ((l.biz_type='salary_batch' AND audit_batch.id=l.biz_id)
+          OR (l.biz_type='project_onsite_assignment' AND audit_p.id=l.biz_id))${projectFilter}
+    ))
+    OR (l.biz_type='salary_detail' AND EXISTS (
+      SELECT 1 FROM salary_detail audit_detail
+      JOIN salary_batch audit_batch ON audit_batch.id=audit_detail.batch_id AND audit_batch.company_id=audit_detail.company_id
+      JOIN labor_project audit_p ON audit_p.id=audit_batch.project_id AND audit_p.company_id=audit_batch.company_id
+      WHERE audit_detail.company_id=l.company_id AND audit_detail.id=l.biz_id${projectFilter}
+    ))
+    OR (l.biz_type='salary_dispute' AND EXISTS (
+      SELECT 1 FROM salary_dispute audit_dispute
+      JOIN salary_detail audit_detail ON audit_detail.id=audit_dispute.salary_detail_id AND audit_detail.company_id=audit_dispute.company_id
+      JOIN salary_batch audit_batch ON audit_batch.id=audit_detail.batch_id AND audit_batch.company_id=audit_detail.company_id
+      JOIN labor_project audit_p ON audit_p.id=audit_batch.project_id AND audit_p.company_id=audit_batch.company_id
+      WHERE audit_dispute.company_id=l.company_id AND audit_dispute.id=l.biz_id${projectFilter}
+    ))
+  )`;
+}
+
+async function auditLogs(companyId, user) {
+  const params = { companyId };
+  const scope = auditLogScope(user, params);
   const rows = await db.query(
     `SELECT id, operator_name operatorName, module_name moduleName, action_type actionType,
       biz_id bizId, after_data afterData, created_at createdAt
-     FROM hr_operation_log WHERE company_id=:companyId ORDER BY id DESC LIMIT 200`, { companyId }
+     FROM hr_operation_log l WHERE l.company_id=:companyId${scope} ORDER BY l.id DESC LIMIT 200`, params
   );
   return rows.map(row => ({
     ...row, operatorName: row.operatorName || '系统管理员',
@@ -241,7 +367,7 @@ async function dashboard(companyId, user) {
   const params = { companyId };
   const employeeFilter = employeeScope(user, params, 'e', 'j');
   const customerFilter = customerScope(user, params, 'c');
-  const [employeeCounts, customers, employment, compliance, risks, trend] = await Promise.all([
+  const [employeeCounts, customers, employment, compliance, risks, trend, suppliers] = await Promise.all([
     db.first(`SELECT COUNT(*) employeeTotal, SUM(employee_status=2) activeTotal, SUM(employee_status=1) pendingOnboardTotal
       FROM hr_employee e
       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
@@ -283,7 +409,14 @@ async function dashboard(companyId, user) {
          )`}) resignations
       FROM (SELECT DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL n MONTH) month_start FROM
       (SELECT 0 n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5) nums) months
-      ORDER BY months.month_start`, params)
+      ORDER BY months.month_start`, params),
+    db.query(`SELECT COALESCE(rc.channel_name, '未填写招聘渠道') name, COUNT(DISTINCT e.id) value
+      FROM hr_employee e
+      JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+      LEFT JOIN hr_recruitment_channel rc ON rc.id=e.recruitment_channel_id AND rc.company_id=e.company_id
+      WHERE e.company_id=:companyId AND e.employee_status=2 AND e.deleted_at IS NULL
+        ${employeeScope(user, params, 'e', 'j')}
+      GROUP BY COALESCE(rc.id, 0), rc.channel_name ORDER BY value DESC, name`, params)
   ]);
   const active = Number(compliance.activeTotal || 0);
   const highOpenRisks = risks.filter(item => Number(item.riskType) > 0).reduce((sum, item) => sum + Number(item.unresolved || 0), 0);
@@ -297,6 +430,9 @@ async function dashboard(companyId, user) {
     },
     customerDistribution: customers.map(item => ({ name: item.name, value: Number(item.value) })),
     employmentDistribution: employment.map(item => ({ name: employmentTypeNames[item.type] || '其他', value: Number(item.value) })),
+    recruitmentChannelDistribution: suppliers.map(item => ({ name: item.name, value: Number(item.value || 0) })),
+    // 保留旧字段，兼容尚未更新的客户端。
+    supplierDistribution: suppliers.map(item => ({ name: item.name, value: Number(item.value || 0) })),
     compliance: {
       contractRate: active ? Math.round(Number(compliance.contractCount || 0) / active * 100) : 100,
       employerInsuranceRate: active ? Math.round(Number(compliance.employerInsuranceCount || 0) / active * 100) : 100,

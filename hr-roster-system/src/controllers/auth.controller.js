@@ -1,4 +1,5 @@
 const authService = require('../services/auth.service');
+const { managerDeviceAuthService } = require('../services/manager-device-auth.service');
 const { success, asyncHandler } = require('../utils/response');
 const env = require('../config/env');
 
@@ -20,12 +21,40 @@ exports.login = asyncHandler(async (req, res) => {
     username: req.body.username,
     password: req.body.password
   });
+  if (req.body.rememberLogin === true && data.user.accountType === 'MANAGER') {
+    const remembered = await managerDeviceAuthService.issue({
+      companyId: data.user.companyId,
+      userId: data.user.id,
+      deviceInfo: req.header('user-agent'),
+      ipAddress: req.ip
+    });
+    data.refreshToken = remembered.refreshToken;
+    data.refreshExpiresAt = remembered.expiresAt;
+  }
   // Web 使用 HttpOnly Cookie；小程序继续使用响应体中的 Bearer Token，保持现有兼容性。
   res.cookie(SESSION_COOKIE, data.token, sessionCookieOptions());
   success(res, data, '登录成功');
 });
 
-exports.logout = asyncHandler(async (_req, res) => {
+exports.refresh = asyncHandler(async (req, res) => {
+  const remembered = await managerDeviceAuthService.refresh({
+    companyId: req.companyId,
+    refreshToken: req.body.refreshToken,
+    deviceInfo: req.header('user-agent'),
+    ipAddress: req.ip
+  });
+  const data = await authService.createSessionForUser(remembered.user, req.companyId);
+  data.refreshToken = remembered.refreshToken;
+  data.refreshExpiresAt = remembered.expiresAt;
+  res.cookie(SESSION_COOKIE, data.token, sessionCookieOptions());
+  success(res, data, '一键登录成功');
+});
+
+exports.logout = asyncHandler(async (req, res) => {
+  await managerDeviceAuthService.revoke({
+    companyId: req.companyId,
+    refreshToken: req.body?.refreshToken
+  });
   res.clearCookie(SESSION_COOKIE, { ...sessionCookieOptions(), maxAge: undefined });
   success(res, null, '已退出登录');
 });

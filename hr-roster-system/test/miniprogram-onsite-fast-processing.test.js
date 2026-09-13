@@ -65,6 +65,12 @@ assert.doesNotMatch(completionBlock, /insurance_status='TERMINATED'/, '快速离
 assert.match(service, /handleArrivalResult[\s\S]*!\[1, 6\]\.includes/, '历史面试人员无法按待到岗标记未入职');
 assert.match(migration, /UPDATE hr_work_task[\s\S]*task_type IN \('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE'\)[\s\S]*task_status IN \(0,1\)/, '迁移未关闭全部开放旧合规待办');
 assert.doesNotMatch(migration, /completed\.company_id IS NULL/, '迁移会因历史完成记录而漏掉仍开放的重复待办');
-assert.match(migration, /source_type='LEGACY_CLOSED'[\s\S]*source_id=t\.id[\s\S]*task_status=3/, '迁移未通过独立归档来源避免历史待办唯一键冲突');
+const workTaskUpdates = migration.match(/UPDATE hr_work_task[\s\S]*?;/g) || [];
+assert.equal(workTaskUpdates.length, 2, '旧合规待办必须拆成两步更新，避免 MySQL 逐列校验联合唯一键时冲突');
+assert.match(workTaskUpdates[0], /source_type='LEGACY_CLOSED'[\s\S]*source_id=t\.id/, '第一步必须先为每条旧待办设置唯一归档来源');
+assert.doesNotMatch(workTaskUpdates[0], /task_status\s*=\s*3/, '第一步不得同时修改任务状态');
+assert.match(workTaskUpdates[1], /task_status\s*=\s*3/, '第二步必须关闭旧待办');
+assert.match(workTaskUpdates[1], /source_type='LEGACY_CLOSED'/, '第二步只能关闭已分配唯一归档来源的待办');
+assert.doesNotMatch(workTaskUpdates[1], /source_id\s*=\s*t\.id/, '第二步不得再改动联合唯一键的来源编号');
 
 console.log('miniprogram-onsite-fast-processing-tests-ok');

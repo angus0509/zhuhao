@@ -14,8 +14,8 @@ assertIncludes(homeWxml, '<text>驻厂快速办理</text>', '首页未切换到�
 if (/驻厂待处理|合规待办|驻厂处理队列|\/work-tasks/.test(homeJs + homeWxml)) throw new Error('首页仍保留驻厂待办或合规队列');
 
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
-assertIncludes(taskJs, "['risk', 'compliance', 'all', 'operations']", '待办页未支持驻厂业务专用模式');
-assertIncludes(taskJs, "this.data.mode === 'operations'", '驻厂业务队列未排除合规重复事项');
+assertIncludes(taskJs, "const mode = 'operations'", '待办页未固定为驻厂业务模式');
+if (/CONTRACT|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs)) throw new Error('驻厂业务队列仍保留合规事项');
 
 const miniContractJs = read('wechat-miniprogram/miniprogram/pages/employees/contract/index.js');
 const miniContractWxml = read('wechat-miniprogram/miniprogram/pages/employees/contract/index.wxml');
@@ -29,11 +29,7 @@ for (const removed of ['合同编号 *', '合同类型 *', '开始日期 *', '�
 }
 
 const html = read('public/index.html');
-const webContractBlock = html.slice(html.indexOf('id="contractModal"'), html.indexOf('id="socialModal"'));
-assertIncludes(webContractBlock, 'name="contractDate"', '网页端合同登记缺少合同日期');
-for (const removed of ['name="contractNo"', 'name="contractType"', 'name="startDate"', 'name="endDate"', 'name="renewalCount"']) {
-  if (webContractBlock.includes(removed)) throw new Error(`网页端合同快速登记仍显示多余字段：${removed}`);
-}
+if (/id="contractModal"|id="contractForm"|name="contractDate"/.test(html)) throw new Error('网页端仍保留已取消的合同登记表单');
 
 const employeeService = read('src/services/employee.service.js');
 assertIncludes(employeeService, 'body.contractDate || body.signDate || body.startDate', '合同服务未兼容统一合同日期');

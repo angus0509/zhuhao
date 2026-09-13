@@ -8,6 +8,7 @@ exports.createUser = asyncHandler(async (req, res) => success(res, await systemS
 exports.updateUser = asyncHandler(async (req, res) => success(res, await systemService.updateUser(req.companyId, Number(req.params.id), req.body), '账号更新成功'));
 exports.toggleUserStatus = asyncHandler(async (req, res) => success(res, await systemService.toggleUserStatus(req.companyId, Number(req.params.id), req.body.status), '状态更新成功'));
 exports.resetPassword = asyncHandler(async (req, res) => success(res, await systemService.resetPassword(req.companyId, Number(req.params.id), req.body), '密码重置成功'));
+exports.deleteUser = asyncHandler(async (req, res) => success(res, await systemService.deleteUser(req.companyId, Number(req.params.id), req.user), '账号已删除'));
 
 // 角色管理
 exports.listRoles = asyncHandler(async (req, res) => success(res, await systemService.listRoles(req.companyId)));

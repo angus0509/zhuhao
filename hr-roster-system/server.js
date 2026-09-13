@@ -8,6 +8,7 @@ const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const DATA_DIR = path.join(ROOT, 'data');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+const EXCELJS_BROWSER_FILE = require.resolve('exceljs/dist/exceljs.min.js');
 
 const now = () => new Date().toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
@@ -177,9 +178,10 @@ function readDb() {
     { id: 2, clientName: '联创智能装备有限公司', contactName: '吴主管', contactPhone: '13810001002', settlementCycle: '月结45天', status: 1 }
   ];
   db.projects = Array.isArray(db.projects) ? db.projects : [
-    { id: 1, clientId: 1, projectCode: 'XM-2026-001', projectName: '华东精密一厂驻场项目', worksiteName: '滨江一厂', serviceType: '岗位外包', managerName: '林少芬', activeCount: 3, status: 1 },
-    { id: 2, clientId: 2, projectCode: 'XM-2026-002', projectName: '联创装备招聘交付项目', worksiteName: '临平厂区', serviceType: 'RPO招聘', managerName: '李海', activeCount: 1, status: 1 }
+    { id: 1, clientId: 1, projectCode: 'XM-2026-001', projectName: '华东精密一厂驻场项目', worksiteName: '滨江一厂', serviceType: '岗位外包', managerName: '林少芬', activeCount: 3, status: 2 },
+    { id: 2, clientId: 2, projectCode: 'XM-2026-002', projectName: '联创装备招聘交付项目', worksiteName: '临平厂区', serviceType: 'RPO招聘', managerName: '李海', activeCount: 1, status: 2 }
   ];
+  db.projects = db.projects.map(project => Number(project.status) === 1 ? { ...project, status: 2 } : project);
   db.talents = Array.isArray(db.talents) ? db.talents : [
     { id: 1, name: '赵凯', phone: '13610002001', source: '员工转介绍', intentionJob: '普工', tags: ['可夜班', '已面试'], followStatus: '待入职', ownerName: '林少芬', lastFollowAt: now() },
     { id: 2, name: '孙丽', phone: '13610002002', source: '招聘平台', intentionJob: '质检员', tags: ['有经验'], followStatus: '跟进中', ownerName: '李海', lastFollowAt: now() }
@@ -268,9 +270,253 @@ function addLog(db, moduleName, actionType, bizId = 0, detail = '') {
   });
 }
 
+function prototypeRecruitmentChannels(db) {
+  const configured = Array.isArray(db.recruitmentChannels) ? db.recruitmentChannels : [];
+  const channelMap = new Map(configured.map(item => [String(item.channelName || '').trim(), { ...item }]));
+  db.employees
+    .filter(item => !item.deletedAt)
+    .forEach(employee => {
+      const channelName = String(employee.recruitmentChannelName || employee.channelSource || '').trim();
+      if (channelName && !channelMap.has(channelName)) {
+        channelMap.set(channelName, { id: channelMap.size + 1, channelName, status: 1, remark: '员工登记渠道' });
+      }
+    });
+
+  return [...channelMap.values()].filter(item => item.channelName).map(channel => {
+    const employees = db.employees.filter(employee => {
+      const employeeChannel = String(employee.recruitmentChannelName || employee.channelSource || '').trim();
+      return !employee.deletedAt && employeeChannel === channel.channelName;
+    });
+    const customerNames = new Set();
+    const feeModes = new Set();
+    employees.forEach(employee => {
+      const assignment = db.factoryStaff.find(item => Number(item.employeeId) === Number(employee.id));
+      const project = db.projects.find(item => Number(item.id) === Number(assignment?.projectId));
+      const customer = db.clients.find(item => Number(item.id) === Number(project?.clientId));
+      if (customer?.clientName) customerNames.add(customer.clientName);
+      if (employee.feeMode) feeModes.add(employee.feeMode);
+    });
+    return {
+      id: Number(channel.id),
+      channelName: channel.channelName,
+      remark: channel.remark || '员工登记渠道',
+      status: Number(channel.status) === 0 ? 0 : 1,
+      employeeCount: employees.length,
+      activeEmployeeCount: employees.filter(item => Number(item.employeeStatus) === 2).length,
+      employeeNames: employees.map(item => item.name).join('、'),
+      customerCount: customerNames.size,
+      customerNames: [...customerNames].join('、'),
+      feeModes: [...feeModes].join('、')
+    };
+  });
+}
+
+function prototypePayrollAmount(value, fieldName) {
+  const amount = Number(value || 0);
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`${fieldName}必须为非负数字`);
+  return Math.round(amount * 100) / 100;
+}
+
+function normalizePrototypePayrollAmounts(row = {}) {
+  const incomeFields = [
+    'baseSalary', 'positionSalary', 'performanceSalary', 'allowanceAmount',
+    'pieceAmount', 'overtime15Amount', 'overtime20Amount', 'overtime30Amount'
+  ];
+  const deductionFields = ['socialDeduction', 'taxDeduction', 'advanceDeduction', 'otherDeduction'];
+  const amounts = {};
+  incomeFields.forEach(field => { amounts[field] = prototypePayrollAmount(row[field], field); });
+  deductionFields.forEach(field => { amounts[field] = prototypePayrollAmount(row[field], field); });
+  let grossAmount = incomeFields.reduce((sum, field) => sum + amounts[field], 0);
+  const importedGross = prototypePayrollAmount(row.grossAmount, '应发工资');
+  const hasImportedGross = row.grossAmount !== undefined && row.grossAmount !== null
+    && String(row.grossAmount).trim() !== '';
+  if (hasImportedGross) {
+    if (grossAmount === 0 && importedGross > 0) amounts.baseSalary = importedGross;
+    grossAmount = importedGross;
+  }
+  let deductions = deductionFields.reduce((sum, field) => sum + amounts[field], 0);
+  const hasNet = row.netAmount !== undefined && row.netAmount !== null && String(row.netAmount).trim() !== '';
+  if (hasNet) {
+    const importedNet = prototypePayrollAmount(row.netAmount, '实发工资');
+    if (importedNet > grossAmount) throw new Error('实发工资不能超过应发工资');
+    const missingDeduction = Math.round((grossAmount - importedNet - deductions) * 100) / 100;
+    if (missingDeduction < -0.01) throw new Error('实发工资与应发工资、扣款明细无法对应');
+    if (missingDeduction > 0) {
+      amounts.otherDeduction = Math.round((amounts.otherDeduction + missingDeduction) * 100) / 100;
+      deductions += missingDeduction;
+    }
+  }
+  if (deductions > grossAmount) throw new Error('扣款合计不能超过应发工资');
+  return {
+    ...amounts,
+    grossAmount: Math.round(grossAmount * 100) / 100,
+    netAmount: Math.round((grossAmount - deductions) * 100) / 100
+  };
+}
+
+function prototypePayrollEmployee(db, projectId, row) {
+  const projectEmployeeIds = new Set(db.factoryStaff
+    .filter(item => Number(item.projectId) === Number(projectId))
+    .map(item => Number(item.employeeId)));
+  const candidates = db.employees.filter(employee => [2, 3].includes(Number(employee.employeeStatus))
+    && !employee.deletedAt && projectEmployeeIds.has(Number(employee.id)));
+  const employeeNo = String(row.employeeNo || '').trim();
+  const idCardNo = String(row.idCardNo || '').trim().toUpperCase();
+  const employeeName = String(row.employeeName || '').trim();
+  const phone = String(row.phone || '').trim();
+  let matches = [];
+  if (employeeNo) matches = candidates.filter(employee => employee.employeeNo === employeeNo);
+  else if (idCardNo) matches = candidates.filter(employee => String(employee.idCardNo || '').toUpperCase() === idCardNo);
+  else if (employeeName && phone) matches = candidates.filter(employee => employee.name === employeeName && employee.phone === phone);
+  else if (employeeName) matches = candidates.filter(employee => employee.name === employeeName);
+  else if (phone) matches = candidates.filter(employee => employee.phone === phone);
+  else throw new Error('缺少员工身份信息');
+  if (!matches.length) throw new Error('员工不存在或不属于所选项目');
+  if (matches.length > 1) throw new Error('存在重名员工，请增加手机号、工号或身份证号识别');
+  return matches[0];
+}
+
+function previewPrototypePayrollRows(db, projectId, rows) {
+  const project = db.projects.find(item => Number(item.id) === Number(projectId) && item.status === 2);
+  if (!project) throw new Error('项目不存在或不可用');
+  if (!Array.isArray(rows) || !rows.length) throw new Error('请至少导入一名员工工资');
+  if (rows.length > 500) throw new Error('单个工资批次最多500人');
+  const seenEmployees = new Set();
+  const previewRows = rows.map((source, index) => {
+    const errors = Array.isArray(source.errors) ? source.errors.map(String).filter(Boolean) : [];
+    const warnings = Array.isArray(source.warnings) ? source.warnings.map(String).filter(Boolean) : [];
+    let employee = null;
+    let amounts = null;
+    try {
+      amounts = normalizePrototypePayrollAmounts(source);
+    } catch (error) {
+      errors.push(`第${index + 1}行${error.message}`);
+    }
+    try {
+      employee = prototypePayrollEmployee(db, projectId, source);
+      if (seenEmployees.has(Number(employee.id))) throw new Error('员工重复');
+      seenEmployees.add(Number(employee.id));
+    } catch (error) {
+      errors.push(`第${index + 1}行${error.message}`);
+    }
+    return {
+      rowNumber: Number(source.rowNumber || index + 1),
+      employeeId: employee ? Number(employee.id) : null,
+      employeeName: employee?.name || String(source.employeeName || '').trim(),
+      employeeNo: employee?.employeeNo || String(source.employeeNo || '').trim(),
+      ...(amounts || {}),
+      errors: [...new Set(errors)],
+      warnings: [...new Set(warnings)]
+    };
+  });
+  const errorRows = previewRows.filter(item => item.errors.length).length;
+  return {
+    projectId: Number(project.id),
+    projectName: project.projectName,
+    totalRows: previewRows.length,
+    validRows: previewRows.length - errorRows,
+    errorRows,
+    rows: previewRows
+  };
+}
+
 function maskPhone(phone) {
   if (!phone) return '';
   return String(phone).replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2');
+}
+
+function prototypePayrollBatchDetailRows(db, batch) {
+  const projectEmployeeIds = db.factoryStaff
+    .filter(item => Number(item.projectId) === Number(batch.projectId))
+    .map(item => Number(item.employeeId));
+  const sourceDetails = Array.isArray(batch.details) && batch.details.length
+    ? batch.details
+    : projectEmployeeIds.slice(0, Number(batch.employeeCount || 0)).map((employeeId, index) => ({
+      employeeId,
+      grossAmount: Number(batch.grossTotal || 0) / Math.max(1, Number(batch.employeeCount || 1)),
+      netAmount: Number(batch.netTotal || 0) / Math.max(1, Number(batch.employeeCount || 1)),
+      prototypeIndex: index
+    }));
+  return sourceDetails.map((detail, index) => {
+    const employee = db.employees.find(item => Number(item.id) === Number(detail.employeeId)) || {};
+    const published = batch.status === 'PUBLISHED';
+    const signed = published && index < Number(batch.signedCount || 0);
+    const viewed = signed || (published && index % 2 === 1);
+    const displayStatus = !published ? '未发布' : signed ? '已签收' : viewed ? '待签字' : '待查看';
+    return {
+      id: Number(batch.id) * 1000 + index + 1,
+      employeeId: Number(detail.employeeId),
+      employeeName: employee.name || `员工${index + 1}`,
+      phoneMasked: maskPhone(employee.phone || ''),
+      grossAmount: Math.round(Number(detail.grossAmount || 0) * 100) / 100,
+      netAmount: Math.round(Number(detail.netAmount || 0) * 100) / 100,
+      receiptStatus: signed ? 2 : published ? 1 : 0,
+      receiptAt: signed ? `${batch.salaryMonth}-28 18:00:00` : null,
+      viewed,
+      wechatBound: Number(detail.employeeId) !== 3,
+      signedName: signed ? employee.name : null,
+      signedAt: signed ? `${batch.salaryMonth}-28 17:58:00` : null,
+      signaturePreviewUrl: null,
+      deliveryStatus: published ? '发放成功' : '未发放',
+      smsStatusName: employee.phone ? (published ? '发送成功' : '未创建通知') : '无有效手机号',
+      smsErrorSummary: employee.phone ? '' : '员工未登记手机号',
+      displayStatus
+    };
+  });
+}
+
+function prototypePayrollBatchDetail(db, batch, page = 1, pageSize = 100) {
+  const rows = prototypePayrollBatchDetailRows(db, batch);
+  const start = Math.max(0, (page - 1) * pageSize);
+  const project = db.projects.find(item => Number(item.id) === Number(batch.projectId));
+  const client = db.clients.find(item => Number(item.id) === Number(project?.clientId));
+  const pendingViewCount = rows.filter(item => item.displayStatus === '待查看').length;
+  const pendingSignCount = rows.filter(item => item.displayStatus === '待签字').length;
+  const signedCount = rows.filter(item => item.displayStatus === '已签收').length;
+  return {
+    batch: {
+      id: Number(batch.id),
+      batchNo: batch.batchNo,
+      salaryMonth: batch.salaryMonth,
+      batchStatus: batch.status === 'PUBLISHED' ? 5 : 3,
+      statusName: batch.status === 'PUBLISHED' ? '已发放' : '待审核',
+      grossTotal: Number(batch.grossTotal || 0),
+      netTotal: Number(batch.netTotal || 0),
+      projectName: project?.projectName || '',
+      customerName: client?.clientName || ''
+    },
+    progress: {
+      total: rows.length,
+      unboundCount: rows.filter(item => !item.wechatBound).length,
+      pendingViewCount,
+      pendingSignCount,
+      signedCount,
+      disputeCount: 0,
+      signedRate: rows.length ? Math.round((signedCount / rows.length) * 100) : 0
+    },
+    page,
+    pageSize,
+    total: rows.length,
+    list: rows.slice(start, start + pageSize)
+  };
+}
+
+function prototypePayrollCsvCell(value) {
+  let text = String(value ?? '');
+  if (/^[=+@-]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function prototypePayrollExportCsv(db, batch, type) {
+  const detail = prototypePayrollBatchDetail(db, batch);
+  const receipt = type === 'receipt';
+  const header = receipt
+    ? ['姓名', '手机号', '工资月份', '实发工资', '查看状态', '签收状态', '签收姓名', '签名时间', '签收时间']
+    : ['姓名', '手机号', '工资月份', '应发工资', '实发工资', '发放状态', '短信状态', '查看与签收'];
+  const lines = [header].concat(detail.list.map(item => receipt
+    ? [item.employeeName, item.phoneMasked, batch.salaryMonth, item.netAmount, item.viewed ? '已查看' : '未查看', item.displayStatus, item.signedName || '', item.signedAt || '', item.receiptAt || '']
+    : [item.employeeName, item.phoneMasked, batch.salaryMonth, item.grossAmount, item.netAmount, item.deliveryStatus, item.smsStatusName, item.displayStatus]));
+  return `\uFEFF${lines.map(line => line.map(prototypePayrollCsvCell).join(',')).join('\n')}`;
 }
 
 function maskIdCard(idCardNo) {
@@ -476,6 +722,8 @@ function validateEmployeeInput(db, body, id = 0) {
 }
 
 function createRiskIfNotExists(db, risk) {
+  // 合同、社保/雇主险风险通知已停用，历史记录保留但禁止新增。
+  if ([1, 2, 3, 7].includes(Number(risk.riskType))) return false;
   if (db.risks.some(item => item.riskKey === risk.riskKey && item.handleStatus !== 3)) return false;
   db.risks.push({
     id: nextId(db, 'risk'),
@@ -588,6 +836,8 @@ function listEmployees(db, searchParams) {
   const pageSize = Number(searchParams.get('pageSize') || 20);
   const keyword = normalizeText(searchParams.get('keyword'));
   const employeeStatus = searchParams.get('employeeStatus');
+  const customerId = searchParams.get('customerId');
+  const projectId = searchParams.get('projectId');
   const deptId = searchParams.get('deptId');
   const employmentType = searchParams.get('employmentType');
 
@@ -600,6 +850,8 @@ function listEmployees(db, searchParams) {
         if (!text.includes(keyword)) return false;
       }
       if (employeeStatus && item.employeeStatus !== Number(employeeStatus)) return false;
+      if (customerId && item.customerId !== Number(customerId)) return false;
+      if (projectId && item.projectId !== Number(projectId)) return false;
       if (deptId && item.deptId !== Number(deptId)) return false;
       if (employmentType && item.employmentType !== Number(employmentType)) return false;
       return true;
@@ -631,7 +883,7 @@ function getSummary(db) {
     riskCaseOpenTotal: db.riskCases.filter(item => item.status !== 3).length,
     riskCaseOverdueTotal: db.riskCases.filter(item => item.status !== 3 && item.deadline && item.deadline < today()).length,
     clientTotal: db.clients.length,
-    projectTotal: db.projects.filter(item => item.status === 1).length,
+    projectTotal: db.projects.filter(item => item.status === 2).length,
     talentTotal: db.talents.length,
     advanceOutstanding: db.advances.reduce((total, item) => total + Math.max(0, Number(item.paidAmount || 0) - Number(item.repaidAmount || 0)), 0),
     advancePendingTotal: db.advances.filter(item => item.status === 'PENDING_APPROVAL').length
@@ -682,6 +934,19 @@ function getDashboardAnalytics(db) {
     }))
     .filter(item => item.value > 0);
 
+  const recruitmentChannelDistribution = activeEmployees
+    .map(employee => {
+      const channel = db.recruitmentChannels?.find(item => Number(item.id) === Number(employee.recruitmentChannelId));
+      return channel?.channelName || employee.recruitmentChannelName || employee.channelSource || '未填写招聘渠道';
+    })
+    .reduce((groups, name) => {
+      const item = groups.find(row => row.name === name);
+      if (item) item.value += 1;
+      else groups.push({ name, value: 1 });
+      return groups;
+    }, [])
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name, 'zh-CN'));
+
   const signedCount = activeEmployees.filter(emp => db.contracts.some(contract => contract.employeeId === emp.id && contract.signStatus === 1 && (!contract.endDate || contract.endDate >= today()))).length;
   const fullTimeEmployees = activeEmployees.filter(emp => activeJobs.some(job => job.employeeId === emp.id && job.employmentType === 1));
   const insuredCount = fullTimeEmployees.filter(emp => db.socials.some(social => social.employeeId === emp.id && social.socialStatus === 1)).length;
@@ -725,10 +990,17 @@ function getDashboardAnalytics(db) {
     compliance: {
       contractRate: activeEmployees.length ? Math.round((signedCount / activeEmployees.length) * 100) : 100,
       socialRate: fullTimeEmployees.length ? Math.round((insuredCount / fullTimeEmployees.length) * 100) : 100,
-      specialCertRate: specialWorkers.length ? Math.round((certifiedSpecialWorkers / specialWorkers.length) * 100) : 100
+      specialCertRate: specialWorkers.length ? Math.round((certifiedSpecialWorkers / specialWorkers.length) * 100) : 100,
+      // 与网页驾驶舱字段保持兼容，避免旧原型接口造成图表数据为空。
+      profileRate: activeEmployees.length ? Math.round((signedCount / activeEmployees.length) * 100) : 100,
+      activeRate: activeEmployees.length ? Math.round((activeEmployees.filter(item => item.employeeStatus === 2).length / activeEmployees.length) * 100) : 100,
+      profileUpdateRate: activeEmployees.length ? Math.round((activeEmployees.filter(item => item.updatedAt).length / activeEmployees.length) * 100) : 100
     },
     departmentDistribution,
+    customerDistribution: departmentDistribution,
     employmentDistribution,
+    recruitmentChannelDistribution,
+    supplierDistribution: recruitmentChannelDistribution,
     riskByType,
     trend
   };
@@ -827,11 +1099,23 @@ async function handleApi(req, res, url) {
       const pendingInsurance = active.filter(employee => !db.socials.some(social => social.employeeId === employee.id && social.socialStatus === 1)).length;
       const unsignedPayslips = db.payrollBatches.reduce((sum, batch) => sum + Math.max(0, Number(batch.employeeCount) - Number(batch.signedCount)), 0);
       return ok(res, {
-        workforce: { total: db.employees.filter(item => !item.deletedAt).length, active: active.length, left: leftEmployees.length, talents: db.talents.length },
+        workforce: {
+          total: db.employees.filter(item => !item.deletedAt).length,
+          interview: db.employees.filter(item => item.employeeStatus === 6 && !item.deletedAt).length,
+          pendingArrival: db.employees.filter(item => item.employeeStatus === 1 && !item.deletedAt).length,
+          active: active.length,
+          notJoined: db.employees.filter(item => item.employeeStatus === 5 && !item.deletedAt).length,
+          left: leftEmployees.length,
+          talents: db.talents.length
+        },
         finance: {
           advancePaid: db.advances.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0),
           advanceOutstanding: db.advances.reduce((sum, item) => sum + Math.max(0, Number(item.paidAmount || 0) - Number(item.repaidAmount || 0)), 0),
           payrollNet: db.payrollBatches.reduce((sum, item) => sum + Number(item.netTotal || 0), 0)
+        },
+        delivery: {
+          activeProjects: db.projects.filter(item => Number(item.status) === 2).length,
+          onsiteEmployees: db.factoryStaff.filter(item => Number(item.onsiteStatus) === 2).length
         },
         todos: [
           { id: 'advance', title: '预支待审批', count: db.advances.filter(item => item.status === 'PENDING_APPROVAL').length, view: 'advances', tone: 'amber' },
@@ -848,12 +1132,59 @@ async function handleApi(req, res, url) {
       });
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/recruitment-channels') {
+      return ok(res, prototypeRecruitmentChannels(db));
+    }
+
+    // 本地原型兼容网页端权限管理接口，统一返回脱敏后的演示数据。
+    if (req.method === 'GET' && url.pathname === '/api/system/users') {
+      return ok(res, db.permissionUsers.map(user => ({
+        ...user,
+        mobile: maskPhone(user.mobile),
+        roles: [db.permissionRoles.find(role => role.id === user.roleId)].filter(Boolean),
+        projects: user.projectNames?.map(projectName => ({ projectName, customerName: '' })) || []
+      })));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/system/roles') {
+      return ok(res, db.permissionRoles.map(role => ({
+        ...role,
+        status: role.status ?? 1,
+        permissions: (role.permissions || []).map((permName, index) => ({ id: index + 1, permName, permCode: String(permName) }))
+      })));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/system/projects') {
+      return ok(res, db.projects.map(project => ({
+        ...project,
+        projectName: project.projectName,
+        customerName: db.clients.find(client => client.id === project.clientId)?.clientName || ''
+      })));
+    }
+    if (req.method === 'GET' && url.pathname === '/api/system/departments') {
+      return ok(res, db.departments);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/system/permissions') {
+      return ok(res, [
+        { id: 1, permCode: 'employee:view', permName: '查看员工' },
+        { id: 2, permCode: 'employee:create', permName: '新增员工' },
+        { id: 3, permCode: 'employee:update', permName: '编辑员工' },
+        { id: 4, permCode: 'employee:export', permName: '导出员工' },
+        { id: 5, permCode: 'payroll:view', permName: '查看工资条' },
+        { id: 6, permCode: 'payroll:manage', permName: '管理工资条' }
+      ]);
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/payroll/overview') {
       const statusName = { DRAFT: '草稿', PENDING_REVIEW: '待审核', APPROVED: '待发布', PUBLISHED: '已发布', CLOSED: '已关闭' };
+      const batchStatus = { DRAFT: 1, PENDING_REVIEW: 3, APPROVED: 4, PUBLISHED: 5, CLOSED: 6 };
       const batches = [...db.payrollBatches].sort((a, b) => b.id - a.id).map(item => ({
         ...item,
         projectName: db.projects.find(project => project.id === item.projectId)?.projectName || '',
         unsignedCount: Math.max(0, Number(item.employeeCount) - Number(item.signedCount)),
+        viewedCount: Number(item.viewedCount ?? item.signedCount ?? 0),
+        deliverySuccessCount: item.status === 'PUBLISHED' ? Number(item.employeeCount || 0) : 0,
+        deliveryFailedCount: Number(item.deliveryFailedCount || 0),
+        batchStatus: batchStatus[item.status] || 1,
+        viewExpiresMinutes: item.viewExpiresMinutes ?? null,
         statusName: statusName[item.status] || item.status
       }));
       return ok(res, {
@@ -862,6 +1193,110 @@ async function handleApi(req, res, url) {
         unsignedTotal: batches.reduce((sum, item) => sum + item.unsignedCount, 0),
         batches
       });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/payroll/disputes') {
+      return ok(res, { page: 1, pageSize: 50, total: 0, list: [] });
+    }
+
+    const payrollDetailMatch = url.pathname.match(/^\/api\/payroll\/batches\/(\d+)\/details$/);
+    if (req.method === 'GET' && payrollDetailMatch) {
+      const batch = db.payrollBatches.find(item => Number(item.id) === Number(payrollDetailMatch[1]));
+      if (!batch) return fail(res, 404, '工资批次不存在');
+      const page = Math.max(1, Number(url.searchParams.get('page') || 1));
+      const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 100)));
+      return ok(res, prototypePayrollBatchDetail(db, batch, page, pageSize));
+    }
+
+    const payrollSmsMatch = url.pathname.match(/^\/api\/payroll\/batches\/(\d+)\/sms-summary$/);
+    if (req.method === 'GET' && payrollSmsMatch) {
+      const batch = db.payrollBatches.find(item => Number(item.id) === Number(payrollSmsMatch[1]));
+      if (!batch) return fail(res, 404, '工资批次不存在');
+      const rows = prototypePayrollBatchDetailRows(db, batch);
+      const sent = rows.filter(item => item.smsStatusName === '发送成功').length;
+      const skippedNoPhone = rows.filter(item => item.smsStatusName === '无有效手机号').length;
+      return ok(res, {
+        total: rows.length,
+        pending: batch.status === 'PUBLISHED' ? 0 : rows.length - skippedNoPhone,
+        sent,
+        failed: 0,
+        skippedNoPhone,
+        retryableCount: skippedNoPhone,
+        items: rows.map(item => ({
+          employeeName: item.employeeName,
+          phoneTail: String(item.phoneMasked || '').slice(-4),
+          deliveryStatusName: item.smsStatusName,
+          errorSummary: item.smsErrorSummary,
+          lastAttemptAt: item.receiptAt
+        }))
+      });
+    }
+
+    const payrollExportMatch = url.pathname.match(/^\/api\/payroll\/batches\/(\d+)\/(delivery|receipt)-export\.csv$/);
+    if (req.method === 'GET' && payrollExportMatch) {
+      const batch = db.payrollBatches.find(item => Number(item.id) === Number(payrollExportMatch[1]));
+      if (!batch) return fail(res, 404, '工资批次不存在');
+      const type = payrollExportMatch[2];
+      const csv = prototypePayrollExportCsv(db, batch, type);
+      addLog(db, '工资管理', type === 'receipt' ? 'export_payroll_receipts' : 'export_payroll_delivery', batch.id, `导出${batch.salaryMonth}工资条${type === 'receipt' ? '签收记录' : '发放明细'}`);
+      writeDb(db);
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="payroll-${type}-${batch.salaryMonth}.csv"`
+      });
+      return res.end(csv);
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/payroll/batches/preview') {
+      const body = await parseBody(req);
+      try {
+        return ok(res, previewPrototypePayrollRows(db, Number(body.projectId), body.rows), '工资表预校验完成');
+      } catch (error) {
+        return fail(res, 400, error.message);
+      }
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/payroll/batches') {
+      const body = await parseBody(req);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(body.salaryMonth || ''))) {
+        return fail(res, 400, '工资月份格式应为 YYYY-MM');
+      }
+      let preview;
+      try {
+        preview = previewPrototypePayrollRows(db, Number(body.projectId), body.rows);
+      } catch (error) {
+        return fail(res, 400, error.message);
+      }
+      if (preview.errorRows > 0) return fail(res, 400, '工资表存在错误，请修正后重新预览');
+      if (db.payrollBatches.some(item => Number(item.projectId) === Number(body.projectId)
+        && item.salaryMonth === body.salaryMonth && !['CLOSED', 'PUBLISHED'].includes(item.status))) {
+        return fail(res, 400, '该项目本月存在进行中的工资批次，请先完成发放或关闭后再新增');
+      }
+      const batchId = nextId(db, 'payrollBatch');
+      const batchNo = `GZ${body.salaryMonth.replace('-', '')}${String(batchId).padStart(3, '0')}`;
+      const grossTotal = preview.rows.reduce((sum, item) => sum + Number(item.grossAmount || 0), 0);
+      const netTotal = preview.rows.reduce((sum, item) => sum + Number(item.netAmount || 0), 0);
+      const advanceDeduction = preview.rows.reduce((sum, item) => sum + Number(item.advanceDeduction || 0), 0);
+      db.payrollBatches.push({
+        id: batchId,
+        batchNo,
+        salaryMonth: body.salaryMonth,
+        projectId: Number(body.projectId),
+        employeeCount: preview.validRows,
+        grossTotal: Math.round(grossTotal * 100) / 100,
+        advanceDeduction: Math.round(advanceDeduction * 100) / 100,
+        netTotal: Math.round(netTotal * 100) / 100,
+        signedCount: 0,
+        status: 'DRAFT',
+        details: preview.rows.map(item => ({
+          employeeId: item.employeeId,
+          grossAmount: item.grossAmount,
+          netAmount: item.netAmount
+        }))
+      });
+      addLog(db, '工资管理', 'create_batch', batchId, `创建${body.salaryMonth}工资批次，共${preview.validRows}人`);
+      writeDb(db);
+      return ok(res, { batchId, batchNo, employeeCount: preview.validRows }, '工资批次创建成功');
     }
 
     if (req.method === 'GET' && url.pathname === '/api/employment-records') {
@@ -1004,6 +1439,7 @@ async function handleApi(req, res, url) {
       return ok(res, db.clients.map(client => ({
         ...client,
         projectCount: db.projects.filter(project => project.clientId === client.id).length,
+        effectiveProjectCount: db.projects.filter(project => project.clientId === client.id && Number(project.status) === 2).length,
         activeCount: db.projects.filter(project => project.clientId === client.id).reduce((sum, project) => sum + Number(project.activeCount || 0), 0)
       })));
     }
@@ -1084,7 +1520,7 @@ async function handleApi(req, res, url) {
             projectName: projectBody.projectName,
             worksiteName: projectBody.worksiteName || body.customerName,
             serviceType: serviceTypeNames[Number(projectBody.serviceType)] || '岗位外包',
-            status: Number(projectBody.status || 2)
+            status: [2, 3, 4].includes(Number(projectBody.status)) ? Number(projectBody.status) : 2
           });
           updatedProjectCount += 1;
         } else {
@@ -1098,7 +1534,7 @@ async function handleApi(req, res, url) {
             serviceType: serviceTypeNames[Number(projectBody.serviceType)] || '岗位外包',
             managerName: '企业管理员',
             activeCount: 0,
-            status: Number(projectBody.status || 2)
+            status: [2, 3, 4].includes(Number(projectBody.status)) ? Number(projectBody.status) : 2
           });
           createdProjectCount += 1;
         }
@@ -1181,7 +1617,7 @@ async function handleApi(req, res, url) {
       const customerId = Number(body.customerId || employee.customerId || 0);
       if (!customerId || customerId !== Number(employee.customerId || 0)) return fail(res, 400, '客户单位必须与员工当前所属客户一致');
       const projectId = Number(body.projectId || 0);
-      const project = projectId ? db.projects.find(item => item.id === projectId && item.status === 1) : null;
+      const project = projectId ? db.projects.find(item => item.id === projectId && item.status === 2) : null;
       if (projectId && (!project || Number(project.clientId) !== customerId)) return fail(res, 400, '所属项目不存在或不属于所选客户');
       const amount = Number(body.applyAmount || 0);
       if (amount <= 0 || amount > 2000) return fail(res, 400, '单笔预支金额必须大于0且不超过2000元');
@@ -1525,6 +1961,7 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === 'POST' && resource === 'employees' && id && action === 'contracts') {
+      return fail(res, 410, '功能已停用');
       const body = await parseBody(req);
       const employee = db.employees.find(item => item.id === id && !item.deletedAt);
       if (!employee) return fail(res, 404, '员工不存在');
@@ -1551,6 +1988,7 @@ async function handleApi(req, res, url) {
     }
 
     if (req.method === 'PUT' && resource === 'employees' && id && action === 'social-security') {
+      return fail(res, 410, '功能已停用');
       const body = await parseBody(req);
       const employee = db.employees.find(item => item.id === id && !item.deletedAt);
       if (!employee) return fail(res, 404, '员工不存在');
@@ -1668,6 +2106,14 @@ async function handleApi(req, res, url) {
 }
 
 function serveStatic(req, res, url) {
+  if (url.pathname === '/vendor/exceljs.min.js') {
+    fs.readFile(EXCELJS_BROWSER_FILE, (error, content) => {
+      if (error) return fail(res, 404, 'Excel 组件不存在');
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+      res.end(content);
+    });
+    return;
+  }
   const requested = url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname);
   const filePath = path.normalize(path.join(PUBLIC_DIR, requested));
   if (!filePath.startsWith(PUBLIC_DIR)) return fail(res, 403, '禁止访问');
@@ -1703,5 +2149,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`优益数字化管理系统已启动：http://localhost:${PORT}`);
+  console.log(`优企云数字化管理系统已启动：http://localhost:${PORT}`);
 });

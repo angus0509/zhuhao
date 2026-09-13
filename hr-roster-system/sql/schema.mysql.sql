@@ -396,13 +396,95 @@ CREATE TABLE sys_user (
   phone VARCHAR(20) DEFAULT NULL COMMENT '手机号',
   employee_id BIGINT DEFAULT NULL COMMENT '关联员工ID',
   token_version INT NOT NULL DEFAULT 0 COMMENT '会话撤销版本，密码或权限变化时递增',
+  account_type VARCHAR(20) NOT NULL DEFAULT 'MANAGER' COMMENT 'MANAGER管理账号 EMPLOYEE员工账号',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1启用 0停用',
+  deleted_at DATETIME DEFAULT NULL COMMENT '软删除时间，删除后账号不可登录且不在账号列表展示',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_company_username (company_id, username),
   INDEX idx_company_id (company_id),
+  INDEX idx_company_account_type (company_id, account_type, status),
   INDEX idx_employee_id (employee_id)
 ) COMMENT='系统用户表';
+
+CREATE TABLE manager_login_device (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '设备登录凭证ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  user_id BIGINT NOT NULL COMMENT '管理账号ID',
+  token_hash CHAR(64) NOT NULL COMMENT '设备凭证SHA-256摘要，不保存明文',
+  token_version INT NOT NULL DEFAULT 0 COMMENT '签发时账号会话撤销版本',
+  expire_at DATETIME NOT NULL COMMENT '凭证过期时间',
+  last_used_at DATETIME DEFAULT NULL COMMENT '最后续登时间',
+  revoked_at DATETIME DEFAULT NULL COMMENT '撤销时间',
+  ip_address VARCHAR(50) DEFAULT NULL COMMENT '最近使用IP',
+  device_info VARCHAR(255) DEFAULT NULL COMMENT '设备信息',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_manager_device_token_hash (token_hash),
+  KEY idx_manager_device_user (company_id, user_id, revoked_at, expire_at),
+  KEY idx_manager_device_expire (expire_at, revoked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='管理端记住登录设备凭证';
+
+CREATE TABLE employee_wechat_binding (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '微信绑定ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  user_id BIGINT NOT NULL COMMENT '员工账号ID',
+  openid VARCHAR(128) NOT NULL COMMENT '小程序OpenID',
+  unionid VARCHAR(128) DEFAULT NULL COMMENT '微信UnionID',
+  phone VARCHAR(20) DEFAULT NULL COMMENT '绑定手机号，无手机号绑定时为空',
+  binding_status TINYINT NOT NULL DEFAULT 1 COMMENT '1有效 0解绑 2冻结',
+  token_version INT NOT NULL DEFAULT 0 COMMENT '绑定会话撤销版本',
+  active_employee_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN binding_status=1 THEN employee_id ELSE NULL END
+  ) STORED,
+  active_openid VARCHAR(128) GENERATED ALWAYS AS (
+    CASE WHEN binding_status=1 THEN openid ELSE NULL END
+  ) STORED,
+  bound_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '绑定时间',
+  last_login_at DATETIME DEFAULT NULL COMMENT '最后登录时间',
+  unbound_at DATETIME DEFAULT NULL COMMENT '解绑时间',
+  unbound_by BIGINT DEFAULT NULL COMMENT '解绑操作人',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_company_employee_active (company_id, active_employee_id),
+  UNIQUE KEY uk_company_openid_active (company_id, active_openid),
+  INDEX idx_user (company_id, user_id),
+  INDEX idx_phone (company_id, phone)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工微信绑定历史';
+
+CREATE TABLE employee_bind_code (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '一次性绑定码ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  code_hash CHAR(64) NOT NULL COMMENT '服务端HMAC-SHA256摘要',
+  code_salt CHAR(32) NOT NULL COMMENT '随机盐',
+  expire_at DATETIME NOT NULL COMMENT '过期时间',
+  failed_attempts TINYINT NOT NULL DEFAULT 0 COMMENT '失败次数，最多5次',
+  used_at DATETIME DEFAULT NULL COMMENT '使用时间',
+  created_by BIGINT NOT NULL COMMENT '创建人',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_employee_active (company_id, employee_id, expire_at, used_at),
+  INDEX idx_expire (expire_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工一次性微信绑定码';
+
+CREATE TABLE employee_login_audit (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '员工登录审计ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  employee_id BIGINT DEFAULT NULL COMMENT '员工ID，未匹配时可为空',
+  user_id BIGINT DEFAULT NULL COMMENT '员工账号ID，未绑定时可为空',
+  ticket_nonce_hash CHAR(64) DEFAULT NULL COMMENT '一次性绑定票据nonce摘要',
+  action_type VARCHAR(30) NOT NULL COMMENT 'TICKET_ISSUE/PHONE_BIND/CODE_BIND/LOGIN',
+  result_code VARCHAR(40) NOT NULL COMMENT 'ISSUED/SUCCESS/FAILED/EXPIRED/LOCKED',
+  phone_tail VARCHAR(4) DEFAULT NULL COMMENT '手机号末四位，不保存完整号码',
+  ip_address VARCHAR(50) DEFAULT NULL COMMENT '客户端IP',
+  device_info VARCHAR(255) DEFAULT NULL COMMENT '设备信息',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '审计时间',
+  UNIQUE KEY uk_ticket_nonce_hash (ticket_nonce_hash),
+  INDEX idx_company_employee_time (company_id, employee_id, created_at),
+  INDEX idx_user_time (user_id, created_at),
+  INDEX idx_action_result_time (action_type, result_code, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工微信登录与绑定审计';
 
 CREATE TABLE sys_role (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '角色ID',
@@ -496,7 +578,7 @@ CREATE TABLE labor_project (
   manager_user_id BIGINT DEFAULT NULL,
   start_date DATE DEFAULT NULL,
   end_date DATE DEFAULT NULL,
-  status TINYINT NOT NULL DEFAULT 1 COMMENT '1筹备 2进行中 3暂停 4结束',
+  status TINYINT NOT NULL DEFAULT 2 COMMENT '2进行中 3暂停 4结束',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_company_project_code (company_id, project_code),
@@ -557,7 +639,7 @@ CREATE TABLE talent_candidate (
   name VARCHAR(50) NOT NULL,
   id_card_no VARCHAR(255) DEFAULT NULL,
   id_card_hash CHAR(64) DEFAULT NULL,
-  phone VARCHAR(20) NOT NULL,
+  phone VARCHAR(20) DEFAULT NULL,
   intended_position VARCHAR(100) DEFAULT NULL,
   source_channel VARCHAR(80) DEFAULT NULL,
   candidate_status TINYINT NOT NULL DEFAULT 1 COMMENT '1新线索 2跟进中 3待入职 4已入职 5淘汰',
@@ -605,6 +687,38 @@ CREATE TABLE salary_advance (
   INDEX idx_employee_id (employee_id)
 ) COMMENT='工资预支申请';
 
+CREATE TABLE salary_import_profile (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  header_signature CHAR(64) NOT NULL,
+  source_headers JSON NOT NULL,
+  mapping_json JSON NOT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  last_used_at DATETIME DEFAULT NULL,
+  created_by BIGINT DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_company_project_signature (company_id, project_id, header_signature),
+  KEY idx_company_project_status (company_id, project_id, status)
+) COMMENT='项目工资表字段映射';
+
+CREATE TABLE salary_import_template (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  name VARCHAR(50) NOT NULL,
+  source_headers JSON NOT NULL,
+  mapping_json JSON NOT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  last_used_at DATETIME DEFAULT NULL,
+  created_by BIGINT DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_company_project_name (company_id, project_id, name),
+  KEY idx_company_project_status (company_id, project_id, status)
+) COMMENT='项目工资表模板';
+
 CREATE TABLE salary_batch (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   company_id BIGINT NOT NULL,
@@ -612,6 +726,11 @@ CREATE TABLE salary_batch (
   batch_no VARCHAR(50) NOT NULL,
   salary_month CHAR(7) NOT NULL,
   payroll_type TINYINT NOT NULL DEFAULT 1 COMMENT '1计时 2计件 3混合',
+  import_profile_id BIGINT DEFAULT NULL COMMENT '导入字段映射ID',
+  source_sheet_name VARCHAR(100) DEFAULT NULL COMMENT '原工资表工作表名称',
+  employee_view_enabled TINYINT NOT NULL DEFAULT 1 COMMENT '员工端是否允许查看工资条',
+  view_once TINYINT NOT NULL DEFAULT 0 COMMENT '是否阅后即焚：首次查看后不可再次打开',
+  view_expires_minutes INT DEFAULT NULL COMMENT '员工端查看有效期，NULL表示不限制',
   batch_status TINYINT NOT NULL DEFAULT 1 COMMENT '1草稿 2核算中 3待复核 4待发放 5已发放 6已归档',
   total_gross DECIMAL(14,2) NOT NULL DEFAULT 0,
   total_net DECIMAL(14,2) NOT NULL DEFAULT 0,
@@ -642,6 +761,8 @@ CREATE TABLE salary_detail (
   advance_deduction DECIMAL(12,2) NOT NULL DEFAULT 0,
   other_deduction DECIMAL(12,2) NOT NULL DEFAULT 0,
   net_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  item_snapshot JSON DEFAULT NULL COMMENT '原工资项目快照',
+  source_row_no INT DEFAULT NULL COMMENT '原工资表行号',
   receipt_status TINYINT NOT NULL DEFAULT 0 COMMENT '0未发送 1待签收 2已签收 3拒签',
   receipt_at DATETIME DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -666,6 +787,99 @@ CREATE TABLE salary_receipt_log (
   INDEX idx_salary_detail (company_id, salary_detail_id, created_at),
   INDEX idx_user_time (user_id, created_at)
 ) COMMENT='工资条查看与签收证据日志';
+
+CREATE TABLE salary_signature (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工资条签名ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  salary_detail_id BIGINT NOT NULL COMMENT '工资明细ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  attachment_id BIGINT NOT NULL COMMENT '签名PNG附件ID',
+  signature_sha256 CHAR(64) NOT NULL COMMENT '签名文件SHA-256',
+  signed_name VARCHAR(50) NOT NULL COMMENT '签名人姓名',
+  statement_version VARCHAR(20) NOT NULL DEFAULT '1.0' COMMENT '确认声明版本',
+  ip_address VARCHAR(50) DEFAULT NULL COMMENT '签名IP',
+  device_info VARCHAR(255) DEFAULT NULL COMMENT '设备信息',
+  signed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '签名时间',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1有效 0作废',
+  active_salary_detail_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN status=1 THEN salary_detail_id ELSE NULL END
+  ) STORED,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_salary_signature_active (company_id, active_salary_detail_id),
+  INDEX idx_employee_time (company_id, employee_id, signed_at),
+  INDEX idx_attachment (company_id, attachment_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工工资条手写签名证据';
+
+CREATE TABLE salary_dispute (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工资异议ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  salary_detail_id BIGINT NOT NULL COMMENT '工资明细ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  dispute_reason VARCHAR(500) NOT NULL COMMENT '异议原因',
+  handle_status TINYINT NOT NULL DEFAULT 0 COMMENT '0待处理 1处理中 2已解决 3驳回',
+  open_salary_detail_id BIGINT GENERATED ALWAYS AS (
+    CASE WHEN handle_status IN (0,1) THEN salary_detail_id ELSE NULL END
+  ) STORED,
+  handler_id BIGINT DEFAULT NULL COMMENT '处理人',
+  handle_remark VARCHAR(500) DEFAULT NULL COMMENT '处理说明',
+  handled_at DATETIME DEFAULT NULL COMMENT '处理时间',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_open_dispute (company_id, open_salary_detail_id),
+  INDEX idx_company_status (company_id, handle_status, created_at),
+  INDEX idx_employee (company_id, employee_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工工资异议';
+
+CREATE TABLE employee_sms_verification (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  employee_id BIGINT DEFAULT NULL COMMENT '唯一匹配的在职员工ID',
+  purpose VARCHAR(30) NOT NULL DEFAULT 'EMPLOYEE_LOGIN',
+  phone_hash CHAR(64) NOT NULL COMMENT '企业维度手机号HMAC',
+  phone_tail CHAR(4) DEFAULT NULL COMMENT '手机号后四位',
+  code_hash CHAR(64) NOT NULL COMMENT '验证码HMAC',
+  expires_at DATETIME NOT NULL,
+  failed_attempts TINYINT NOT NULL DEFAULT 0,
+  send_status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/SENT/FAILED/SUPPRESSED',
+  provider_request_id VARCHAR(100) DEFAULT NULL,
+  consumed_at DATETIME DEFAULT NULL,
+  request_ip_hash CHAR(64) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_company_phone_time (company_id,phone_hash,created_at),
+  KEY idx_company_ip_time (company_id,request_ip_hash,created_at),
+  KEY idx_expiry_status (expires_at,consumed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工短信验证码';
+
+CREATE TABLE sms_delivery_job (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  employee_id BIGINT NOT NULL COMMENT '收件员工ID',
+  batch_id BIGINT DEFAULT NULL COMMENT '工资批次ID',
+  payslip_id BIGINT DEFAULT NULL COMMENT '工资条ID',
+  business_type VARCHAR(30) NOT NULL COMMENT 'PAYSLIP_PUBLISHED/PAYSLIP_REMINDER',
+  template_key VARCHAR(40) NOT NULL,
+  salary_month CHAR(7) DEFAULT NULL,
+  phone_hash CHAR(64) DEFAULT NULL COMMENT '实际发送号码HMAC',
+  phone_tail CHAR(4) DEFAULT NULL,
+  delivery_status VARCHAR(25) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/SENDING/SENT/FAILED/SKIPPED_NO_PHONE/CANCELLED',
+  attempt_count TINYINT NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_attempt_at DATETIME DEFAULT NULL,
+  provider_code VARCHAR(80) DEFAULT NULL,
+  provider_request_id VARCHAR(100) DEFAULT NULL,
+  provider_serial_no VARCHAR(100) DEFAULT NULL,
+  error_summary VARCHAR(255) DEFAULT NULL,
+  dedupe_key VARCHAR(180) NOT NULL,
+  created_by BIGINT DEFAULT NULL,
+  sent_at DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_company_dedupe (company_id,dedupe_key),
+  KEY idx_pending (delivery_status,next_attempt_at),
+  KEY idx_batch_status (company_id,batch_id,delivery_status),
+  KEY idx_employee_time (company_id,employee_id,created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='短信发送队列与留痕';
 
 CREATE TABLE sys_user_project (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,

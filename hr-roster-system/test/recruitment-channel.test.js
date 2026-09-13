@@ -38,6 +38,9 @@ if (hasMiniProgramSource) {
   const miniWxml = fs.readFileSync(path.join(miniRoot, 'pages/employees/add/index.wxml'), 'utf8');
   const miniDetailWxml = fs.readFileSync(path.join(miniRoot, 'pages/employees/detail/index.wxml'), 'utf8');
   if (miniJs.includes("if (!f.channelSource.trim())") || !miniWxml.includes('data-field="channelSource"')) throw new Error('小程序招聘渠道未改为选填');
+  if (miniWxml.includes('招聘来源')) throw new Error('小程序员工录入仍使用招聘来源旧名称');
+  if (!miniWxml.includes('招聘渠道与备注')) throw new Error('小程序员工录入分组未统一为招聘渠道');
+  if (/渠道商、招聘人|供应商/.test(miniWxml)) throw new Error('小程序招聘渠道提示仍区分招聘人或供应商');
   if (!miniDetailWxml.includes("basic.recruitmentChannelName || '-'")) throw new Error('小程序员工详情未统一显示招聘渠道');
 }
 

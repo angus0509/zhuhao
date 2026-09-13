@@ -7,7 +7,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.scan = asyncHandler(async (req, res) => {
-  const data = await riskService.scanRisks(req.companyId);
+  const data = await riskService.scanRisks(req.companyId, req.user);
   success(res, data, `风险扫描完成，新增${data.created}条`);
 });
 

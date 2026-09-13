@@ -1,0 +1,17 @@
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const source = fs.readFileSync(path.join(__dirname, '..', 'src/services/official-notification.service.js'), 'utf8');
+assert.match(source, /company_id=:companyId/);
+assert.match(source, /ON DUPLICATE KEY UPDATE/);
+assert.match(source, /employee_official_binding/);
+assert.match(source, /LEFT JOIN employee_official_binding/);
+assert.match(source, /SKIPPED_NOT_BOUND/);
+assert.match(source, /WECHAT_OFFICIAL/);
+assert.doesNotMatch(source, /idCard|bankCard|salaryAmount|totalNet/);
+const controller = fs.readFileSync(path.join(__dirname, '..', 'src/controllers/wechat-official.controller.js'), 'utf8');
+const routes = fs.readFileSync(path.join(__dirname, '..', 'src/routes/wechat-official.routes.js'), 'utf8');
+assert.match(controller, /listNotifications/);
+assert.match(source, /company_id=:companyId/);
+assert.match(routes, /official\/notifications/);
+console.log('official-notification-tests-ok');

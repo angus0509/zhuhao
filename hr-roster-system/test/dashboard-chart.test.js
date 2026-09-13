@@ -17,5 +17,6 @@ assert(dashboard.includes('destroyDashboardChart'), '图表重复渲染时未销
 assert(dashboard.includes("classList.contains('motion-enabled')"), 'Chart.js 动画未受 motion 开关控制');
 assert(dashboard.includes('escapeHtml(item.name)'), 'CSS 降级图表未转义业务名称');
 assert(css.includes('.chart-canvas-host'), '缺少 Chart.js 响应式容器样式');
+assert(dashboard.includes('renderRecruitmentChannelChart'), '驾驶舱缺少招聘渠道图表');
 
 console.log('dashboard-chart-tests-ok');

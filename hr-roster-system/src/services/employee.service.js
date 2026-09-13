@@ -138,9 +138,7 @@ function formatEmployeeRow(row, options = {}) {
     recruitmentChannel: row.channel_source || (Number(row.recruitment_source_type) === 1 && row.recruiter_id
       ? `recruiter:${row.recruiter_id}`
       : Number(row.recruitment_source_type) === 2 && row.supplier_id ? `supplier:${row.supplier_id}` : ''),
-    recruitmentChannelName: row.channel_source || (Number(row.recruitment_source_type) === 1
-      ? `招聘人｜${row.recruiter_name || '-'}`
-      : Number(row.recruitment_source_type) === 2 ? `供应商｜${row.recruitment_supplier_name || '-'}` : ''),
+    recruitmentChannelName: row.channel_source || row.recruiter_name || row.recruitment_supplier_name || '',
     sourceLocked: Number(row.source_locked || 0) === 1,
     lifecycleStatus: row.lifecycle_status || '',
     arrivalStatus: row.arrival_status || '',
@@ -178,6 +176,30 @@ function formatEmployeeRow(row, options = {}) {
     riskCount: Number(row.risk_count || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+// 编辑员工时，敏感字段采用“有权限且有值才覆盖”策略。
+// 小程序受限编辑页不会回传身份证号/手机号，不能因字段缺失而写入 NULL 或触发必填校验。
+function resolveSensitiveEmployeeFields(employee, body = {}, canViewSensitiveEmployee = false) {
+  const current = {
+    idCardNo: decrypt(employee.id_card_no),
+    address: decrypt(employee.address),
+    phone: employee.phone || '',
+    bankCardNo: decrypt(employee.bank_card_no),
+    emergencyPhone: employee.emergency_phone || ''
+  };
+  if (!canViewSensitiveEmployee) return current;
+  const provided = field => Object.prototype.hasOwnProperty.call(body, field)
+    && body[field] !== undefined
+    && body[field] !== null
+    && String(body[field]).trim() !== '';
+  return {
+    idCardNo: provided('idCardNo') ? String(body.idCardNo).trim().toUpperCase() : current.idCardNo,
+    address: provided('address') ? String(body.address).trim() : current.address,
+    phone: provided('phone') ? String(body.phone).trim() : current.phone,
+    bankCardNo: provided('bankCardNo') ? String(body.bankCardNo).trim() : current.bankCardNo,
+    emergencyPhone: provided('emergencyPhone') ? String(body.emergencyPhone).trim() : current.emergencyPhone
   };
 }
 
@@ -238,7 +260,7 @@ async function resolveDataScope(companyId, user) {
       SELECT DISTINCT p.id project_id, p.customer_id
       FROM sys_user_project up
       JOIN labor_project p ON p.id = up.project_id AND p.company_id = :companyId
-      WHERE up.user_id = :userId AND p.status IN (1,2)
+      WHERE up.user_id = :userId AND p.status = 2
       `,
       { companyId, userId: Number(user.id) }
     );
@@ -361,7 +383,7 @@ async function assertNewEmployeeScope(companyId, body, user, connection = db.poo
     if (!body.projectId) throw createError('授权项目范围账号必须选择所属项目');
     const [[project]] = await connection.execute(
       `SELECT p.id FROM sys_user_project up
-       JOIN labor_project p ON p.id=up.project_id AND p.company_id=:companyId AND p.status IN (1,2)
+       JOIN labor_project p ON p.id=up.project_id AND p.company_id=:companyId AND p.status=2
        WHERE up.user_id=:userId AND p.id=:projectId AND p.customer_id=:customerId LIMIT 1`,
       { companyId, userId: Number(user.id), projectId: Number(body.projectId), customerId: Number(body.customerId) }
     );
@@ -394,7 +416,7 @@ async function getBootstrap(companyId, user = null) {
     ),
     db.query(
       `SELECT id,customer_id customerId,project_name projectName,factory_name factoryName,status
-       FROM labor_project WHERE company_id=:companyId AND status IN (1,2) ORDER BY project_name,id`,
+       FROM labor_project WHERE company_id=:companyId AND status=2 ORDER BY project_name,id`,
       { companyId }
     ),
     db.query(
@@ -613,6 +635,7 @@ async function listEmployees(companyId, query, user = null, options = {}) {
     keyword: `%${query.keyword || ''}%`,
     employeeStatus: query.employeeStatus ? Number(query.employeeStatus) : null,
     customerId: query.customerId ? Number(query.customerId) : null,
+    projectId: query.projectId ? Number(query.projectId) : null,
     employmentType: query.employmentType ? Number(query.employmentType) : null,
     pageSize,
     offset
@@ -623,6 +646,7 @@ async function listEmployees(companyId, query, user = null, options = {}) {
     'e.deleted_at IS NULL',
     '(:employeeStatus IS NULL OR e.employee_status = :employeeStatus)',
     '(:customerId IS NULL OR j.customer_id = :customerId)',
+    '(:projectId IS NULL OR j.project_id = :projectId)',
     '(:employmentType IS NULL OR j.employment_type = :employmentType)'
   ];
 
@@ -946,11 +970,9 @@ async function recordSensitiveAccess(companyId, employeeId, operatorId, reason, 
 async function validateEmployeeInput(companyId, body, employeeId = 0, connection = db.pool, employeeStatus = 1) {
   const interview = Number(employeeStatus) === 6;
   const required = interview ? [
-    ['name', '姓名不能为空'],
-    ['phone', '手机号不能为空']
+    ['name', '姓名不能为空']
   ] : [
     ['name', '姓名不能为空'],
-    ['phone', '手机号不能为空'],
     ['idCardNo', '身份证号不能为空'],
     ['customerId', '客户单位不能为空'],
     ['positionId', '岗位不能为空']
@@ -966,7 +988,7 @@ async function validateEmployeeInput(companyId, body, employeeId = 0, connection
   for (const [field, message] of required) {
     if (!body[field]) throw createError(message);
   }
-  if (!/^1[3-9]\d{9}$/.test(body.phone)) throw createError('手机号格式不正确');
+  if (body.phone && !/^1[3-9]\d{9}$/.test(body.phone)) throw createError('手机号格式不正确');
   if (body.idCardNo && !/^\d{17}[\dXx]$/.test(body.idCardNo)) throw createError('身份证号格式不正确');
   if (body.address && String(body.address).trim().length > 255) throw createError('地址最多填写255个字符');
   if (body.employmentType && ![1, 2, 3, 4, 5, 6].includes(Number(body.employmentType))) throw createError('用工模式不正确');
@@ -1033,7 +1055,7 @@ async function validateEmployeeInput(companyId, body, employeeId = 0, connection
   await validateRecruitmentSource(companyId, body, connection);
   if (body.projectId) {
     const [[project]] = await connection.execute(
-      'SELECT id FROM labor_project WHERE company_id=:companyId AND id=:projectId AND customer_id=:customerId AND status IN (1,2) LIMIT 1',
+      'SELECT id FROM labor_project WHERE company_id=:companyId AND id=:projectId AND customer_id=:customerId AND status=2 LIMIT 1',
       { companyId, projectId: Number(body.projectId), customerId: Number(body.customerId) }
     );
     if (!project) throw createError('所属项目不存在、已停用或不属于客户单位');
@@ -1066,26 +1088,173 @@ async function validateRecruitmentSource(companyId, body, connection = db.pool) 
   if (supplier.contract_end_date && supplier.contract_end_date < today()) throw createError('供应商合同已过期，不能作为新员工招聘来源');
 }
 
-async function precheckEmployee(companyId, body) {
-  if (!/^\d{17}[\dXx]$/.test(String(body.idCardNo || ''))) throw createError('身份证号格式不正确');
-  const [blacklisted, existing] = await Promise.all([
-    db.first(
-      'SELECT blacklist_reason reason,risk_level riskLevel FROM person_blacklist WHERE company_id=:companyId AND id_card_hash=:idCardHash AND status=1 LIMIT 1',
-      { companyId, idCardHash: sha256(body.idCardNo) }
-    ),
-    db.first(
-      `SELECT id,name,employee_status employeeStatus,lifecycle_status lifecycleStatus
-       FROM hr_employee WHERE company_id=:companyId AND id_card_hash=:idCardHash AND deleted_at IS NULL LIMIT 1`,
-      { companyId, idCardHash: sha256(body.idCardNo) }
+function talentCandidateScope(user, alias = 't') {
+  if (!user || Number(user.dataScope) === 1) return '';
+  if (Number(user.dataScope) === 5) {
+    return `AND (${alias}.owner_user_id=:scopeUserId OR EXISTS (
+      SELECT 1 FROM sys_user_project talent_up
+      WHERE talent_up.user_id=:scopeUserId AND talent_up.project_id=${alias}.project_id
+    ))`;
+  }
+  return `AND ${alias}.owner_user_id=:scopeUserId`;
+}
+
+async function precheckEmployee(companyId, body, user = null) {
+  const name = String(body.name || '').trim();
+  const idCardNo = String(body.idCardNo || '').trim();
+  if (!name && !idCardNo) throw createError('姓名或身份证号至少填写一项');
+  if (idCardNo && !/^\d{17}[\dXx]$/.test(idCardNo)) throw createError('身份证号格式不正确');
+  const idCardHash = idCardNo ? sha256(idCardNo) : null;
+  const canViewSensitiveTalent = Boolean(user?.permissions?.includes('employee:sensitive:view'));
+  const talentScope = talentCandidateScope(user, 't');
+  const params = { companyId, name, idCardHash, scopeUserId: Number(user?.id || 0) };
+  const duplicateScopeParams = { companyId, idCardHash };
+  const duplicateScopeWhere = [];
+  applyDataScope(duplicateScopeWhere, duplicateScopeParams, await resolveDataScope(companyId, user));
+  const duplicateScopeSql = duplicateScopeWhere.length ? `AND ${duplicateScopeWhere.join(' AND ')}` : '';
+  const [blacklisted, duplicateRecord, existing, talentRows] = await Promise.all([
+    idCardHash
+      ? db.first(
+        'SELECT blacklist_reason reason,risk_level riskLevel FROM person_blacklist WHERE company_id=:companyId AND id_card_hash=:idCardHash AND status=1 LIMIT 1',
+        params
+      )
+      : null,
+    idCardHash
+      ? db.first(
+        `SELECT id,employee_status employeeStatus,lifecycle_status lifecycleStatus
+         FROM hr_employee WHERE company_id=:companyId AND id_card_hash=:idCardHash AND deleted_at IS NULL LIMIT 1`,
+        params
+      )
+      : null,
+    idCardHash
+      ? db.first(
+        `SELECT e.id,e.name,e.employee_status employeeStatus,e.lifecycle_status lifecycleStatus,
+                cu.customer_name customerName,pj.project_name projectName
+         FROM hr_employee e
+         LEFT JOIN hr_employee_job j ON j.id=(
+           SELECT j2.id FROM hr_employee_job j2
+           WHERE j2.company_id=e.company_id AND j2.employee_id=e.id
+           ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
+         )
+         LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
+         LEFT JOIN labor_project pj ON pj.id=j.project_id AND pj.company_id=e.company_id
+         WHERE e.company_id=:companyId AND e.id_card_hash=:idCardHash AND e.deleted_at IS NULL
+           ${duplicateScopeSql}
+         LIMIT 1`,
+        duplicateScopeParams
+      )
+      : null,
+    db.query(
+      `SELECT t.id,t.name,t.id_card_no,t.id_card_hash,t.phone,t.intended_position,t.source_channel,t.remark,
+              t.customer_id,t.project_id,t.position_id,t.recruitment_channel_id,t.talent_source_type,
+              c.customer_name,pj.project_name,pos.position_name,COALESCE(rc.channel_name,t.source_channel) recruitment_channel_name
+       FROM talent_candidate t
+       LEFT JOIN crm_customer c ON c.id=t.customer_id AND c.company_id=t.company_id
+       LEFT JOIN labor_project pj ON pj.id=t.project_id AND pj.company_id=t.company_id
+       LEFT JOIN hr_position pos ON pos.id=t.position_id AND pos.company_id=t.company_id
+       LEFT JOIN hr_recruitment_channel rc ON rc.id=t.recruitment_channel_id AND rc.company_id=t.company_id
+       WHERE t.company_id=:companyId AND t.employee_id IS NULL
+         AND (t.name=:name OR (:idCardHash IS NOT NULL AND t.id_card_hash=:idCardHash))
+         ${talentScope}
+       ORDER BY (t.id_card_hash=:idCardHash) DESC,t.updated_at DESC,t.id DESC
+       LIMIT 5`,
+      params
     )
   ]);
+  const talentCandidates = talentRows.map(row => ({
+    id: Number(row.id),
+    name: row.name,
+    idCardNo: canViewSensitiveTalent ? decrypt(row.id_card_no) : '',
+    phone: canViewSensitiveTalent ? (row.phone || '') : '',
+    intendedPosition: row.intended_position || '',
+    sourceChannel: row.recruitment_channel_name || row.source_channel || '',
+    remark: row.remark || '',
+    customerId: row.customer_id || null,
+    customerName: row.customer_name || '',
+    projectId: row.project_id || null,
+    projectName: row.project_name || '',
+    positionId: row.position_id || null,
+    positionName: row.position_name || row.intended_position || '',
+    recruitmentChannelId: row.recruitment_channel_id || null,
+    talentSourceType: row.talent_source_type || 'MANUAL',
+    matchByIdCard: Boolean(idCardHash && row.id_card_hash === idCardHash),
+    matchByName: row.name === name
+  }));
   return {
-    allowOnboarding: !blacklisted && !existing,
+    allowOnboarding: !blacklisted && !duplicateRecord,
+    talentCandidates,
     checks: {
       blacklist: blacklisted ? { passed: false, reason: blacklisted.reason, riskLevel: blacklisted.riskLevel } : { passed: true },
-      duplicate: existing ? { passed: false, employeeId: existing.id, employeeStatus: existing.lifecycleStatus || existing.employeeStatus } : { passed: true }
+      duplicate: duplicateRecord ? {
+        passed: false,
+        employeeId: existing ? Number(existing.id) : null,
+        employeeName: existing?.name || '',
+        employeeStatus: Number(existing?.employeeStatus || duplicateRecord.employeeStatus),
+        lifecycleStatus: existing?.lifecycleStatus || duplicateRecord.lifecycleStatus || '',
+        customerName: existing?.customerName || '',
+        projectName: existing?.projectName || '',
+        canOpen: Boolean(existing && user?.permissions?.includes('employee:view')),
+        canReactivate: Boolean(existing && [3, 5].includes(Number(existing.employeeStatus)) && user?.permissions?.includes('employee:update'))
+      } : { passed: true }
     }
   };
+}
+
+async function reactivateEmployee(companyId, employeeId, body, operatorId = 0, user = null) {
+  return db.transaction(async connection => {
+    await assertEmployeeScope(companyId, employeeId, user, connection);
+    const [[employee]] = await connection.execute(
+      `SELECT e.id,e.name,e.employee_status,j.id job_id,j.customer_id,j.project_id,j.position_id
+       FROM hr_employee e
+       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+       WHERE e.company_id=:companyId AND e.id=:employeeId AND e.deleted_at IS NULL LIMIT 1`,
+      { companyId, employeeId }
+    );
+    if (!employee) throw createError('员工不存在', 404);
+    if (![3, 5].includes(Number(employee.employee_status))) throw createError('只有离职或未入职员工可以重新录用');
+    if (!employee.job_id || !employee.customer_id || !employee.position_id) {
+      throw createError('请先编辑并补齐客户、项目和岗位信息');
+    }
+
+    await connection.execute(
+      `UPDATE hr_employee
+       SET employee_status=1,lifecycle_status='PENDING_ARRIVAL',arrival_status='PENDING',updated_at=NOW()
+       WHERE company_id=:companyId AND id=:employeeId`,
+      { companyId, employeeId }
+    );
+    await createWorkTask(connection, {
+      companyId,
+      employeeId,
+      projectId: employee.project_id || null,
+      taskType: 'ARRIVAL',
+      taskTitle: `${employee.name}重新录用待到岗`,
+      taskContent: String(body.remark || '历史员工重新录用，请确认到岗').slice(0, 255),
+      sourceType: 'EMPLOYEE_REACTIVATION',
+      sourceId: employeeId,
+      riskLevel: 2,
+      assignedUserId: operatorId || null,
+      deadline: null
+    });
+    await connection.execute(
+      `UPDATE talent_candidate
+       SET candidate_status=3,employee_status_snapshot=1,available_status=1,updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId`,
+      { companyId, employeeId }
+    );
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
+       VALUES (:companyId,:operatorId,'员工重新录用','employee',:employeeId,'reactivate',:beforeData,:afterData)`,
+      {
+        companyId,
+        operatorId: operatorId || null,
+        employeeId,
+        beforeData: JSON.stringify({ employeeStatus: Number(employee.employee_status) }),
+        afterData: JSON.stringify({ employeeStatus: 1, lifecycleStatus: 'PENDING_ARRIVAL' })
+      }
+    );
+    return { employeeId, employeeStatus: 1, lifecycleStatus: 'PENDING_ARRIVAL' };
+  });
 }
 
 async function createWorkTask(connection, task) {
@@ -1116,68 +1285,9 @@ async function closeEmployeeOpenItems(connection, companyId, employeeId, operato
   );
 }
 
-// 新员工确认在职后，只建立劳动合同和雇主险两项核心入职合规。
-async function createOnboardingCompliance(connection, {
-  companyId,
-  employeeId,
-  employeeName,
-  projectId = null,
-  operatorId = 0,
-  hireDate
-}) {
-  const reminders = [
-    {
-      riskType: 1,
-      riskTitle: '新员工劳动合同待签订',
-      riskDesc: `${employeeName}已入职，请登记已签订的劳动合同`,
-      riskKey: `contract_missing:${employeeId}`
-    },
-    {
-      riskType: 7,
-      riskTitle: '新员工雇主险待增保',
-      riskDesc: `${employeeName}已入职，请办理雇主险增保`,
-      riskKey: `employer_insurance_missing:${employeeId}`
-    }
-  ];
-  for (const reminder of reminders) {
-    await connection.execute(
-      `INSERT INTO hr_risk_alert
-       (company_id,employee_id,risk_type,risk_level,risk_title,risk_desc,risk_key,handle_status)
-       VALUES (:companyId,:employeeId,:riskType,3,:riskTitle,:riskDesc,:riskKey,0)
-       ON DUPLICATE KEY UPDATE risk_type=VALUES(risk_type),risk_level=VALUES(risk_level),
-         risk_title=VALUES(risk_title),risk_desc=VALUES(risk_desc),handle_status=0,
-         handler_id=NULL,handle_time=NULL,handle_remark=NULL,updated_at=NOW()`,
-      { companyId, employeeId, ...reminder }
-    );
-    await noticeService.createNotice(connection, {
-      companyId,
-      employeeId,
-      title: reminder.riskDesc,
-      category: '入职待办',
-      noticeType: 'warning',
-      targetView: 'risk',
-      dedupeKey: `notice:${reminder.riskKey}`
-    });
-  }
-
-  await createWorkTask(connection, {
-    companyId,
-    employeeId,
-    projectId,
-    taskType: 'ONBOARDING_COMPLIANCE',
-    taskTitle: `${employeeName}合同和雇主险待确认`,
-    taskContent: '一键确认劳动合同已签和雇主险已增保',
-    sourceType: 'EMPLOYEE_ONBOARDING',
-    sourceId: employeeId,
-    riskLevel: 3,
-    assignedUserId: operatorId || null,
-    deadline: `${hireDate} 23:59:59`
-  });
-}
-
-async function linkExistingTalentToEmployee(connection, { companyId, employeeId, operatorId = 0 }) {
+async function linkExistingTalentToEmployee(connection, { companyId, employeeId, operatorId = 0, selectedTalentId = 0, user = null }) {
   const [[employee]] = await connection.execute(
-    `SELECT e.id,e.id_card_hash,e.phone,e.employee_status,e.recruitment_channel_id,e.channel_source,e.created_by,
+    `SELECT e.id,e.name,e.id_card_hash,e.phone,e.employee_status,e.recruitment_channel_id,e.channel_source,e.created_by,
             j.customer_id,j.project_id,j.position_id,p.position_name
      FROM hr_employee e
      LEFT JOIN hr_employee_job j ON j.id=(
@@ -1189,12 +1299,28 @@ async function linkExistingTalentToEmployee(connection, { companyId, employeeId,
     { companyId, employeeId }
   );
   if (!employee) return null;
+  const selectedScope = talentCandidateScope(user, 'talent_candidate');
   const [[talent]] = await connection.execute(
-    `SELECT id FROM talent_candidate
-     WHERE company_id=:companyId AND employee_id IS NULL
-       AND ((id_card_hash IS NOT NULL AND id_card_hash=:idCardHash) OR phone=:phone)
-     ORDER BY id DESC LIMIT 1`,
-    { companyId, idCardHash: employee.id_card_hash, phone: employee.phone }
+    selectedTalentId
+      ? `SELECT id FROM talent_candidate
+         WHERE company_id=:companyId AND id=:selectedTalentId AND employee_id IS NULL
+           AND (name=:employeeName OR (id_card_hash IS NOT NULL AND id_card_hash=:idCardHash))
+           ${selectedScope}
+         LIMIT 1`
+      : `SELECT id FROM talent_candidate
+         WHERE company_id=:companyId AND employee_id IS NULL
+           AND ((:idCardHash IS NOT NULL AND id_card_hash=:idCardHash)
+             OR (:phone IS NOT NULL AND :phone<>'' AND phone=:phone))
+         ${selectedScope}
+         ORDER BY id DESC LIMIT 1`,
+    {
+      companyId,
+      selectedTalentId: Number(selectedTalentId || 0),
+      employeeName: employee.name,
+      idCardHash: employee.id_card_hash,
+      phone: employee.phone,
+      scopeUserId: Number(user?.id || 0)
+    }
   );
   if (!talent) return null;
   const isActive = Number(employee.employee_status) === 2;
@@ -1412,9 +1538,11 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
       'UPDATE hr_employee_job SET job_status=2,updated_at=NOW() WHERE company_id=:companyId AND employee_id=:employeeId AND job_status=1',
       { companyId, employeeId: row.employee_id }
     );
-    // 离职闭环与账号状态在同一事务完成，防止离职员工继续使用已有 Token。
+    // 离职后仅保留员工端工资条账号；管理账号停用，所有旧 Token 同步失效。
     await connection.execute(
-      'UPDATE sys_user SET status=0,token_version=token_version+1,updated_at=NOW() WHERE company_id=:companyId AND employee_id=:employeeId AND status=1',
+      `UPDATE sys_user SET status=CASE WHEN account_type='EMPLOYEE' THEN 1 ELSE 0 END,
+         token_version=token_version+1,updated_at=NOW()
+       WHERE company_id=:companyId AND employee_id=:employeeId AND status=1`,
       { companyId, employeeId: row.employee_id }
     );
     await connection.execute(
@@ -1478,13 +1606,23 @@ async function terminateEmployerInsuranceForResignation(connection, {
   return { covered: true, terminated: true };
 }
 
-async function createEmployee(companyId, body, operatorId = 0, user = null) {
+async function createEmployee(companyId, body, operatorId = 0, user = null, options = {}) {
+  const requestedEmployeeStatus = body.employeeStatus === undefined || body.employeeStatus === null || body.employeeStatus === ''
+    ? 1
+    : Number(body.employeeStatus);
+  const allowHistoricalActive = options.allowHistoricalActive === true;
+  if (requestedEmployeeStatus === 2 && !allowHistoricalActive) {
+    throw createError('新增员工请先录入为待到岗，再确认入职');
+  }
+  if (![1, 6].includes(requestedEmployeeStatus) && !(allowHistoricalActive && requestedEmployeeStatus === 2)) {
+    throw createError('新增员工只能选择面试或直接入职');
+  }
   return db.transaction(async connection => {
     const [[defaultDept]] = await connection.execute(
       'SELECT id FROM hr_department WHERE company_id=:companyId AND status=1 ORDER BY sort_no,id LIMIT 1', { companyId }
     );
     // 所有客户端缺省均进入待入职；6 为面试简登状态。
-    const employeeStatus = [1, 2, 5, 6].includes(Number(body.employeeStatus)) ? Number(body.employeeStatus) : 1;
+    const employeeStatus = requestedEmployeeStatus;
     let normalizedBody = {
       ...normalizeRecruitmentChannel(body),
       employeeStatus,
@@ -1514,7 +1652,7 @@ async function createEmployee(companyId, body, operatorId = 0, user = null) {
         idCardNo: encrypt(body.idCardNo),
         idCardHash: sha256(body.idCardNo),
         address: encrypt(body.address),
-        phone: body.phone,
+        phone: body.phone || null,
         email: body.email || null,
         education: body.education || null,
         bankName: body.bankName || null,
@@ -1526,7 +1664,7 @@ async function createEmployee(companyId, body, operatorId = 0, user = null) {
         recruitmentSourceType: normalizedBody.recruitmentSourceType ? Number(normalizedBody.recruitmentSourceType) : null,
         recruiterId: normalizedBody.recruiterId ? Number(normalizedBody.recruiterId) : null,
         supplierId: normalizedBody.supplierId ? Number(normalizedBody.supplierId) : null,
-        lifecycleStatus: employeeStatus === 6 ? 'INTERVIEW' : employeeStatus === 1 ? 'PENDING_ARRIVAL' : employeeStatus === 5 ? 'NOT_JOINED' : 'ONBOARDING',
+        lifecycleStatus: employeeStatus === 6 ? 'INTERVIEW' : employeeStatus === 1 ? 'PENDING_ARRIVAL' : employeeStatus === 2 ? 'ACTIVE' : employeeStatus === 5 ? 'NOT_JOINED' : 'ONBOARDING',
         arrivalStatus: employeeStatus === 5 ? 'NO_SHOW' : employeeStatus === 2 ? 'CONFIRMED' : 'PENDING',
         remark: body.remark || null,
         employeeStatus,
@@ -1562,7 +1700,13 @@ async function createEmployee(companyId, body, operatorId = 0, user = null) {
     }
 
     // 已有招聘线索按身份证摘要或手机号绑定到新员工，避免人才库出现重复人员。
-    await linkExistingTalentToEmployee(connection, { companyId, employeeId, operatorId });
+    await linkExistingTalentToEmployee(connection, {
+      companyId,
+      employeeId,
+      operatorId,
+      selectedTalentId: Number(body.selectedTalentId || 0),
+      user
+    });
 
     if (employeeStatus === 1) {
       await createWorkTask(connection, {
@@ -1617,14 +1761,15 @@ async function createEmployeesBatch(companyId, rows, operatorId = 0, user = null
   const [customers, positions, projects] = await Promise.all([
     db.query('SELECT id, customer_name FROM crm_customer WHERE company_id=:companyId AND status=1', { companyId }),
     db.query('SELECT id, position_name FROM hr_position WHERE company_id=:companyId AND status=1', { companyId }),
-    db.query('SELECT id,customer_id,project_name FROM labor_project WHERE company_id=:companyId AND status IN (1,2)', { companyId })
+    db.query('SELECT id,customer_id,project_name FROM labor_project WHERE company_id=:companyId AND status=2', { companyId })
   ]);
   const customerMap = new Map(customers.map(item => [item.customer_name.trim(), item.id]));
   const positionMap = new Map(positions.map(item => [item.position_name.trim(), item.id]));
   const projectMap = new Map(projects.map(item => [`${item.customer_id}::${item.project_name.trim()}`, item.id]));
   const genderMap = { 未知: 0, 男: 1, 女: 2 };
   const workMap = { 计时: 1, 计件: 2, 混合: 3 };
-  const employeeStatusMap = { 待入职: 1, 直接入职: 2, 在职: 2, 未入职: 5, 面试: 6 };
+  // “在职”仅用于批量补录历史员工；“直接入职”仍先进入待到岗。
+  const employeeStatusMap = { 待到岗: 1, 待入职: 1, 直接入职: 1, 在职: 2, 未入职: 5, 面试: 6 };
   const errors = [];
   const warnings = [];
   let successCount = 0;
@@ -1632,14 +1777,37 @@ async function createEmployeesBatch(companyId, rows, operatorId = 0, user = null
     const row = rows[index] || {};
     try {
       const employeeStatusRaw = String(row.employeeStatus || '').trim();
+      const numericStatus = /^[1256]$/.test(employeeStatusRaw) ? Number(employeeStatusRaw) : 0;
       const employeeStatus = employeeStatusRaw
-        ? (employeeStatusMap[employeeStatusRaw] || (/^[1256]$/.test(employeeStatusRaw) ? Number(employeeStatusRaw) : 0))
+        ? (employeeStatusMap[employeeStatusRaw] || numericStatus)
         : 1;
-      if (!employeeStatus) throw createError(`录入状态"${employeeStatusRaw}"无效，请填写待入职/直接入职/未入职/面试`);
+      if (!employeeStatus) throw createError(`录入状态"${employeeStatusRaw}"无效，请填写待到岗/直接入职/在职/未入职/面试`);
       const customerId = customerMap.get(String(row.customerName || '').trim());
-      const positionId = positionMap.get(String(row.positionName || '').trim());
+      const positionName = String(row.positionName || '').trim();
+      let positionId = positionMap.get(positionName);
       if (employeeStatus !== 6 && !customerId) throw createError(`客户单位"${row.customerName || ''}"不存在`);
-      if (employeeStatus !== 6 && !positionId) throw createError(`岗位"${row.positionName || ''}"不存在`);
+      if (employeeStatus !== 6 && !positionName) throw createError('岗位不能为空');
+      // 表格经常先于岗位字典维护。批量导入时为当前企业补建缺失岗位，
+      // 后续仍可在岗位管理中补充编码、风险等级和特殊工种属性。
+      if (positionName && !positionId) {
+        const positionCode = `IMPORT-${sha256(positionName).slice(0, 12).toUpperCase()}`;
+        const existingPosition = await db.first(
+          'SELECT id FROM hr_position WHERE company_id=:companyId AND position_name=:positionName AND status=1 LIMIT 1',
+          { companyId, positionName }
+        );
+        if (existingPosition) {
+          positionId = Number(existingPosition.id);
+        } else {
+          const positionResult = await db.query(
+            `INSERT INTO hr_position
+             (company_id,position_name,position_code,risk_level,is_special_work,status)
+             VALUES (:companyId,:positionName,:positionCode,1,0,1)`,
+            { companyId, positionName, positionCode }
+          );
+          positionId = Number(positionResult.insertId);
+        }
+        positionMap.set(positionName, positionId);
+      }
       const projectName = String(row.projectName || '').trim();
       const projectId = projectName ? (customerId ? projectMap.get(`${customerId}::${projectName}`) : null) : null;
       if (projectName && !projectId) throw createError(`所属项目"${projectName}"不存在或不属于所选客户`);
@@ -1668,7 +1836,7 @@ async function createEmployeesBatch(companyId, rows, operatorId = 0, user = null
         feeMode,
         workType,
         employeeStatus
-      }, operatorId, user);
+      }, operatorId, user, { allowHistoricalActive: employeeStatus === 2 });
       successCount += 1;
       if (rowWarnings.length) {
         warnings.push({ row: index + 1, name: row.name || '', messages: rowWarnings });
@@ -1684,7 +1852,10 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
   return db.transaction(async connection => {
     await assertEmployeeScope(companyId, employeeId, user, connection);
     const [[currentJobForDept]] = await connection.execute(
-      'SELECT dept_id,customer_id,project_id FROM hr_employee_job WHERE company_id=:companyId AND employee_id=:employeeId AND job_status=1 LIMIT 1',
+      `SELECT id,dept_id,customer_id,project_id,job_status
+       FROM hr_employee_job
+       WHERE company_id=:companyId AND employee_id=:employeeId
+       ORDER BY (job_status=1) DESC,id DESC LIMIT 1`,
       { companyId, employeeId }
     );
     const [[employee]] = await connection.execute(
@@ -1693,27 +1864,13 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
     );
     if (!employee) throw createError('员工不存在', 404);
     const canViewSensitiveEmployee = user?.permissions?.includes('employee:sensitive:view');
-    const sensitiveBody = canViewSensitiveEmployee
-      ? {
-          idCardNo: body.idCardNo,
-          address: body.address,
-          phone: body.phone,
-          bankCardNo: body.bankCardNo,
-          emergencyPhone: body.emergencyPhone
-        }
-      : {
-          idCardNo: decrypt(employee.id_card_no),
-          address: decrypt(employee.address),
-          phone: employee.phone,
-          bankCardNo: decrypt(employee.bank_card_no),
-          emergencyPhone: employee.emergency_phone
-        };
+    const sensitiveBody = resolveSensitiveEmployeeFields(employee, body, canViewSensitiveEmployee);
     let normalizedBody = {
       ...normalizeRecruitmentChannel(body),
       ...sensitiveBody,
       employeeStatus: Number(employee.employee_status),
       employeeNo: employee.employee_no,
-      deptId: body.deptId || currentJobForDept?.dept_id
+      deptId: Number(body.deptId || currentJobForDept?.dept_id || 0) || null
     };
     normalizedBody = await resolveRecruitmentChannel(companyId, normalizedBody, operatorId, connection);
     const ownsUnassignedLegacyEmployee = Number(user?.dataScope) === 5
@@ -1781,14 +1938,15 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
       employeeId,
       customerId: normalizedBody.customerId ? Number(normalizedBody.customerId) : null,
       projectId: normalizedBody.projectId ? Number(normalizedBody.projectId) : null,
-      deptId: Number(normalizedBody.deptId),
+      // 历史员工可能没有部门记录，不能把 Number(undefined) 传给 mysql2。
+      deptId: Number(normalizedBody.deptId || 0) || null,
       positionId: body.positionId ? Number(body.positionId) : null,
       employmentType: body.employmentType ? Number(body.employmentType) : null,
       feeMode: normalizeFeeMode(body.feeMode),
       workType: body.workType ? Number(body.workType) : null,
       hireDate: body.hireDate || null
     };
-    if (currentJobForDept) {
+    if (currentJobForDept && Number(currentJobForDept.job_status) === 1) {
       await connection.execute(
         `
         UPDATE hr_employee_job
@@ -1879,7 +2037,7 @@ async function transferJob(companyId, employeeId, body, operatorId = 0, user = n
     if (targetProjectId) {
       const [[project]] = await connection.execute(
         `SELECT id,customer_id,manager_user_id FROM labor_project
-         WHERE company_id=:companyId AND id=:projectId AND status IN (1,2) LIMIT 1`,
+         WHERE company_id=:companyId AND id=:projectId AND status=2 LIMIT 1`,
         { companyId, projectId: targetProjectId }
       );
       if (!project || Number(project.customer_id) !== Number(body.newCustomerId)) {
@@ -2208,7 +2366,6 @@ async function onboardEmployee(companyId, employeeId, body, operatorId = 0, user
     if (![1, 6].includes(Number(employee.employee_status))) throw createError('该员工已不在待到岗状态，请刷新列表');
     const missingFields = [];
     if (!decrypt(employee.id_card_no)) missingFields.push('身份证号');
-    if (!employee.phone) missingFields.push('手机号');
     if (!employee.customer_id) missingFields.push('客户单位');
     if (!employee.position_id) missingFields.push('岗位');
     if (!employee.employment_type) missingFields.push('用工模式');
@@ -2369,6 +2526,8 @@ async function handleArrivalResult(companyId, employeeId, body, operatorId = 0, 
 }
 
 async function confirmOnboardingCompliance(companyId, employeeId, body, operatorId = 0, user = null) {
+  throw createError('功能已停用', 410);
+  /* istanbul ignore next -- 保留历史实现以兼容审计与历史数据读取 */
   return db.transaction(async connection => {
     await assertEmployeeScope(companyId, employeeId, user, connection);
     const [[employee]] = await connection.execute(
@@ -2451,6 +2610,8 @@ async function assertEmployeeExists(companyId, employeeId, connection = db.pool)
 }
 
 async function createContract(companyId, employeeId, body, operatorId = 0, user = null) {
+  throw createError('功能已停用', 410);
+  /* istanbul ignore next -- 历史合同数据仍由详情接口只读展示 */
   return db.transaction(async connection => {
     await assertEmployeeScope(companyId, employeeId, user, connection);
     const employee = await assertEmployeeExists(companyId, employeeId, connection);
@@ -2546,6 +2707,8 @@ async function createContract(companyId, employeeId, body, operatorId = 0, user 
 }
 
 async function updateSocialSecurity(companyId, employeeId, body, operatorId = 0, user = null) {
+  throw createError('功能已停用', 410);
+  /* istanbul ignore next -- 历史雇主险数据仍由详情接口只读展示 */
   return db.transaction(async connection => {
     await assertEmployeeScope(companyId, employeeId, user, connection);
     const employee = await assertEmployeeExists(companyId, employeeId, connection);
@@ -2794,7 +2957,7 @@ function colorEmployeeStatus(cell, status) {
 async function exportEmployeesExcel(companyId, query, user = null, audit = {}) {
   const result = await listEmployees(companyId, { ...query, page: 1, pageSize: 2000 }, user, { maxPageSize: 2000 });
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = '优益数字化管理系统';
+  workbook.creator = '优企云数字化管理系统';
   workbook.created = new Date();
   workbook.modified = new Date();
 
@@ -2940,6 +3103,7 @@ module.exports = {
   normalizeEmploymentType,
   normalizeFeeMode,
   normalizeRecruitmentChannel,
+  resolveSensitiveEmployeeFields,
   linkExistingTalentToEmployee,
   syncEmployeeToTalent,
   buildInternalEmployeeNo
@@ -2947,4 +3111,5 @@ module.exports = {
   ,validateRecruitmentSource
   ,handleTransfer
   ,updateResignationProgress
+  ,reactivateEmployee
 };

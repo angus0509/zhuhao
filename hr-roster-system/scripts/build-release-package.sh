@@ -22,35 +22,14 @@ trap cleanup_package EXIT
 
 # 打包。显式关闭 macOS 扩展属性、ACL、文件标志和 AppleDouble 元数据，
 # 避免 Linux 服务器解压时出现 LIBARCHIVE.xattr / SCHILY.fflags 警告。
-COPYFILE_DISABLE=1 tar \
-  --no-xattrs \
-  --no-acls \
-  --no-fflags \
-  --no-mac-metadata \
-  -czf "$PACKAGE_FILE" \
-  --exclude='node_modules' \
-  --exclude='.runtime' \
-  --exclude='data' \
-  --exclude='uploads' \
-  --exclude='.DS_Store' \
-  --exclude='design-qa.md' \
-  --exclude='wechat-miniprogram' \
-  --exclude='*.log' \
-  --exclude='*.pem' \
-  --exclude='*.key' \
-  --exclude='*.p12' \
-  --exclude='*.pfx' \
-  --exclude='id_rsa' \
-  --exclude='id_ed25519' \
-  --exclude='*.sql.gz' \
-  --exclude='.env' \
-  --exclude='.env.production' \
-  --exclude='.env.local' \
-  --exclude='.env.development' \
-  --exclude='.env.test' \
-  --exclude='.env.*.local' \
-  --exclude='.env.staging' \
-  .
+PACKAGE_FILE_LIST="$(mktemp)"
+{
+  printf '%s\n' package.json package-lock.json Dockerfile docker-compose.prod.yml README.md DEVELOPMENT_PLAN.md REUSE_GUIDE.md server.js .env.example .env.production.example
+  find public src sql scripts deploy test -type f -print
+} > "$PACKAGE_FILE_LIST"
+COPYFILE_DISABLE=1 tar --no-xattrs --no-acls --no-fflags --no-mac-metadata \
+  --exclude='uploads' -c --use-compress-program='gzip -1' -f "$PACKAGE_FILE" -T "$PACKAGE_FILE_LIST"
+rm -f "$PACKAGE_FILE_LIST"
 
 # ---- 安全检查 1：无符号链接/硬链接 ----
 TAR_DETAIL="$(tar tvzf "$PACKAGE_FILE")"
@@ -90,7 +69,7 @@ if [ -n "$SENSITIVE_ENV" ]; then
 fi
 
 # ---- 安全检查 4：禁止项不存在 ----
-for forbidden in '.env' '.env.production' '.env.local' 'node_modules' '.runtime' 'data' 'uploads'; do
+for forbidden in '.env' '.env.production' '.env.local' 'node_modules' '.runtime' 'data' 'uploads' 'release-candidate.json'; do
   if echo "$TAR_LIST" | grep -q "^${forbidden}\(/.*\)*$"; then
     echo "错误: 包内不应包含 — $forbidden" >&2
     exit 1

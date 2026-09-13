@@ -8,10 +8,12 @@ const release = JSON.parse(read('wechat-miniprogram/release.json'));
 const app = read('wechat-miniprogram/miniprogram/app.js');
 const profileJs = read('wechat-miniprogram/miniprogram/pages/profile/index.js');
 const profileWxml = read('wechat-miniprogram/miniprogram/pages/profile/index.wxml');
+const employeeProfilePanel = read('wechat-miniprogram/miniprogram/components/employee-profile-panel/index.js');
 
 assert.ok(app.includes(`version: '${release.version}'`), 'App 兜底版本与发布候选版本不一致');
 assert.ok(profileJs.includes(`versionText: '${release.version}'`), '个人中心兜底版本与发布候选版本不一致');
-assert.match(app, /onLaunch\(\)[\s\S]*this\.checkForUpdate\(\)/, '小程序启动时未检查新版本');
+assert.ok(employeeProfilePanel.includes(`versionText: '${release.version}'`), '员工个人面板兜底版本与发布候选版本不一致');
+assert.match(app, /onLaunch\([^)]*\)[\s\S]*this\.checkForUpdate\(\)/, '小程序启动时未检查新版本');
 assert.match(app, /onUpdateReady[\s\S]*applyUpdate\(\)/, '新版本就绪后未强制统一更新');
 assert.match(profileWxml, /\{\{versionText\}\} · \{\{environmentText\}\}/, '个人中心未展示实际版本环境');
 assert.match(profileWxml, /bindtap="checkUpdate"/, '个人中心缺少手动检查新版本入口');

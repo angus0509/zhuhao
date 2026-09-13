@@ -8,7 +8,7 @@ const assertIncludes = (source, expected, message) => {
 };
 
 const appJson = JSON.parse(read('wechat-miniprogram/miniprogram/app.json'));
-if (!appJson.pages.includes('pages/tasks/index')) throw new Error('小程序未注册风险与合规处理页');
+if (!appJson.pages.includes('pages/tasks/index')) throw new Error('小程序未注册驻厂待办页');
 
 const homeJs = read('wechat-miniprogram/miniprogram/pages/home/index.js');
 const homeWxml = read('wechat-miniprogram/miniprogram/pages/home/index.wxml');
@@ -20,12 +20,10 @@ if (/goRiskCenter|goTodo|驻厂待处理|合规待办|驻厂处理队列/.test(h
 
 const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
 const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
-assertIncludes(taskJs, "request({ url: '/risk-alerts' })", '页面未读取风险提醒');
-assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '页面未读取待处理合规任务');
-assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '页面未读取处理中合规任务');
-assertIncludes(taskJs, "CONTRACT: { kind: 'compliance'", '页面未将历史合同待办归入合并合规');
-assertIncludes(taskJs, "kind === 'compliance'", '风险数据未归类为合并合规待办');
-assertIncludes(taskJs, '/pages/employees/compliance/index?id=', '合同和雇主险待办未直达合并办理');
+if (taskJs.includes("request({ url: '/risk-alerts' })")) throw new Error('驻厂待办仍读取风险提醒');
+assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '页面未读取待处理驻厂任务');
+assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '页面未读取处理中驻厂任务');
+if (/CONTRACT|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs)) throw new Error('驻厂待办仍保留已取消的合规办理入口');
 assertIncludes(taskJs, "taskType === 'ARRIVAL'", '到岗待办未直达确认入职');
 assertIncludes(taskJs, '/pages/employees/onboard/index?id=', '到岗待办缺少确认入职页面');
 assertIncludes(taskJs, "taskType === 'DOCUMENT'", '资料待补未直达员工编辑');
@@ -40,16 +38,11 @@ assertIncludes(taskWxml, 'bindtap="handleItem"', '具体事项缺少直接处理
 if (taskWxml.includes('.slice(')) throw new Error('WXML 中不应调用 JavaScript 方法');
 
 const webApp = read('public/app.js');
-for (const label of ['直接登记合同', '直接办理增保', '确认已减保并离职']) {
-  assertIncludes(webApp, label, `网页端待办缺少操作：${label}`);
+const webHtml = read('public/index.html');
+for (const removed of ['直接登记合同', '直接办理增保', '确认已减保并离职', 'data-insurance-action=', 'data-open-offboard=', 'data-todo-id=']) {
+  if ((webApp + webHtml).includes(removed)) throw new Error(`网页端仍保留已取消操作：${removed}`);
 }
-assertIncludes(webApp, 'data-insurance-action="ADD"', '网页端增保入口未明确传递增保动作');
-assertIncludes(webApp, 'data-open-offboard=', '网页端减保事项未合并到离职办理');
-assertIncludes(webApp, "function openSocialModal(id, requestedAction = '')", '雇主险弹窗无法接收明确的增减保动作');
-assertIncludes(webApp, 'openSocialModal(id, actionButton.dataset.insuranceAction)', '雇主险按钮动作未传入办理弹窗');
-assertIncludes(webApp, 'data-todo-id=', '网页端待办未传递具体类型');
-assertIncludes(webApp, "todoId === 'contract'", '网页端合同待办不能精确筛选');
-assertIncludes(webApp, "todoId === 'insurance'", '网页端雇主险待办不能精确筛选');
+if (/id="riskView"|id="riskStatusFilter"|id="riskDetailModal"/.test(webHtml)) throw new Error('网页端仍显示已下线风险页面');
 
 const employeeService = read('src/services/employee.service.js');
 const summaryRiskQuery = employeeService.slice(

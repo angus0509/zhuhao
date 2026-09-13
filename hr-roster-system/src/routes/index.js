@@ -1,5 +1,6 @@
 const express = require('express');
 const authRoutes = require('./auth.routes');
+const employeeAuthRoutes = require('./employee-auth.routes');
 const employeeRoutes = require('./employee.routes');
 const riskRoutes = require('./risk.routes');
 const operationsRoutes = require('./operations.routes');
@@ -10,10 +11,15 @@ const attachmentRoutes = require('./attachment.routes');
 const recruitmentSourceRoutes = require('./recruitment-source.routes');
 const workTaskRoutes = require('./work-task.routes');
 const payslipRoutes = require('./payslip.routes');
+const smsRoutes = require('./sms.routes');
+const wechatOfficialRoutes = require('./wechat-official.routes');
 
 const router = express.Router();
 
 router.use(authRoutes);
+router.use(employeeAuthRoutes);
+router.use(smsRoutes);
+router.use(wechatOfficialRoutes);
 router.use(employeeRoutes);
 router.use(riskRoutes);
 router.use(operationsRoutes);

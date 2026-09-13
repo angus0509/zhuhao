@@ -15,15 +15,26 @@ assert.match(syncUtil, /tabBar\.setData\(\{\s*selected,\s*switching:\s*false\s*\
 const pages = [
   ['home/index.js', 0],
   ['employees/index.js', 1],
-  ['advances/index.js', 2],
-  ['payroll/index.js', 3],
-  ['profile/index.js', 4]
+  ['advances/index.js', 2]
 ];
 
 for (const [file, index] of pages) {
   const source = read(`wechat-miniprogram/miniprogram/pages/${file}`);
   assert.match(source, /require\(['"]\.\.\/\.\.\/utils\/tab-bar['"]\)/, `${file} 未接入菜单同步工具`);
   assert.match(source, new RegExp(`onShow\\(\\) \\{\\s*syncTabBar\\(this, ${index}\\);`), `${file} 未在显示时立即同步正确菜单序号`);
+}
+
+for (const [file, employeeIndex, managerIndex] of [
+  ['payroll/index.js', 1, 3],
+  ['profile/index.js', 2, 4]
+]) {
+  const source = read(`wechat-miniprogram/miniprogram/pages/${file}`);
+  assert.match(source, /require\(['"]\.\.\/\.\.\/utils\/tab-bar['"]\)/, `${file} 未接入菜单同步工具`);
+  assert.match(
+    source,
+    new RegExp(`syncTabBar\\(this, employeeMode \\? ${employeeIndex} : ${managerIndex}\\)`),
+    `${file} 未按员工端和管理端分别同步正确菜单序号`
+  );
 }
 
 console.log('miniprogram-tabbar-follow-tests-ok');

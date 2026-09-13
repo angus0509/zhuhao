@@ -1,5 +1,6 @@
 async function uploadAttachment(file, bizType, bizId) {
   if (!file) return null;
+  const requestSessionVersion = state.sessionVersion;
   const formData = new FormData();
   formData.append('file', file);
   formData.append('bizType', bizType);
@@ -12,8 +13,16 @@ async function uploadAttachment(file, bizType, bizId) {
       headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
       body: formData
     });
-    const payload = await response.json();
-    if (!response.ok || payload.code !== 0) throw new Error(payload.message || '附件上传失败');
+    assertCurrentSession(requestSessionVersion);
+    const payload = await response.json().catch(() => null);
+    assertCurrentSession(requestSessionVersion);
+    if (response.status === 401) {
+      const message = payload?.message || '登录已过期，请重新登录';
+      rememberAuthMessage(message);
+      logout(false, false);
+      setLoginError(message);
+    }
+    if (!response.ok || payload?.code !== 0) throw new Error(payload?.message || '附件上传失败');
     return payload.data;
   } finally {
     hideLoading();
@@ -26,23 +35,34 @@ async function uploadSavedAttachment(file, bizType, bizId) {
     await uploadAttachment(file, bizType, bizId);
     return true;
   } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
     toast(`业务记录已保存，但附件上传失败：${error.message}`, 'error');
     return false;
   }
 }
 
 async function downloadAttachment(id, filename) {
+  const requestSessionVersion = state.sessionVersion;
   showLoading();
   try {
     const response = await fetch(`/api/attachments/${id}/download`, {
       credentials: 'same-origin',
       headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
     });
+    assertCurrentSession(requestSessionVersion);
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
+      if (response.status === 401) {
+        const message = payload?.message || '登录已过期，请重新登录';
+        rememberAuthMessage(message);
+        logout(false, false);
+        setLoginError(message);
+      }
       throw new Error(payload?.message || '附件下载失败');
     }
-    const url = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    assertCurrentSession(requestSessionVersion);
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
     link.download = filename || '合规附件';
@@ -50,6 +70,16 @@ async function downloadAttachment(id, filename) {
     URL.revokeObjectURL(url);
   } finally {
     hideLoading();
+  }
+}
+
+async function refreshAfterSuccess(refreshPromise, operationName = '操作') {
+  try {
+    return await refreshPromise;
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    toast(`操作已成功，但${operationName}后的页面刷新失败：${error.message}。请手动刷新。`, 'error');
+    return null;
   }
 }
 
@@ -77,7 +107,7 @@ function configureSensitiveEmployeeFields(form, editing) {
     const input = form?.elements?.[name];
     if (!input) continue;
     if (!input.dataset.defaultPlaceholder) input.dataset.defaultPlaceholder = input.placeholder || '';
-    const requiredOnCreate = ['idCardNo', 'phone'].includes(name);
+    const requiredOnCreate = name === 'idCardNo';
     input.required = !editing && requiredOnCreate;
     if (editing && !allowed) {
       input.value = '';
@@ -93,6 +123,140 @@ function removeUnavailableSensitiveFields(form, body, editing) {
   if (!editing || form.dataset.canViewSensitiveEmployee === '1') return body;
   for (const name of ['idCardNo', 'address', 'phone', 'bankCardNo', 'emergencyPhone']) delete body[name];
   return body;
+}
+
+function talentCheckKey(body = {}) {
+  return `${String(body.name || '').trim()}::${String(body.idCardNo || '').trim().toUpperCase()}`;
+}
+
+function applyWebTalentCandidate(form, candidate) {
+  if (!form || !candidate) return;
+  const setValue = (name, value) => {
+    if (form.elements[name] && value !== null && value !== undefined && value !== '') {
+      form.elements[name].value = String(value);
+    }
+  };
+  setValue('selectedTalentId', candidate.id);
+  setValue('name', candidate.name);
+  setValue('idCardNo', candidate.idCardNo);
+  setValue('phone', candidate.phone);
+  setValue('customerId', candidate.customerId);
+  updateEmployeeProjectOptions(form, candidate.projectId || '');
+  setValue('positionId', candidate.positionId);
+  setValue('channelSource', candidate.sourceChannel);
+  setValue('remark', candidate.remark);
+  form.dataset.talentCheckKey = talentCheckKey({
+    name: form.elements.name?.value,
+    idCardNo: form.elements.idCardNo?.value
+  });
+  toast('已拉取人才库信息，请核对后保存');
+}
+
+function resetWebTalentSelection(event) {
+  const name = event.target?.name;
+  if (name !== 'name' && name !== 'idCardNo') return;
+  const form = event.target.form;
+  if (!form) return;
+  if (form.elements.selectedTalentId) form.elements.selectedTalentId.value = '';
+  delete form.dataset.talentCheckKey;
+}
+
+let duplicateIdentityCheckTimer = null;
+
+function scheduleWebExistingEmployeeCheck(form) {
+  const editing = form?.id === 'mobileEmployeeForm' ? state.editingMobileEmployeeId : state.editingEmployeeId;
+  if (!form || editing) return;
+  const idCardNo = String(form.elements.idCardNo?.value || '').trim();
+  if (!/^\d{17}[\dXx]$/.test(idCardNo)) return;
+  window.clearTimeout(duplicateIdentityCheckTimer);
+  duplicateIdentityCheckTimer = window.setTimeout(async () => {
+    if (form.dataset.duplicateCheckIdCard === idCardNo) return;
+    form.dataset.duplicateCheckIdCard = idCardNo;
+    try {
+      const result = await api('/api/employees/precheck', {
+        method: 'POST',
+        body: JSON.stringify({ name: form.elements.name?.value || '', idCardNo })
+      });
+      if (result.checks?.duplicate?.passed === false) {
+        await openExistingEmployeeRecord(result.checks.duplicate, { mobile: form.id === 'mobileEmployeeForm' });
+      }
+    } catch (error) {
+      delete form.dataset.duplicateCheckIdCard;
+      toast(error.message, 'error');
+    }
+  }, 120);
+}
+
+async function checkWebTalentCandidates(form, body) {
+  const result = await api('/api/employees/precheck', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  if (!result.allowOnboarding) {
+    if (result.checks?.blacklist?.passed === false) {
+      throw new Error(`该人员命中黑名单：${result.checks.blacklist.reason || '禁止录入'}`);
+    }
+    if (result.checks?.duplicate?.passed === false) {
+      const opened = await openExistingEmployeeRecord(result.checks.duplicate);
+      if (opened) return false;
+      throw new Error('该身份证号已存在员工档案，不能重复录入');
+    }
+    throw new Error('员工预检查未通过，请核对人员信息');
+  }
+  const candidates = result.talentCandidates || [];
+  const checkKey = talentCheckKey(body);
+  if (!candidates.length || form.dataset.talentCheckKey === checkKey || body.selectedTalentId) return true;
+  const first = candidates[0];
+  const useTalent = await confirmDialog({
+    title: '发现人才库记录',
+    message: `人才库发现${candidates.length}条同名或同身份证记录。是否拉取“${first.name}”的已有信息？取消后将继续按当前内容录入。`,
+    confirmText: '拉取已有信息'
+  });
+  if (useTalent) {
+    applyWebTalentCandidate(form, first);
+    return false;
+  }
+  form.dataset.talentCheckKey = checkKey;
+  return true;
+}
+
+async function reactivateExistingEmployee(id) {
+  await api(`/api/employees/${id}/reactivate`, {
+    method: 'POST',
+    body: JSON.stringify({ remark: '身份证重复录入时重新捞出员工档案' })
+  });
+  toast('员工已重新录用并进入待到岗', 'success');
+  await refreshEmployeeWorkspace();
+  await selectEmployee(id);
+}
+
+async function openExistingEmployeeRecord(duplicate, options = {}) {
+  if (!duplicate?.canOpen || !duplicate.employeeId) {
+    throw new Error('该身份证号已存在员工档案，但当前账号无权查看，请联系企业管理员');
+  }
+  const statusText = duplicate.lifecycleStatus || `状态${duplicate.employeeStatus || '-'}`;
+  const locationText = [duplicate.customerName, duplicate.projectName].filter(Boolean).join(' / ') || '暂未分配客户项目';
+  const actionHint = duplicate.canReactivate ? '打开档案后可编辑资料并重新录用。' : '将直接打开现有员工档案。';
+  const confirmed = await confirmDialog({
+    title: '身份证号已存在',
+    message: `该身份证号已存在员工档案：${duplicate.employeeName || '员工'}（${statusText}）。当前归属：${locationText}。${actionHint}`,
+    confirmText: '打开员工档案'
+  });
+  if (!confirmed) {
+    return false;
+  }
+  const sourceModal = options.mobile ? $('#mobileEmployeeModal') : $('#employeeModal');
+  if (sourceModal?.open) sourceModal.close();
+  switchView('roster');
+  await selectEmployee(duplicate.employeeId);
+  if (duplicate.canReactivate) {
+    if (options.mobile) await openMobileEmployeeModal(Number(duplicate.employeeId));
+    else await openEmployeeModal(Number(duplicate.employeeId));
+    toast('请核对并保存档案，再点击“重新录用”转入待到岗', 'success');
+  } else if ((state.user?.permissions || []).includes('employee:update')) {
+    await openEmployeeModal(Number(duplicate.employeeId));
+  }
+  return true;
 }
 
 /* ==================== 空状态和行数工具 ==================== */
@@ -127,23 +291,35 @@ function parseBatchTable(text, columns, firstHeader) {
   });
 }
 
-function downloadCsvTemplate(filename, headers, example) {
-  const csv = `\uFEFF${headers.join(',')}\n${example.join(',')}\n`;
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  link.style.display = 'none';
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // 给浏览器足够时间接管 Blob，避免立即释放地址导致下载被取消。
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function downloadXlsxTemplate(filename, headers, example) {
-  if (typeof XLSX === 'undefined') { toast('XLSX 库未加载，请刷新页面重试'); return; }
-  const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-  ws['!cols'] = headers.map(() => ({ wch: 16 }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, '批量录入');
-  XLSX.writeFile(wb, filename);
+function downloadCsvTemplate(filename, headers, example) {
+  const csv = `\uFEFF${headers.join(',')}\n${example.join(',')}\n`;
+  triggerBlobDownload(new Blob([csv], { type: 'text/csv;charset=utf-8' }), filename);
+}
+
+async function downloadXlsxTemplate(filename, headers, example) {
+  if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('批量录入');
+  worksheet.addRow(headers);
+  worksheet.addRow(example);
+  worksheet.columns.forEach(column => { column.width = 16; });
+  const buffer = await workbook.xlsx.writeBuffer();
+  triggerBlobDownload(new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  }), filename);
 }
 
 function rowsToTabText(rows) {
@@ -160,14 +336,17 @@ function excelSerialToDate(serial) {
 }
 
 function excelCellToText(value) {
-  // XLSX cellDates:true 成功 → Date 对象
+  if (value && typeof value === 'object' && value.formula) {
+    return `=${value.formula}`;
+  }
+  // ExcelJS 日期单元格会读取为 Date 对象
   if (value instanceof Date && !isNaN(value.getTime())) {
     const y = value.getFullYear();
     const m = String(value.getMonth() + 1).padStart(2, '0');
     const d = String(value.getDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
-  // XLSX cellDates:true 失败 → 数字序列号（1970~2119 = 25569~73050）
+  // 少数表格日期仍可能以数字序列号保存（1970~2119 = 25569~73050）
   if (typeof value === 'number' && value >= 25569 && value < 73050) {
     const date = excelSerialToDate(value);
     if (date) {
@@ -180,7 +359,62 @@ function excelCellToText(value) {
   if (value && typeof value === 'object' && value.richText) {
     return value.richText.map(part => part.text || '').join('');
   }
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'text')) {
+    return value.text == null ? '' : String(value.text);
+  }
   return value == null ? '' : String(value);
+}
+
+function worksheetToRows(worksheet) {
+  const rowCount = worksheet.actualRowCount || worksheet.rowCount || 0;
+  const columnCount = worksheet.actualColumnCount || worksheet.columnCount || 0;
+  const rows = [];
+  for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+    const row = [];
+    for (let columnIndex = 1; columnIndex <= columnCount; columnIndex += 1) {
+      const cell = worksheet.getRow(rowIndex).getCell(columnIndex);
+      const isMergedCopy = cell.isMerged && cell.master && cell.master.address !== cell.address;
+      row.push(isMergedCopy ? '' : excelCellToText(cell.value));
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+function readFileAsArrayBuffer(file, errorMessage = '文件读取失败') {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(errorMessage));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function readFileAsText(file, errorMessage = '文件读取失败') {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const buffer = reader.result;
+      if (!(buffer instanceof ArrayBuffer) || typeof TextDecoder === 'undefined') {
+        resolve(String(buffer || ''));
+        return;
+      }
+      const utf8 = new TextDecoder('utf-8').decode(buffer);
+      // 国内财务软件常导出 GBK/ANSI CSV；UTF-8 解码出现替换字符时尝试 GBK。
+      if (!utf8.includes('\uFFFD')) {
+        resolve(utf8);
+        return;
+      }
+      try {
+        const gbk = new TextDecoder('gbk').decode(buffer);
+        resolve(gbk.includes('\uFFFD') ? utf8 : gbk);
+      } catch (error) {
+        resolve(utf8);
+      }
+    };
+    reader.onerror = () => reject(new Error(errorMessage));
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 function renderBatchColumnPreview(previewEl, expectedHeaders, actualHeaders, dataRow) {
@@ -188,6 +422,28 @@ function renderBatchColumnPreview(previewEl, expectedHeaders, actualHeaders, dat
   if (!Array.isArray(actualHeaders) || !actualHeaders.length) {
     previewEl.classList.add('hidden');
     previewEl.innerHTML = '';
+    return;
+  }
+  const employeeHeaders = typeof EmployeeBatch !== 'undefined'
+    && expectedHeaders.join('\u0000') === EmployeeBatch.headers.join('\u0000');
+  if (employeeHeaders) {
+    const inspection = EmployeeBatch.inspectEmployeeHeaders(actualHeaders);
+    const recognized = inspection.columns.filter(column => column.key).length;
+    const unknown = inspection.columns.length - recognized;
+    const hasRequired = inspection.missingRequired.length === 0;
+    const statusTone = hasRequired ? 'ok' : 'bad';
+    const statusText = hasRequired
+      ? `✓ 已按表头自动识别 ${recognized} 列，列顺序可自由调整${unknown ? `；${unknown} 个额外列将忽略` : ''}`
+      : `⚠ 缺少必需表头：${inspection.missingRequired.join('、')}`;
+    const cells = inspection.columns.map((column, idx) => {
+      const tone = column.key ? 'ok' : 'missing';
+      const mark = column.key ? '✓ 已对应' : '忽略';
+      const sample = (dataRow && dataRow[idx] != null) ? `  样例：<code>${escapeHtml(String(dataRow[idx]).slice(0, 24))}</code>` : '';
+      return `<div class="batch-col-row ${tone}"><span class="batch-col-num">${idx + 1}</span><span class="batch-col-std">${escapeHtml(column.canonical || '额外列')}</span><span class="batch-col-arrow">←</span><span class="batch-col-actual">${escapeHtml(column.actual) || '<em>空</em>'}</span><span class="batch-col-mark">${mark}${sample}</span></div>`;
+    }).join('');
+    previewEl.className = `batch-column-preview ${statusTone}`;
+    previewEl.innerHTML = `<div class="batch-column-head">${escapeHtml(statusText)}</div>${cells}`;
+    previewEl.classList.remove('hidden');
     return;
   }
   const same = actualHeaders.length === expectedHeaders.length;
@@ -214,58 +470,59 @@ function renderBatchColumnPreview(previewEl, expectedHeaders, actualHeaders, dat
   previewEl.classList.remove('hidden');
 }
 
-function handleBatchFile(file, textarea, fileNameEl, options = {}) {
+async function handleBatchFile(file, textarea, fileNameEl, options = {}) {
   if (!file) return;
   const name = (file.name || '').toLowerCase();
   const expectedHeaders = options.expectedHeaders || [];
   const previewEl = options.previewEl || null;
-  if (!/\.(csv|xlsx|xls)$/.test(name)) { toast('仅支持 .csv / .xlsx / .xls 文件'); return; }
+  if (name.endsWith('.xls')) throw new Error('旧版 .xls 暂不支持，请在 Excel 中另存为 .xlsx 或 .csv 后上传');
+  if (!/\.(csv|xlsx)$/.test(name)) throw new Error('仅支持 .csv / .xlsx 文件');
   if (fileNameEl) fileNameEl.textContent = `解析中：${file.name} …`;
   if (previewEl) { previewEl.classList.add('hidden'); previewEl.innerHTML = ''; }
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      let text = '';
-      let actualHeaders = [];
-      let firstDataRow = [];
-      if (name.endsWith('.csv')) {
-        text = String(reader.result || '').replace(/\r\n?/g, '\n').replace(/\uFEFF/g, '').trim();
-        if (text) {
-          const firstLine = text.split('\n')[0];
-          const sep = firstLine.includes('\t') ? '\t' : ',';
-          actualHeaders = firstLine.split(sep).map(c => c.trim());
-        }
-      } else {
-        if (typeof XLSX === 'undefined') throw new Error('XLSX 库未加载，请刷新页面重试');
-        const wb = XLSX.read(new Uint8Array(reader.result), { type: 'array' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        // raw:true + cellDates:true 才能把日期单元格转回 JS Date 对象（raw:false 会按 m/d/yy 格式字符串输出）
-        const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '', cellDates: true }).map(r => r.map(excelCellToText));
-        if (!rows.length) throw new Error('文件为空');
-        actualHeaders = (rows[0] || []).map(c => String(c || '').trim());
-        firstDataRow = rows[1] || [];
-        text = rowsToTabText(rows);
+  try {
+    let text = '';
+    let actualHeaders = [];
+    let firstDataRow = [];
+    if (name.endsWith('.csv')) {
+      text = (await readFileAsText(file)).replace(/\r\n?/g, '\n').replace(/\uFEFF/g, '').trim();
+      if (text) {
+        const firstLine = text.split('\n')[0];
+        const sep = firstLine.includes('\t') ? '\t' : ',';
+        actualHeaders = firstLine.split(sep).map(c => c.trim());
       }
-      if (!text) throw new Error('未解析到数据');
-      textarea.value = text;
-      const dataRowCount = Math.max(0, (text.split('\n').length - 1));
-      if (fileNameEl) fileNameEl.textContent = `已载入：${file.name}（共 ${dataRowCount} 行）`;
-      // 列数预检
-      if (expectedHeaders.length) {
-        renderBatchColumnPreview(previewEl, expectedHeaders, actualHeaders, firstDataRow);
-        if (actualHeaders.length !== expectedHeaders.length) {
-          toast(`表格列数不符：应为 ${expectedHeaders.length} 列，实际 ${actualHeaders.length} 列。请参考上方对照表调整，或使用本系统下载的模板重新录入。`, 'error');
-        }
-      }
-      textarea.focus();
-    } catch (err) {
-      if (fileNameEl) fileNameEl.textContent = '';
-      toast(err.message || '文件解析失败');
+    } else {
+      if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+      const workbook = new ExcelJS.Workbook();
+      const buffer = await readFileAsArrayBuffer(file);
+      await workbook.xlsx.load(buffer);
+      const rows = worksheetToRows(workbook.worksheets[0]);
+      if (!rows.length) throw new Error('文件为空');
+      actualHeaders = (rows[0] || []).map(c => String(c || '').trim());
+      firstDataRow = rows[1] || [];
+      text = rowsToTabText(rows);
     }
-  };
-  reader.onerror = () => { if (fileNameEl) fileNameEl.textContent = ''; toast('文件读取失败'); };
-  if (name.endsWith('.csv')) reader.readAsText(file, 'utf-8');
-  else reader.readAsArrayBuffer(file);
+    if (!text) throw new Error('未解析到数据');
+    textarea.value = text;
+    const dataRowCount = Math.max(0, (text.split('\n').length - 1));
+    if (fileNameEl) fileNameEl.textContent = `已载入：${file.name}（共 ${dataRowCount} 行）`;
+    if (expectedHeaders.length) {
+      renderBatchColumnPreview(previewEl, expectedHeaders, actualHeaders, firstDataRow);
+      const employeeHeaders = typeof EmployeeBatch !== 'undefined'
+        && expectedHeaders.join('\u0000') === EmployeeBatch.headers.join('\u0000');
+      const missingEmployeeHeaders = employeeHeaders
+        ? EmployeeBatch.inspectEmployeeHeaders(actualHeaders).missingRequired
+        : [];
+      if (employeeHeaders && missingEmployeeHeaders.length) {
+        toast(`表格缺少必需表头：${missingEmployeeHeaders.join('、')}`, 'error');
+      } else if (!employeeHeaders && actualHeaders.length !== expectedHeaders.length) {
+        toast(`表格列数不符：应为 ${expectedHeaders.length} 列，实际 ${actualHeaders.length} 列。请参考上方对照表调整，或使用本系统下载的模板重新录入。`, 'error');
+      }
+    }
+    textarea.focus();
+  } catch (error) {
+    if (fileNameEl) fileNameEl.textContent = '';
+    throw error;
+  }
 }
 
 function bindBatchFileZone(zoneId, inputId, formId, fileNameId, expectedHeaders) {
@@ -279,7 +536,8 @@ function bindBatchFileZone(zoneId, inputId, formId, fileNameId, expectedHeaders)
   // employeeFileZone -> employeeColumnPreview
   const previewId = zoneId.replace('FileZone', '') + 'ColumnPreview';
   const previewEl = document.getElementById(previewId);
-  const trigger = () => handleBatchFile(input.files[0], textarea, fileNameEl, { expectedHeaders, previewEl });
+  const trigger = () => handleBatchFile(input.files[0], textarea, fileNameEl, { expectedHeaders, previewEl })
+    .catch(error => toast(error.message || '文件解析失败', 'error'));
   zone.addEventListener('click', () => input.click());
   zone.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); input.click(); } });
   input.addEventListener('change', trigger);
@@ -287,30 +545,40 @@ function bindBatchFileZone(zoneId, inputId, formId, fileNameId, expectedHeaders)
   ['dragleave', 'drop'].forEach(evt => zone.addEventListener(evt, event => { event.preventDefault(); zone.classList.remove('dragover'); }));
   zone.addEventListener('drop', event => {
     const file = event.dataTransfer && event.dataTransfer.files[0];
-    if (file) { input.value = ''; handleBatchFile(file, textarea, fileNameEl, { expectedHeaders, previewEl }); }
+    if (file) {
+      input.value = '';
+      handleBatchFile(file, textarea, fileNameEl, { expectedHeaders, previewEl })
+        .catch(error => toast(error.message || '文件解析失败', 'error'));
+    }
   });
 }
 
 function showBatchResult(element, result) {
-  const errors = result.errors || [];
-  const warnings = result.warnings || [];
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
   const warnBlock = warnings.length
-    ? `<div class="batch-warn-block">${warnings.map(item => `第${item.row}行 ${escapeHtml(item.name || '')}：${item.messages.map(escapeHtml).join('；')}`).join('<br>')}</div>`
+    ? `<div class="batch-warn-block">${warnings.map(item => `第${item.row}行 ${escapeHtml(item.name || '')}：${(Array.isArray(item.messages) ? item.messages : []).map(escapeHtml).join('；')}`).join('<br>')}</div>`
     : '';
   element.classList.remove('hidden');
   const summary = `<strong>共${result.total}行：成功${result.successCount}行，失败${result.failureCount}行${warnings.length ? `，自动纠错${warnings.length}行` : ''}</strong>`;
-  const detail = errors.length
-    ? `<div class="batch-error-block">${errors.map(item => `第${item.row}行 ${escapeHtml(item.name || '')}：${escapeHtml(item.message)}`).join('<br>')}</div>`
+  const hasFailures = Number(result.failureCount) > 0;
+  const errorLines = errors.map(item => `第${item.row}行 ${escapeHtml(item.name || '')}：${escapeHtml(item.message)}`).join('<br>');
+  const detail = hasFailures
+    ? `<div class="batch-error-block">${errorLines || '存在录入失败的行，但未返回具体明细，请重试或联系管理员'}</div>`
     : '<div>全部录入成功。</div>';
   element.innerHTML = summary + warnBlock + detail;
 }
 
 async function submitEmployeeBatch(event) {
   event.preventDefault();
-  const columns = ['name', 'gender', 'education', 'idCardNo', 'address', 'phone', 'customerName', 'projectName', 'positionName', 'workType', 'hireDate', 'employmentType', 'feeMode', 'channelSource', 'remark', 'bankName', 'bankCardNo', 'emergencyContact', 'emergencyPhone', 'employeeStatus'];
-  const rows = parseBatchTable(event.currentTarget.elements.tableData.value, columns, '姓名');
+  const rows = EmployeeBatch.parseEmployeeBatchTable(event.currentTarget.elements.tableData.value);
   const result = await api('/api/employees/batch', { method: 'POST', body: JSON.stringify({ rows }) });
   showBatchResult($('#batchEmployeeResult'), result);
+  if (Number(result.failureCount) > 0) {
+    const resultEl = $('#batchEmployeeResult');
+    if (resultEl) resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    toast(`批量录入完成：成功${result.successCount}人，失败${result.failureCount}人，详见下方红色提示`, 'error');
+  }
   await Promise.all([loadEmployees(), loadSummary(), loadOffice()]);
   if (!result.failureCount) {
     event.currentTarget.reset();
@@ -335,7 +603,9 @@ function updateEmployeeProjectOptions(form, selectedValue = '') {
   const select = form?.elements?.projectId;
   if (!select || !state.bootstrap) return;
   const customerId = Number(form.elements.customerId?.value || 0);
-  const projects = (state.bootstrap.projects || []).filter(item => Number(item.customerId) === customerId);
+  const projects = (state.bootstrap.projects || []).filter(item =>
+    Number(item.customerId) === customerId && Number(item.status) === 2
+  );
   const allowLegacyUnassigned = form.dataset.allowLegacyUnassigned === '1'
     && Number(form.dataset.legacyCustomerId || 0) === customerId;
   const employeeStatus = Number(form.elements.employeeStatus?.value || form.dataset.employeeStatus || 1);
@@ -357,7 +627,7 @@ function populateAdvanceProjectOptions() {
   const projectSelect = $('#advanceProjectSelect');
   if (!customerSelect || !projectSelect) return;
   const customerId = Number(customerSelect.value || 0);
-  const projects = state.projects.filter(item => Number(item.customerId) === customerId && [1, 2].includes(Number(item.status)));
+  const projects = state.projects.filter(item => Number(item.customerId) === customerId && Number(item.status) === 2);
   const projectRequired = Number(state.user?.dataScope) === 5;
   if (!customerId) {
     projectSelect.innerHTML = '<option value="">请先选择客户单位</option>';
@@ -408,6 +678,7 @@ async function loadBootstrap() {
   state.bootstrap.projects = projects;
   state.bootstrap.positions = positions;
   $('#customerSelect').innerHTML = `<option value="">全部</option>${optionHtml(customers, 'id', 'customerName')}`;
+  updateRosterProjectOptions();
   $('#formCustomerSelect').innerHTML = `<option value="">请选择工作单位</option>${optionHtml(customers, 'id', 'customerName')}`;
   $('#transferCustomerSelect').innerHTML = optionHtml(customers, 'id', 'customerName');
   $('#transferProjectSelect').innerHTML = `<option value="">仅调整客户/岗位</option>${optionHtml(projects, 'id', 'projectName')}`;
@@ -423,6 +694,16 @@ async function loadBootstrap() {
   updateEmployeeProjectOptions($('#mobileEmployeeForm'));
 }
 
+function updateRosterProjectOptions(selectedValue = '') {
+  const select = $('#projectSelect');
+  if (!select || !state.bootstrap) return;
+  const customerId = Number($('#customerSelect')?.value || 0);
+  const projects = (state.bootstrap.projects || []).filter(item => !customerId || Number(item.customerId) === customerId);
+  const currentValue = selectedValue || select.value;
+  select.innerHTML = `<option value="">全部项目</option>${optionHtml(projects, 'id', 'projectName')}`;
+  if (projects.some(item => String(item.id) === String(currentValue))) select.value = String(currentValue);
+}
+
 function updateTransferProjectOptions() {
   const select = $('#transferProjectSelect');
   if (!select || !state.bootstrap) return;
@@ -433,28 +714,29 @@ function updateTransferProjectOptions() {
 
 async function login(event) {
   event.preventDefault();
+  const form = event.currentTarget;
   if (loginSubmitting) return;
   loginSubmitting = true;
+  await waitForLogoutRequest();
+  setSystemStatus('loading');
   setLoginError('');
   const submitButton = $('#loginSubmitButton');
   if (submitButton) {
     submitButton.disabled = true;
     submitButton.textContent = '登录中...';
   }
-  const body = formToObject(event.currentTarget);
+  const body = formToObject(form);
   try {
     const data = await api('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify(body)
     });
 
-    // 仅保存在当前页面内存中；生产环境同时使用 HttpOnly Cookie，原型环境使用 Bearer Token。
-    state.token = data.token || '';
-    state.user = data.user;
-    showApp();
+    // 先清除上一账号工作区并加载当前权限范围，完成后再显示页面，避免共享电脑串号残留。
+    await activateAuthenticatedSession(data.user, data.token || '');
     toast('登录成功', 'success');
-    await bootAuthedApp();
   } catch (error) {
+    if (!state.user) setSystemStatus('auth');
     setLoginError(error.message || '登录失败，请稍后重试');
     throw error;
   } finally {
@@ -475,10 +757,12 @@ function setLoginError(message) {
 
 function logout(showMessage = true, revokeServer = true) {
   if (revokeServer) {
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    registerLogoutRequest(fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {
+      if (showMessage) toast('已退出本机，但服务器会话撤销失败，请稍后重新登录确认', 'error');
+    }));
   }
-  state.token = '';
-  state.user = null;
+  clearSessionWorkspace();
+  setSystemStatus('auth');
   // 清理旧版本遗留的可被脚本读取的会话数据。
   localStorage.removeItem('hrRosterToken');
   localStorage.removeItem('hrRosterUser');
@@ -488,34 +772,85 @@ function logout(showMessage = true, revokeServer = true) {
 }
 
 function showApp() {
+  setWorkspaceLocked(false);
   $('#loginScreen').classList.add('hidden');
   $('#userPill').textContent = state.user ? `${state.user.realName} / ${state.user.roles?.[0]?.roleName || '用户'}` : '已登录';
   applyNavVisibility();
+}
+
+function getVisibleNavigationModel(activeView = state.activeView) {
+  const permissions = state.user?.permissions || [];
+  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+  return buildNavigationModel({ activeView, permissions, isCompanyAdmin });
+}
+
+function renderPrimaryNavigation(activeView = state.activeView) {
+  const container = $('#primaryNavigation');
+  if (!container) return;
+  const groups = getVisibleNavigationModel(activeView);
+  const activeGroup = groups.find(group => group.active) || groups[0];
+  container.innerHTML = groups.map(group => {
+    const expanded = group.id === activeGroup?.id;
+    const targetView = group.active ? activeView : group.activeView;
+    return `<div class="nav-group ${expanded ? 'active' : ''}" data-nav-group="${group.id}">
+      <button class="nav-item ${expanded ? 'active' : ''}" type="button" data-view="${targetView}" aria-expanded="${expanded}">
+        <span>${escapeHtml(group.shortLabel)}</span>
+        <strong>${escapeHtml(group.label)}</strong>
+        <small>${escapeHtml(group.activeLabel)}</small>
+      </button>
+      <div class="nav-submenu" ${expanded ? '' : 'hidden'}>
+        ${group.items.map(item => `<button class="nav-subitem ${item.view === activeView ? 'active' : ''}" type="button" data-view="${item.view}">${escapeHtml(item.label)}</button>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderMobileNavigation(activeView = state.activeView) {
+  const container = $('#mobileNavigationItems');
+  if (!container) return;
+  const items = buildMobileNavigationItems(getVisibleNavigationModel(activeView));
+  const groups = new Map();
+  items.forEach(item => {
+    if (!groups.has(item.groupId)) groups.set(item.groupId, { label: item.groupLabel, items: [] });
+    groups.get(item.groupId).items.push(item);
+  });
+  container.innerHTML = Array.from(groups.values()).map(group => `
+    <section class="mobile-navigation-group">
+      <h3>${escapeHtml(group.label)}</h3>
+      <div>${group.items.map(item => `<button type="button" class="mobile-navigation-item ${item.view === activeView ? 'active' : ''}" data-mobile-nav-view="${item.view}"><span>${escapeHtml(item.label)}</span><strong>进入</strong></button>`).join('')}</div>
+    </section>
+  `).join('');
+}
+
+function updateMobileNavigationActive(view = state.activeView) {
+  const directViews = new Set($$('.mobile-tabbar button[data-view]').map(item => item.dataset.view));
+  $$('.mobile-tabbar button[data-view]').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+  const moreButton = $('[data-mobile-nav-more]');
+  if (moreButton) moreButton.classList.toggle('active', !directViews.has(view));
+  $$('.mobile-navigation-item').forEach(item => item.classList.toggle('active', item.dataset.mobileNavView === view));
 }
 
 /* 角色驱动的导航菜单显隐 */
 function applyNavVisibility() {
   const perms = state.user?.permissions || [];
   const isCompanyAdmin = (state.user?.roles || []).some(r => r.roleCode === 'company_admin');
-  $$('.nav-item').forEach(item => {
-    const requiredPerm = item.dataset.perm;
-    if (!requiredPerm || isCompanyAdmin || perms.includes(requiredPerm)) {
-      item.style.display = '';
-    } else {
-      item.style.display = 'none';
-    }
-  });
+  const navigationModel = getVisibleNavigationModel();
+  renderPrimaryNavigation();
+  renderMobileNavigation();
   $$('[data-action-perm]').forEach(item => {
     const requiredPerms = String(item.dataset.actionPerm || '').split(',').filter(Boolean);
     item.style.display = isCompanyAdmin || requiredPerms.every(permission => perms.includes(permission)) ? '' : 'none';
   });
-  configureMetricRiskAccess();
   applyTopbarActionVisibility(state.activeView);
   /* 移动端 tabbar 也按权限显隐 */
   $$('.mobile-tabbar button').forEach(item => {
+    if (item.hasAttribute('data-mobile-nav-more')) {
+      item.style.display = navigationModel.length ? '' : 'none';
+      return;
+    }
     const view = item.dataset.view;
-    const navItem = $(`.nav-item[data-view="${view}"]`);
-    if (navItem) item.style.display = navItem.style.display;
+    const allowed = navigationModel.some(group => group.items.some(navItem => navItem.view === view));
+    item.style.display = allowed ? '' : 'none';
   });
 }
 
@@ -534,8 +869,6 @@ async function loadSummary() {
   const summary = await api('/api/summary');
   setAnimatedMetric('employeeTotal', summary.employeeTotal);
   setAnimatedMetric('activeTotal', summary.activeTotal);
-  setAnimatedMetric('unresolvedRiskTotal', summary.unresolvedRiskTotal);
-  setAnimatedMetric('unsignedTotal', summary.unsignedTotal);
   setAnimatedMetric('advanceOutstanding', `¥${Number(summary.advanceOutstanding || 0).toLocaleString('zh-CN')}`);
 }
 
@@ -557,12 +890,37 @@ async function selectEmployee(id) {
   renderDetail(detail);
 }
 
+async function toggleRosterIdCard(button) {
+  if (!canViewSensitiveEmployee()) throw new Error('当前账号没有查看完整身份证号的权限');
+  const cell = button.closest('.col-idcard');
+  const valueElement = cell?.querySelector('.id-card-value');
+  if (!valueElement) return;
+  if (button.dataset.revealed === '1') {
+    valueElement.textContent = button.dataset.maskedValue || '-';
+    button.dataset.revealed = '0';
+    button.textContent = '显示完整';
+    button.title = '查看完整身份证号码';
+    return;
+  }
+  const confirmed = await confirmDialog({
+    title: '查看敏感身份信息',
+    message: '完整身份证号码属于敏感个人信息。本次查看将记录操作原因，请避免在投屏或公共环境中展示。',
+    confirmText: '确认查看'
+  });
+  if (!confirmed) return;
+  const id = Number(button.dataset.id || 0);
+  const detail = await api(`/api/employees/${id}?showSensitive=1&reason=${encodeURIComponent('查看花名册身份证号')}`);
+  valueElement.textContent = detail.basicInfo?.idCardNo || '-';
+  button.dataset.revealed = '1';
+  button.textContent = '隐藏';
+  button.title = '恢复脱敏显示';
+}
+
 function renderDetail(detail) {
   $('#emptyDetail').classList.add('hidden');
   const content = $('#detailContent');
   content.classList.remove('hidden');
   const basic = detail.basicInfo;
-  const riskRows = detail.riskAlertList || [];
   const permissions = state.user?.permissions || [];
 
   content.innerHTML = `
@@ -576,10 +934,9 @@ function renderDetail(detail) {
       </div>
       <div class="topbar-actions">
         ${permissions.includes('employee:update') ? `<button class="secondary-button" type="button" data-action="edit" data-id="${basic.id}">编辑</button>` : ''}
+        ${EmployeeBindCode.canGenerateEmployeeBindCode(permissions, basic.employeeStatus) ? `<button class="secondary-button" type="button" data-action="employee-bind-code" data-id="${basic.id}">生成绑定码</button>` : ''}
+        ${permissions.includes('employee:update') && [3, 5].includes(Number(basic.employeeStatus)) ? `<button class="primary-button" type="button" data-action="reactivate" data-id="${basic.id}">重新录用</button>` : ''}
         ${permissions.includes('employee:transfer') ? `<button class="secondary-button" type="button" data-action="transfer" data-id="${basic.id}">调岗</button>` : ''}
-        ${permissions.includes('contract:manage') && permissions.includes('social:manage') && Number(basic.employeeStatus) === 2 ? `<button class="primary-button" type="button" data-action="compliance" data-id="${basic.id}">一键确认合同和雇主险</button>` : ''}
-        ${permissions.includes('contract:manage') ? `<button class="secondary-button" type="button" data-action="contract" data-id="${basic.id}">合同</button>` : ''}
-        ${permissions.includes('social:manage') ? `<button class="secondary-button" type="button" data-action="social" data-id="${basic.id}">雇主险</button>` : ''}
         ${permissions.includes('cert:manage') ? `<button class="secondary-button" type="button" data-action="certificate" data-id="${basic.id}">证件</button>` : ''}
         ${permissions.includes('employee:resign') ? `<button class="danger-button" type="button" data-action="resign" data-id="${basic.id}">离职</button>` : ''}
       </div>
@@ -607,14 +964,6 @@ function renderDetail(detail) {
         ${infoItem('费用模式', basic.feeModeName || '-')}
         ${infoItem('工资类型', basic.workTypeName)}
         ${infoItem('入职日期', basic.hireDate)}
-        ${infoItem('雇主险状态', basic.employerInsuranceStatusName || '未增保')}
-      </div>
-    </section>
-
-    <section class="detail-section">
-      <h3>合同记录</h3>
-      <div class="timeline">
-        ${renderContracts(detail.contractList)}
       </div>
     </section>
 
@@ -625,22 +974,42 @@ function renderDetail(detail) {
       </div>
     </section>
 
-    <section class="detail-section">
-      <h3>合规附件</h3>
-      <div class="attachment-list">${renderAttachmentRows(detail.attachmentList)}</div>
-    </section>
-
-    <section class="detail-section">
-      <h3>未处理风险</h3>
-      <div class="timeline">
-        ${
-          riskRows.length
-            ? riskRows.map(risk => `<button type="button" class="timeline-item risk-link-item" data-risk-jump="${risk.id}"><strong>${escapeHtml(risk.riskTitle)}</strong><span>${escapeHtml(risk.riskDesc)}</span><small>查看风险详情 →</small></button>`).join('')
-            : '<span class="muted">暂无风险</span>'
-        }
-      </div>
-    </section>
   `;
+}
+
+async function openEmployeeBindCode(employeeId) {
+  const basic = state.selectedDetail?.basicInfo;
+  const result = await EmployeeBindCode.createEmployeeBindCode({
+    employeeId,
+    employeeName: Number(basic?.id) === Number(employeeId) ? basic.name : '当前员工',
+    request: api
+  });
+  $('#employeeBindCodeEmployee').textContent = result.employeeName;
+  $('#employeeBindCodeValue').textContent = result.bindCode;
+  $('#employeeBindCodeExpireAt').textContent = result.expireAt;
+  $('#copyEmployeeBindCodeButton').dataset.bindCode = result.bindCode;
+  $('#employeeBindCodeModal').showModal();
+}
+
+async function copyEmployeeBindCode() {
+  const button = $('#copyEmployeeBindCodeButton');
+  const bindCode = String(button.dataset.bindCode || '').trim();
+  if (!bindCode) throw new Error('当前没有可复制的绑定码');
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(bindCode);
+  } else {
+    const input = document.createElement('textarea');
+    input.value = bindCode;
+    input.setAttribute('readonly', '');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    document.body.appendChild(input);
+    input.select();
+    const copied = document.execCommand('copy');
+    input.remove();
+    if (!copied) throw new Error('复制失败，请手动记录绑定码');
+  }
+  toast('绑定码已复制', 'success');
 }
 
 function infoItem(label, value) {
@@ -675,192 +1044,6 @@ function renderCertificates(rows) {
     .join('');
 }
 
-function buildOnboardingComplianceRows(risks = state.risks || []) {
-  const employees = new Map();
-  for (const risk of risks) {
-    const employeeId = Number(risk.employeeId);
-    if (!employees.has(employeeId)) {
-      employees.set(employeeId, {
-        employeeId,
-        employeeName: risk.employeeName || risk.employeeNo,
-        employeeNo: risk.employeeNo || '',
-        customerName: risk.customerName || '',
-        projectId: risk.projectId || null,
-        projectName: risk.projectName || '',
-        positionName: risk.positionName || '',
-        hireDate: risk.hireDate || '',
-        contractSigned: Boolean(risk.contractSigned),
-        employerInsuranceActive: Boolean(risk.employerInsuranceActive),
-        alerts: []
-      });
-    }
-    const employee = employees.get(employeeId);
-    employee.contractSigned = employee.contractSigned || Boolean(risk.contractSigned);
-    employee.employerInsuranceActive = employee.employerInsuranceActive || Boolean(risk.employerInsuranceActive);
-    employee.alerts.push(risk);
-  }
-  return [...employees.values()].map(employee => ({
-    ...employee,
-    completed: employee.contractSigned && employee.employerInsuranceActive,
-    pendingCount: Number(!employee.contractSigned) + Number(!employee.employerInsuranceActive)
-  })).sort((left, right) => right.pendingCount - left.pendingCount || Number(right.employeeId) - Number(left.employeeId));
-}
-
-function applyRiskPreset(preset) {
-  const filter = $('#riskComplianceFilter');
-  if (!filter) return;
-  const mapped = { open: 'pending', high: 'pending', contract: 'contract', insurance: 'insurance', completed: 'completed' };
-  filter.value = mapped[preset] || 'all';
-  renderRiskCenter();
-}
-
-function renderRiskCenter() {
-  const filter = $('#riskComplianceFilter')?.value || 'pending';
-  const keyword = ($('#riskKeywordInput')?.value || '').trim().toLowerCase();
-  const all = buildOnboardingComplianceRows();
-  const contractPending = all.filter(row => !row.contractSigned);
-  const insurancePending = all.filter(row => !row.employerInsuranceActive);
-  const pending = all.filter(row => !row.completed);
-  const completed = all.filter(row => row.completed);
-  $('#complianceKpis').innerHTML = [
-    ['open', '待完善员工', pending.length, '查看名单'],
-    ['contract', '合同待签', contractPending.length, '登记合同'],
-    ['insurance', '雇主险待增', insurancePending.length, '办理增保'],
-    ['completed', '两项已完成', completed.length, '合规完成']
-  ].map(([preset, labelText, value, hint]) => `<button type="button" class="risk-command-kpi ${preset !== 'completed' && value ? 'danger' : ''}" data-risk-preset="${preset}"><span>${labelText}</span><strong>${value}</strong><small>${hint} →</small></button>`).join('');
-
-  const filtered = all.filter(row => {
-    if (filter === 'pending' && row.completed) return false;
-    if (filter === 'contract' && row.contractSigned) return false;
-    if (filter === 'insurance' && row.employerInsuranceActive) return false;
-    if (filter === 'completed' && !row.completed) return false;
-    if (state.selectedRiskProjectId && Number(row.projectId) !== Number(state.selectedRiskProjectId)) return false;
-    if (keyword && !`${row.employeeName} ${row.employeeNo} ${row.customerName} ${row.projectName} ${row.positionName}`.toLowerCase().includes(keyword)) return false;
-    return true;
-  });
-  $('#riskQueueCount').textContent = `${filtered.length} 人`;
-  const list = $('#riskList');
-  if (!filtered.length) {
-    list.innerHTML = '<div class="risk-command-empty"><strong>当前范围没有员工</strong><p>切换查看范围，或点击“重新检查”同步最新合同和雇主险状态。</p></div>';
-    $('#riskDetailPanel').innerHTML = '<div class="risk-detail-empty"><span>ONBOARDING FILE</span><strong>暂无待处理事项</strong><p>新员工入职后会自动进入这里。</p></div>';
-    return;
-  }
-  if (!filtered.some(row => Number(row.employeeId) === Number(state.selectedRiskId))) state.selectedRiskId = filtered[0].employeeId;
-  list.innerHTML = filtered.map(row => `<article class="risk-command-card ${Number(row.employeeId) === Number(state.selectedRiskId) ? 'selected' : ''} ${row.completed ? 'completed' : 'high'}" data-risk-detail="${row.employeeId}" tabindex="0" role="button">
-    <div class="risk-command-card-top"><span class="risk-severity-code">${row.completed ? '✓' : row.pendingCount}</span><div><strong>${escapeHtml(row.employeeName)}</strong><small>${escapeHtml(row.customerName || '未分配客户')} · ${escapeHtml(row.projectName || row.positionName || '未关联项目')}</small></div>${badge(row.completed ? '合规完成' : `待完成 ${row.pendingCount} 项`, row.completed ? 'green' : 'amber')}</div>
-    <div class="onboarding-status-pair"><span class="${row.contractSigned ? 'done' : 'pending'}">合同 ${row.contractSigned ? '已签订' : '待签订'}</span><span class="${row.employerInsuranceActive ? 'done' : 'pending'}">雇主险 ${row.employerInsuranceActive ? '保障中' : '待增保'}</span></div>
-    <div class="risk-card-foot"><span>入职日期 ${escapeHtml(row.hireDate || '-')}</span><span>${escapeHtml(row.positionName || '未关联岗位')}</span></div>
-  </article>`).join('');
-  renderRiskDetail(filtered.find(row => Number(row.employeeId) === Number(state.selectedRiskId)));
-}
-
-function renderRiskDetail(row) {
-  const panel = $('#riskDetailPanel');
-  if (!row) return;
-  const permissions = state.user?.permissions || [];
-  const canContract = permissions.includes('contract:manage');
-  const canInsurance = permissions.includes('social:manage');
-  const canCompliance = canContract && canInsurance;
-  panel.innerHTML = `<div class="risk-detail-head"><div><span>EMPLOYEE #${row.employeeId}</span><h3>${escapeHtml(row.employeeName)}</h3></div>${badge(row.completed ? '入职合规完成' : '入职事项待完善', row.completed ? 'green' : 'amber')}</div>
-    <div class="risk-detail-context onboarding-person-context">
-      ${infoItem('客户单位', row.customerName || '未分配')}
-      ${infoItem('所属项目', row.projectName || '未关联')}
-      ${infoItem('岗位', row.positionName || '未关联')}
-      ${infoItem('入职日期', row.hireDate || '-')}
-    </div>
-    <section class="onboarding-check-list">
-      <article class="onboarding-check-card ${row.contractSigned ? 'done' : 'pending'}"><div><i>${row.contractSigned ? '✓' : '1'}</i><span><strong>劳动合同</strong><small>${row.contractSigned ? '已登记已签署合同' : '尚未登记已签署合同'}</small></span></div>${row.contractSigned ? badge('已签订', 'green') : canContract ? `<button class="primary-button" type="button" data-action="contract" data-id="${row.employeeId}">登记合同</button>` : badge('待签订', 'amber')}</article>
-      <article class="onboarding-check-card ${row.employerInsuranceActive ? 'done' : 'pending'}"><div><i>${row.employerInsuranceActive ? '✓' : '2'}</i><span><strong>雇主险</strong><small>${row.employerInsuranceActive ? '当前雇主险保障有效' : '尚未办理有效雇主险增保'}</small></span></div>${row.employerInsuranceActive ? badge('保障中', 'green') : canInsurance ? `<button class="primary-button" type="button" data-action="social" data-id="${row.employeeId}" data-insurance-action="ADD">办理增保</button>` : badge('待增保', 'amber')}</article>
-    </section>
-    <div class="onboarding-result ${row.completed ? 'done' : ''}"><strong>${row.completed ? '两项均已完成' : `还有 ${row.pendingCount} 项需要办理`}</strong><p>${row.completed ? '系统已自动完成入职合规闭环。' : '办理完成后系统会自动更新状态，无需建立整改任务。'}</p></div>
-    ${!row.completed && canCompliance ? `<button class="primary-button" type="button" data-action="compliance" data-id="${row.employeeId}">一键确认合同和雇主险</button>` : ''}
-    <div class="risk-detail-actions"><button class="secondary-button" type="button" data-risk-employee="${row.employeeId}">查看员工档案</button></div>`;
-}
-
-async function loadRiskCenter() {
-  setPanelLoading('#riskView');
-  try {
-    state.risks = await api('/api/risk-alerts');
-    state.riskCases = [];
-    renderRiskCenter();
-  } finally { setPanelLoaded('#riskView'); }
-}
-
-async function loadRisks() { return loadRiskCenter(); }
-async function loadRiskCases() { return loadRiskCenter(); }
-
-function configureRiskStatusOptions(select, currentStatus) {
-  const status = Number(currentStatus || 0);
-  const options = status === 0
-    ? [[0, '待整改：已指派，尚未开始'], [1, '整改中：责任人已开始处理']]
-    : status === 1
-      ? [[1, '整改中：继续处理'], [2, '提交复核：整改完成并已提供证据']]
-      : status === 2
-        ? [[2, '继续待复核：尚未作出决定'], [1, '退回整改：证据或结果不符合要求'], [3, '复核通过：关闭并归档风险']]
-        : [[3, '已关闭：风险已归档']];
-  select.innerHTML = options.map(([value, labelText]) => `<option value="${value}">${labelText}</option>`).join('');
-  select.value = String(status);
-}
-
-async function openRiskCaseModal(id, mode = 'create') {
-  const form = $('#riskCaseForm');
-  form.reset();
-  $$('.case-progress-field').forEach(item => item.classList.toggle('hidden', mode === 'create'));
-  if (mode === 'create') {
-    const risk = state.risks.find(item => item.id === Number(id));
-    if (!risk) throw new Error('风险预警不存在');
-    form.elements.sourceAlertId.value = risk.id;
-    form.elements.deadline.value = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
-    configureRiskStatusOptions(form.elements.status, 0);
-    $('#riskCaseModalTitle').textContent = '建立整改任务';
-    $('#riskCaseSubmitButton').textContent = '创建并指派整改';
-    $('#riskCaseSource').innerHTML = `<strong>${escapeHtml(risk.riskTitle)}</strong><span>${escapeHtml(risk.employeeName)} · ${escapeHtml(risk.customerName || '未分配客户')}：${escapeHtml(risk.riskDesc)}</span>`;
-  } else {
-    const row = state.riskCases.find(item => item.id === Number(id));
-    if (!row) throw new Error('整改任务不存在');
-    configureRiskStatusOptions(form.elements.status, row.status);
-    const values = { caseId: row.id, sourceAlertId: row.sourceAlertId, ownerName: row.ownerName, ownerDept: row.ownerDept, deadline: row.deadline, correctiveMeasure: row.correctiveMeasure, status: row.status, evidenceNote: row.evidenceNote, reviewNote: row.reviewNote };
-    for (const [key, value] of Object.entries(values)) form.elements[key].value = value ?? '';
-    $('#riskCaseModalTitle').textContent = Number(row.status) === 2 ? '复核整改结果' : '更新整改进度';
-    $('#riskCaseSubmitButton').textContent = Number(row.status) === 2 ? '保存复核结果' : '保存整改进度';
-    $('#riskCaseSource').innerHTML = `<strong>${escapeHtml(row.riskTitle)}</strong><span>${escapeHtml(row.employeeName)} · ${escapeHtml(row.customerName || '未分配客户')}：${escapeHtml(row.riskDesc)}</span>`;
-  }
-  updateRiskStatusHelp();
-  $('#riskCaseModal').showModal();
-}
-
-function updateRiskStatusHelp() {
-  const status = Number($('#riskCaseForm')?.elements?.status?.value || 0);
-  const messages = {
-    0: '待整改：任务已指派，但责任人尚未开始处理。',
-    1: '整改中：正在处理风险问题，可持续补充整改措施。',
-    2: '待复核：必须填写整改结果或证据说明，等待有权限人员复核。',
-    3: '已关闭：必须填写整改证据和复核结论，保存后风险正式归档。'
-  };
-  $('#riskStatusHelp').textContent = messages[status];
-}
-
-async function saveRiskCase(event) {
-  event.preventDefault();
-  const attachment = selectedAttachment(event.currentTarget);
-  const body = formToObject(event.currentTarget);
-  const caseId = Number(body.caseId || 0);
-  const status = Number(body.status || 0);
-  if (status >= 2 && !String(body.evidenceNote || '').trim()) {
-    throw new Error('提交复核前，请填写整改结果或证据说明');
-  }
-  if (status === 3 && !String(body.reviewNote || '').trim()) {
-    throw new Error('关闭风险前，请填写复核结论');
-  }
-  if (caseId && status === 3 && !window.confirm('确认整改证据有效且风险已经消除？关闭后将进入归档状态。')) return;
-  const result = await api(caseId ? `/api/risk-cases/${caseId}` : '/api/risk-cases', { method: caseId ? 'PUT' : 'POST', body: JSON.stringify(body) });
-  const attachmentUploaded = await uploadSavedAttachment(attachment, 'risk_case', result.caseId);
-  $('#riskCaseModal').close();
-  if (attachmentUploaded) toast(caseId ? '整改进度已更新' : '整改任务已创建并指派');
-  state.selectedRiskId = Number(body.sourceAlertId || state.selectedRiskId);
-  await Promise.all([loadRiskCenter(), loadSummary()]);
-}
-
 const actionNames = {
   create: '新增',
   update: '编辑',
@@ -869,9 +1052,6 @@ const actionNames = {
   upsert: '维护',
   handle: '处理',
   change_password: '修改密码'
-  ,create_case: '创建整改任务'
-  ,update_case: '更新整改任务'
-  ,close_case: '复核关闭风险'
 };
 
 async function loadAuditLogs() {
@@ -880,7 +1060,7 @@ async function loadAuditLogs() {
   const rows = await api('/api/audit-logs');
   const tbody = $('#auditTableBody');
   if (!rows.length) {
-    tbody.innerHTML = emptyRow(6, '暂无操作记录', '系统操作日志会在员工、合同、雇主险等关键操作后自动记录');
+    tbody.innerHTML = emptyRow(6, '暂无操作记录', '员工、工资条、风险、账号权限等关键操作会自动留痕');
     return;
   }
   tbody.innerHTML = rows
@@ -895,6 +1075,10 @@ async function loadAuditLogs() {
       </tr>
     `)
     .join('');
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    renderTableFailure('#auditTableBody', 6, '操作日志加载失败', error, 'audit');
+    throw error;
   } finally { setPanelLoaded('#auditTableBody'); }
 }
 
@@ -921,6 +1105,32 @@ function applyEmployeeFormDefaults(form) {
   if (form.elements.hireDate) form.elements.hireDate.value = new Date().toISOString().slice(0, 10);
 }
 
+function syncEmployeeEntryPresentation(form, statusValue = '') {
+  if (!form || form.id !== 'employeeForm') return;
+  const employeeStatus = Number(statusValue || form.elements.employeeStatus?.value || form.dataset.employeeStatus || 6);
+  const presentation = getEmployeeEntryPresentation(employeeStatus);
+  const editing = form.dataset.editing === '1';
+  form.querySelectorAll('[data-entry-direct]').forEach(section => {
+    section.classList.toggle('hidden', !editing && !presentation.showPlacement);
+  });
+  form.querySelectorAll('[data-entry-mode]').forEach(button => {
+    const selected = Number(button.dataset.entryMode) === employeeStatus;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  if ($('#employeeEntryFlowTitle')) $('#employeeEntryFlowTitle').textContent = editing ? '编辑员工档案' : presentation.flowTitle;
+  if ($('#employeeEntryFlowDescription')) {
+    $('#employeeEntryFlowDescription').textContent = editing
+      ? '保存后更新现有档案，不改变员工当前生命周期状态。'
+      : presentation.flowDescription;
+  }
+  const values = Object.fromEntries(new FormData(form));
+  const completion = calculateEmployeeEntryCompletion(values, presentation);
+  if ($('#employeeEntryCompletionLabel')) $('#employeeEntryCompletionLabel').textContent = `${completion}%`;
+  if ($('#employeeEntryCompletionBar')) $('#employeeEntryCompletionBar').style.width = `${completion}%`;
+  if ($('#employeeEntrySubmit')) $('#employeeEntrySubmit').textContent = editing ? '保存员工资料' : presentation.primaryAction;
+}
+
 function syncEmployeeFormRequirements(form, statusValue = '') {
   if (!form) return;
   const employeeStatus = Number(statusValue || form.elements.employeeStatus?.value || form.dataset.employeeStatus || 1);
@@ -928,15 +1138,36 @@ function syncEmployeeFormRequirements(form, statusValue = '') {
   for (const name of ['idCardNo', 'customerId', 'positionId']) {
     if (form.elements[name]) form.elements[name].required = !interview;
   }
-  // 用工与计费、招聘来源和备注均允许后续补齐。
+  // 用工与计费、招聘渠道和备注均允许后续补齐。
   for (const name of ['employmentType', 'feeMode', 'workType', 'hireDate', 'channelSource', 'remark']) {
     if (form.elements[name]) form.elements[name].required = false;
   }
   updateEmployeeProjectOptions(form);
   if (interview && form.elements.projectId) form.elements.projectId.required = false;
+  syncEmployeeEntryPresentation(form, employeeStatus);
 }
 
-async function openEmployeeModal(id = null) {
+function setEmployeeFormReadOnly(form, readOnly) {
+  if (!form) return;
+  form.dataset.readOnly = readOnly ? '1' : '0';
+  form.querySelectorAll('input, select, textarea').forEach(field => {
+    field.disabled = Boolean(readOnly);
+  });
+  form.querySelectorAll('button[data-entry-mode], #onboardingTalentButton, #onboardingBatchButton').forEach(button => {
+    button.disabled = Boolean(readOnly);
+    button.classList.toggle('hidden', Boolean(readOnly));
+  });
+  const submit = $('#employeeEntrySubmit');
+  if (submit) {
+    submit.disabled = Boolean(readOnly);
+    submit.classList.toggle('hidden', Boolean(readOnly));
+  }
+  const cancel = form.querySelector('[data-close-modal="employeeModal"]:not(.icon-button)');
+  if (cancel) cancel.textContent = readOnly ? '关闭' : '取消';
+}
+
+async function openEmployeeModal(id = null, options = {}) {
+  const readOnly = Boolean(options.readOnly);
   await ensureRecruitmentChannelOptions();
   state.editingEmployeeId = id;
   const form = $('#employeeForm');
@@ -944,9 +1175,15 @@ async function openEmployeeModal(id = null) {
   delete form.dataset.allowLegacyUnassigned;
   delete form.dataset.legacyCustomerId;
   delete form.dataset.employeeStatus;
+  delete form.dataset.talentCheckKey;
+  delete form.dataset.duplicateCheckIdCard;
+  form.dataset.editing = id ? '1' : '0';
+  setEmployeeFormReadOnly(form, false);
   updateEmployeeProjectOptions(form);
-  $('#employeeModalTitle').textContent = id ? '编辑员工' : '新增员工';
+  $('#employeeModalTitle').textContent = readOnly ? '查看员工' : (id ? '编辑员工' : '新增员工');
   $('#employeeStatusField')?.classList.toggle('hidden', Boolean(id));
+  $('#employeeEntryModeSwitch')?.classList.toggle('hidden', Boolean(id));
+  form.querySelector('.onboarding-control')?.classList.toggle('hidden', Boolean(id));
   if (!id) applyEmployeeFormDefaults(form);
   configureSensitiveEmployeeFields(form, Boolean(id));
   syncEmployeeFormRequirements(form);
@@ -990,6 +1227,7 @@ async function openEmployeeModal(id = null) {
     syncEmployeeFormRequirements(form, row.employeeStatus);
   }
 
+  setEmployeeFormReadOnly(form, readOnly);
   $('#employeeModal').showModal();
 }
 
@@ -1005,45 +1243,7 @@ function openResignModal(id) {
   form.reset();
   const now = new Date();
   form.elements.leaveDate.value = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  const covered = Number(state.selectedDetail?.socialSecurity?.employerInsuranceStatus || 0) === 1;
-  form.elements.terminateEmployerInsurance.checked = false;
-  form.elements.terminateEmployerInsurance.disabled = !covered;
-  form.elements.terminateEmployerInsurance.required = covered;
-  $('#resignInsuranceHint').textContent = covered
-    ? '办理减保后勾选“已减保”，再确认员工离职'
-    : '当前未投保或已终止，无需办理减保';
   $('#resignModal').showModal();
-}
-
-function openContractModal(id) {
-  state.selectedEmployeeId = Number(id);
-  const form = $('#contractForm');
-  form.reset();
-  form.elements.signStatus.value = '1';
-  const now = new Date();
-  form.elements.contractDate.value = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  $('#contractModal').showModal();
-}
-
-function openComplianceModal(id) {
-  state.selectedEmployeeId = Number(id);
-  const form = $('#complianceForm');
-  form.reset();
-  const now = new Date();
-  const date = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-  form.elements.contractDate.value = date;
-  form.elements.insuranceStartDate.value = date;
-  $('#complianceModal').showModal();
-}
-
-function openSocialModal(id, requestedAction = '') {
-  state.selectedEmployeeId = Number(id);
-  const form = $('#socialForm');
-  form.reset();
-  const social = Number(state.selectedDetail?.basic?.id) === Number(id) ? state.selectedDetail?.socialSecurity : null;
-  const explicitAction = ['ADD', 'REMOVE'].includes(requestedAction) ? requestedAction : '';
-  form.elements.employerInsuranceAction.value = explicitAction || (Number(social?.employerInsuranceStatus) === 1 ? 'REMOVE' : 'ADD');
-  $('#socialModal').showModal();
 }
 
 function openCertificateModal(id) {
@@ -1055,15 +1255,32 @@ function openCertificateModal(id) {
 async function saveEmployee(event) {
   event.preventDefault();
   const id = state.editingEmployeeId;
-  const body = removeUnavailableSensitiveFields(event.currentTarget, formToObject(event.currentTarget), Boolean(id));
+  const form = event.currentTarget;
+  if (form.dataset.readOnly === '1') {
+    $('#employeeModal')?.close();
+    return;
+  }
+  const body = removeUnavailableSensitiveFields(form, formToObject(form), Boolean(id));
   if (id) delete body.employeeStatus;
+  if (!id && !(await checkWebTalentCandidates(form, body))) return;
   const path = id ? `/api/employees/${id}` : '/api/employees';
   const method = id ? 'PUT' : 'POST';
-  const result = await api(path, { method, body: JSON.stringify(body) });
-  $('#employeeModal').close();
-  toast(id ? '员工信息已保存' : '员工已新增');
-  await refreshEmployeeWorkspace();
-  await selectEmployee(result.employeeId);
+  const submitButton = $('#employeeEntrySubmit');
+  if (submitButton) submitButton.disabled = true;
+  try {
+    const result = await api(path, { method, body: JSON.stringify(body) });
+    $('#employeeModal').close();
+    const successMessage = id
+      ? '员工信息已保存'
+      : Number(body.employeeStatus) === 6
+        ? '已保存到面试名单'
+        : '已保存并进入待到岗';
+    toast(successMessage);
+    await refreshEmployeeWorkspace();
+    await selectEmployee(result.employeeId);
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+  }
 }
 
 async function submitTransfer(event) {
@@ -1082,7 +1299,13 @@ async function submitTransfer(event) {
 async function submitResign(event) {
   event.preventDefault();
   const body = formToObject(event.currentTarget);
-  if (!window.confirm('确认完成离职？保存后员工将转入花名册“已离职”，并同步进入人才库。')) return;
+  const confirmed = await confirmDialog({
+    title: '确认办理离职',
+    message: '保存后员工将转入花名册“已离职”，并同步进入人才库。该操作会改变员工在职状态。',
+    confirmText: '确认离职',
+    danger: true
+  });
+  if (!confirmed) return;
   const result = await api(`/api/employees/${state.resignEmployeeId}/resign`, {
     method: 'POST',
     body: JSON.stringify(body)
@@ -1091,48 +1314,6 @@ async function submitResign(event) {
   toast(result.completed ? '离职已办结，员工已归档并同步人才库' : '离职信息已保存');
   await refreshEmployeeWorkspace();
   await selectEmployee(state.resignEmployeeId);
-}
-
-async function submitContract(event) {
-  event.preventDefault();
-  const attachment = selectedAttachment(event.currentTarget);
-  const body = formToObject(event.currentTarget);
-  const result = await api(`/api/employees/${state.selectedEmployeeId}/contracts`, {
-    method: 'POST',
-    body: JSON.stringify(body)
-  });
-  const attachmentUploaded = await uploadSavedAttachment(attachment, 'contract', result.contractId);
-  $('#contractModal').close();
-  if (attachmentUploaded) toast('合同已登记');
-  await refreshEmployeeWorkspace();
-  await selectEmployee(state.selectedEmployeeId);
-}
-
-async function submitSocial(event) {
-  event.preventDefault();
-  const body = formToObject(event.currentTarget);
-  await api(`/api/employees/${state.selectedEmployeeId}/social-security`, {
-    method: 'PUT',
-    body: JSON.stringify(body)
-  });
-  $('#socialModal').close();
-  toast(body.employerInsuranceAction === 'ADD' ? '雇主险增保已登记' : '雇主险减保已登记');
-  await refreshEmployeeWorkspace();
-  await selectEmployee(state.selectedEmployeeId);
-}
-
-async function submitOnboardingCompliance(event) {
-  event.preventDefault();
-  const body = formToObject(event.currentTarget);
-  if (!window.confirm('确认该员工劳动合同已签署，且雇主险已完成增保？')) return;
-  await api(`/api/employees/${state.selectedEmployeeId}/onboarding-compliance/confirm`, {
-    method: 'POST',
-    body: JSON.stringify(body)
-  });
-  $('#complianceModal').close();
-  toast('合同和雇主险已一键确认');
-  await refreshEmployeeWorkspace();
-  await selectEmployee(state.selectedEmployeeId);
 }
 
 async function submitCertificate(event) {
@@ -1150,25 +1331,6 @@ async function submitCertificate(event) {
   await selectEmployee(state.selectedEmployeeId);
 }
 
-async function scanRisks() {
-  const data = await api('/api/risk-alerts/scan', { method: 'POST' });
-  toast(`入职合规检查完成，新增 ${data.created} 项待办`);
-  await refreshEmployeeWorkspace();
-}
-
-async function handleRisk(id, status) {
-  if (Number(status) === 3 && !window.confirm('确认忽略该风险？忽略表示当前无需整改，但操作会被记录。')) return;
-  await api(`/api/risk-alerts/${id}/handle`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      handleStatus: Number(status),
-      handleRemark: status === '2' ? '已完成处理并确认风险消除' : '经确认当前无需整改，已忽略'
-    })
-  });
-  toast(status === '2' ? '风险已处理' : '风险已忽略');
-  await Promise.all([loadRiskCenter(), loadSummary()]);
-}
-
 async function loadProjects() {
   setPanelLoading('#projectCards');
   try {
@@ -1176,8 +1338,8 @@ async function loadProjects() {
   const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
   const canViewCustomers = isCompanyAdmin || userPermissions.includes('customer:view');
   const [clientResult, projectResult] = await Promise.all([
-    canViewCustomers ? api('/api/clients') : Promise.resolve({ list: [] }),
-    api('/api/projects')
+    canViewCustomers ? apiAllPages('/api/clients') : Promise.resolve({ list: [] }),
+    apiAllPages('/api/projects')
   ]);
   const clients = (clientResult.list || clientResult).map(item => ({
     ...item,
@@ -1195,23 +1357,16 @@ async function loadProjects() {
   state.projects = projects;
   const canManageClientProjects = isCompanyAdmin
     || (userPermissions.includes('customer:manage') && userPermissions.includes('project:manage'));
-  const canAssignOnsite = isCompanyAdmin
-    || userPermissions.includes('system:role');
-  const canViewRisk = isCompanyAdmin
-    || userPermissions.includes('risk:view');
+  const canAssignOnsite = isCompanyAdmin;
+  const canViewEmployees = isCompanyAdmin
+    || userPermissions.includes('employee:view');
   const healthTotals = projects.reduce((summary, item) => ({
     onsite: summary.onsite + Number(item.activeCount || 0),
-    contract: summary.contract + Number(item.unsignedContractCount || 0),
-    insurance: summary.insurance + Number(item.uninsuredCount || 0),
-    risk: summary.risk + Number(item.openRiskCount || 0),
     outstanding: summary.outstanding + Number(item.advanceOutstanding || 0)
-  }), { onsite: 0, contract: 0, insurance: 0, risk: 0, outstanding: 0 });
+  }), { onsite: 0, outstanding: 0 });
   $('#projectHealthKpis').innerHTML = [
-    ['生效项目', projects.filter(item => [1, 2].includes(Number(item.status))).length, 'neutral'],
+    ['生效项目', projects.filter(item => Number(item.status) === 2).length, 'neutral'],
     ['当前在岗', healthTotals.onsite, 'good'],
-    ['合同缺口', healthTotals.contract, healthTotals.contract ? 'danger' : 'good'],
-    ['雇主险待增', healthTotals.insurance, healthTotals.insurance ? 'danger' : 'good'],
-    ['未关闭风险', healthTotals.risk, healthTotals.risk ? 'danger' : 'good'],
     ['预支未结', money(healthTotals.outstanding), healthTotals.outstanding ? 'warning' : 'good']
   ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
   $('#clientCards').innerHTML = clients.map(item => {
@@ -1223,7 +1378,7 @@ async function loadProjects() {
         <div class="client-card-head"><h4>${escapeHtml(item.clientName)}</h4>${badge('已生效', 'green')}</div>
         <p>${escapeHtml(item.contactName || '-')} · ${escapeHtml(item.contactPhone || '-')}</p>
         <div class="client-scale"><span>在岗规模</span><div class="scale-bar"><div class="scale-fill" style="width:${scale * 100}%"></div></div><strong>${item.activeCount || 0}人</strong></div>
-        <div class="entity-meta"><span>${item.settlementCycle || '按月结算'}</span><strong>${item.projectCount || 0}个项目</strong></div>
+        <div class="entity-meta"><span>${item.settlementCycle || '按月结算'}</span><strong>生效 ${item.effectiveProjectCount || 0} / 全部 ${item.projectCount || 0}</strong></div>
         ${canManageClientProjects ? '<div class="client-manage-hint">点击查看并修改客户项目 →</div>' : ''}
       </div>
     </article>`;
@@ -1232,18 +1387,16 @@ async function loadProjects() {
     <article class="entity-card project-card health-card">
       <div class="entity-index">P${String(item.id).padStart(2, '0')}</div>
       <div>
-        <div class="project-card-title"><div><h4>${escapeHtml(item.projectName)}</h4><p>${escapeHtml(item.clientName)} · ${escapeHtml(item.worksiteName)}</p></div>${badge([1, 2].includes(Number(item.status)) ? '已生效' : '停用', [1, 2].includes(Number(item.status)) ? 'green' : 'amber')}</div>
+        <div class="project-card-title"><div><h4>${escapeHtml(item.projectName)}</h4><p>${escapeHtml(item.clientName)} · ${escapeHtml(item.worksiteName)}</p></div>${badge(Number(item.status) === 2 ? '进行中' : Number(item.status) === 3 ? '已暂停' : '已结束', Number(item.status) === 2 ? 'green' : 'amber')}</div>
         <div class="project-health-grid">
           <span><i>在岗人数</i><b>${item.activeCount}</b></span>
-          <span class="${item.unsignedContractCount ? 'risk' : ''}"><i>合同缺口</i><b>${item.unsignedContractCount || 0}</b></span>
-          <span class="${item.uninsuredCount ? 'risk' : ''}"><i>雇主险待增</i><b>${item.uninsuredCount || 0}</b></span>
-          <span class="${item.openRiskCount ? 'risk' : ''}"><i>未结风险</i><b>${item.openRiskCount || 0}</b></span>
+          <span><i>预支未结</i><b>${money(item.advanceOutstanding)}</b></span>
+          <span><i>累计实发</i><b>${money(item.payrollNet)}</b></span>
         </div>
-        <div class="project-money-row"><span>预支未结 ${money(item.advanceOutstanding)}</span><strong>累计实发 ${money(item.payrollNet)}</strong></div>
         <div class="entity-meta"><span>${escapeHtml(item.serviceType)}</span><strong>${escapeHtml(item.managerName)}</strong></div>
         <div class="project-quick-actions">
+          ${canViewEmployees ? `<button class="quick-btn" type="button" data-project-roster="${item.id}" data-project-customer="${item.customerId}">查看在职员工</button>` : ''}
           ${canAssignOnsite ? `<button class="quick-btn" type="button" data-action="assign-onsite" data-project="${item.id}">派遣驻厂</button>` : ''}
-          ${canViewRisk ? `<button class="quick-btn ${item.openRiskCount ? 'warn' : ''}" type="button" data-action="goto-risk" data-project="${item.id}">查看风险</button>` : ''}
         </div>
       </div>
     </article>
@@ -1253,6 +1406,24 @@ async function loadProjects() {
     populateAdvanceProjectOptions();
   }
   } finally { setPanelLoaded('#projectCards'); }
+}
+
+function openProjectRoster(projectId) {
+  if (!canRunOfficeAction('employees')) {
+    toast('当前账号没有查看员工名单的权限', 'error');
+    return;
+  }
+  const project = state.projects.find(item => Number(item.id) === Number(projectId));
+  if (!project) {
+    toast('未找到当前项目，请刷新后重试', 'error');
+    return;
+  }
+  switchView('roster');
+  $('#statusSelect').value = '2';
+  $('#customerSelect').value = String(project.customerId || '');
+  updateRosterProjectOptions(project.id);
+  $('#projectSelect').value = String(project.id);
+  loadEmployees().catch(error => toast(error.message, 'error'));
 }
 
 async function openProjectOnsiteModal(projectId) {
@@ -1308,7 +1479,6 @@ function customerProjectEditorHtml(project = {}) {
         <option value="4" ${Number(project.serviceType) === 4 ? 'selected' : ''}>RPO招聘</option>
       </select></label>
       <label><span>项目状态</span><select name="status">
-        <option value="1" ${status === 1 ? 'selected' : ''}>筹备</option>
         <option value="2" ${status === 2 ? 'selected' : ''}>进行中</option>
         <option value="3" ${status === 3 ? 'selected' : ''}>暂停</option>
         <option value="4" ${status === 4 ? 'selected' : ''}>结束</option>
@@ -1343,10 +1513,12 @@ function collectCustomerProjects() {
   }));
 }
 
-async function loadTalents() {
+async function loadTalents(keyword = '') {
   setPanelLoading('#talentTableBody');
   try {
-  state.talents = await api('/api/talents');
+  const query = String(keyword || '').trim();
+  state.talents = await api(`/api/talents${query ? `?keyword=${encodeURIComponent(query)}` : ''}`);
+  const canCreateEmployee = (state.user?.permissions || []).includes('employee:create');
   $('#talentTableBody').innerHTML = state.talents.map(item => `
     <tr>
       <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.phone)}</small></td>
@@ -1358,84 +1530,73 @@ async function loadTalents() {
       <td>${badge(item.availableStatusName, Number(item.availableStatus) === 3 ? 'green' : 'neutral')}</td>
       <td>${escapeHtml(item.flowedAt ? new Date(item.flowedAt).toLocaleString('zh-CN', { hour12: false }) : '-')}<small>${escapeHtml(item.resignationReason || '-')}</small></td>
       <td>${escapeHtml(item.ownerName)}</td>
+      <td>${canCreateEmployee && Number(item.availableStatus) !== 3 ? `<button class="table-button" type="button" data-talent-onboard="${item.id}">${item.employeeId ? '打开员工档案' : '转入员工录入'}</button>` : `<span class="muted">${canCreateEmployee ? '无需处理' : '只读'}</span>`}</td>
     </tr>
-  `).join('') || emptyRow(9, '暂无人才数据', '未入职和完成离职的员工会自动流转到这里，也可快速录入招聘线索');
+  `).join('') || emptyRow(10, '暂无人才数据', '未入职和完成离职的员工会自动流转到这里，也可快速录入招聘线索');
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    state.talents = [];
+    renderTableFailure('#talentTableBody', 10, '人才库加载失败', error, 'talents');
+    throw error;
   } finally { setPanelLoaded('#talentTableBody'); }
 }
 
-async function loadWorkTasks() {
-  const status = $('#taskStatusFilter')?.value ?? '0';
-  const risk = $('#taskRiskFilter')?.value || '';
-  const query = new URLSearchParams();
-  if (status !== '') query.set('taskStatus', status);
-  if (risk) query.set('riskLevel', risk);
-  state.workTasks = await api(`/api/work-tasks?${query.toString()}`);
-  const pending = state.workTasks.filter(item => item.taskStatus === 0).length;
-  const processing = state.workTasks.filter(item => item.taskStatus === 1).length;
-  const overdue = state.workTasks.filter(item => item.overdue).length;
-  const high = state.workTasks.filter(item => item.riskLevel === 3 && item.taskStatus < 2).length;
-  $('#taskKpis').innerHTML = [['待处理', pending, 'warning'], ['处理中', processing, 'neutral'], ['已逾期', overdue, 'danger'], ['高风险', high, 'danger']]
-    .map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
-  const statusNames = { 0: '待处理', 1: '处理中', 2: '已完成', 3: '已关闭' };
-  const permissions = state.user?.permissions || [];
-  const canManageOffboard = permissions.includes('employee:resign');
-  const canHandleTransfer = permissions.includes('employee:transfer');
-  const canUpdateTask = permissions.includes('employee:update');
-  const canContract = permissions.includes('contract:manage');
-  const canInsurance = permissions.includes('social:manage');
-  const canCertificate = permissions.includes('cert:manage');
-  const taskView = { INSURANCE: 'roster', INSURANCE_TERMINATION: 'roster', ARRIVAL: 'roster', CONTRACT: 'roster', ONBOARDING_COMPLIANCE: 'roster', DOCUMENT: 'roster', OFFBOARD: 'roster', TRANSFER_ACCEPTANCE: 'tasks' };
-  $('#taskTableBody').innerHTML = state.workTasks.map(item => {
-    const tone = item.riskLevel === 3 ? 'red' : item.riskLevel === 2 ? 'amber' : 'blue';
-    const transferAction = item.taskType === 'TRANSFER_ACCEPTANCE' && canHandleTransfer
-      ? `<button class="table-button" data-handle-transfer="${item.sourceId}" data-approved="1">接收</button> <button class="table-button danger" data-handle-transfer="${item.sourceId}" data-approved="0">拒绝</button>`
-      : '';
-    const offboardAction = item.taskType === 'OFFBOARD' && canManageOffboard
-      ? `<button class="table-button" data-open-offboard="${item.employeeId}">打开离职办理</button>`
-      : '';
-    const businessAction = item.taskType === 'ONBOARDING_COMPLIANCE' && canContract && canInsurance
-      ? `<button class="table-button primary" data-action="compliance" data-id="${item.employeeId}">一键确认办理</button>`
-      : item.taskType === 'CONTRACT' && canContract
-      ? `<button class="table-button primary" data-action="contract" data-id="${item.employeeId}">直接登记合同</button>`
-      : item.taskType === 'INSURANCE' && canInsurance
-        ? `<button class="table-button primary" data-action="social" data-id="${item.employeeId}" data-insurance-action="ADD">直接办理增保</button>`
-        : item.taskType === 'INSURANCE_TERMINATION' && canManageOffboard
-          ? `<button class="table-button primary" data-open-offboard="${item.employeeId}">确认已减保并离职</button>`
-          : item.taskType === 'DOCUMENT' && canCertificate
-            ? `<button class="table-button primary" data-action="certificate" data-id="${item.employeeId}">直接补资料</button>`
-            : '';
-    const genericAction = canUpdateTask
-      ? (item.taskStatus === 0
-          ? `<button class="table-button" data-start-task="${item.id}">开始处理</button>`
-          : `<button class="table-button" data-view="${taskView[item.taskType] || 'roster'}">进入业务</button>${item.riskLevel < 3 ? ` <button class="table-button" data-complete-task="${item.id}">完成</button>` : ''}`)
-      : '<span class="muted">等待有权限人员处理</span>';
-    const action = item.taskStatus >= 2 ? '<span class="muted">已结束</span>'
-      : transferAction || offboardAction || businessAction || genericAction;
-    return `<tr><td>${badge(item.riskLevel === 3 ? '高' : item.riskLevel === 2 ? '中' : '低', tone)}${item.overdue ? '<small class="money-risk">已逾期</small>' : ''}</td><td><strong>${escapeHtml(item.taskTitle)}</strong><small>${escapeHtml(item.taskContent || item.taskTypeName)}</small></td><td>${escapeHtml(item.employeeName || '-')}<small>${escapeHtml(item.customerName || '-')} · ${escapeHtml(item.positionName || '-')}</small></td><td>${escapeHtml(item.assignedUserName)}</td><td>${item.deadline ? new Date(item.deadline).toLocaleString('zh-CN', { hour12: false }) : '-'}</td><td>${badge(statusNames[item.taskStatus], item.taskStatus === 2 ? 'green' : item.taskStatus === 1 ? 'blue' : 'amber')}</td><td>${action}</td></tr>`;
-  }).join('') || emptyRow(7, '暂无待办', '员工入职、雇主险、转岗或离职后会自动生成');
+function submitTalentSearch() {
+  const input = $('#talentSearchInput');
+  loadTalents(input?.value || '').catch(error => toast(error.message, 'error'));
+}
+
+async function openTalentOnboarding(talentId) {
+  const talent = state.talents.find(item => Number(item.id) === Number(talentId));
+  if (!talent) throw new Error('人才记录不存在，请刷新后重试');
+  if (talent.employeeId) {
+    return openExistingEmployeeRecord({
+      canOpen: true,
+      employeeId: talent.employeeId,
+      employeeName: talent.name,
+      employeeStatus: talent.employeeStatus,
+      lifecycleStatus: talent.lifecycleStatus,
+      customerName: talent.customerName,
+      projectName: talent.projectName,
+      canReactivate: [3, 5].includes(Number(talent.employeeStatus))
+        && (state.user?.permissions || []).includes('employee:update')
+    });
+  }
+  await openEmployeeModal();
+  const form = $('#employeeForm');
+  form.elements.selectedTalentId.value = String(talent.id);
+  form.elements.name.value = talent.name || '';
+  if (form.elements.channelSource && talent.recruitmentChannelName && talent.recruitmentChannelName !== '未填写渠道') {
+    form.elements.channelSource.value = talent.recruitmentChannelName;
+  }
+  form.dataset.talentCheckKey = talentCheckKey({ name: talent.name });
+  syncEmployeeFormRequirements(form, 6);
+  toast('已带入人才信息，请补充本次录入资料', 'success');
 }
 
 async function loadRecruitmentSources() {
-  const [channels, recruiters, suppliers] = await Promise.all([api('/api/recruitment-channels'), api('/api/recruiters'), api('/api/recruitment-suppliers')]);
-  state.recruitmentChannels = channels;
-  state.recruiters = recruiters;
-  state.recruitmentSuppliers = suppliers;
-  const enabledChannels = channels.filter(item => Number(item.status) === 1);
-  const channelOptions = enabledChannels.map(item => `<option value="${escapeHtml(item.channelName)}">${escapeHtml(item.channelTypeName)}</option>`).join('');
-  ['#desktopRecruitmentChannelOptions', '#mobileRecruitmentChannelOptions'].forEach(selector => { if ($(selector)) $(selector).innerHTML = channelOptions; });
-  $('#channelRecruiterSelect').innerHTML = '<option value="">不关联</option>' + recruiters.filter(item => Number(item.status) === 1).map(item => `<option value="${item.id}">${item.recruiterName}</option>`).join('');
-  $('#channelSupplierSelect').innerHTML = '<option value="">不关联</option>' + suppliers.filter(item => Number(item.status) === 1).map(item => `<option value="${item.id}">${item.supplierName}</option>`).join('');
-  const totalEmployees = channels.reduce((sum, item) => sum + Number(item.employeeCount || 0), 0);
-  $('#channelSummary').innerHTML = `<span>启用 <strong>${enabledChannels.length}</strong></span><span>归档员工 <strong>${totalEmployees}</strong></span>`;
-  $('#channelTableBody').innerHTML = channels.map(item => {
-    const related = item.recruiterName ? `招聘人｜${item.recruiterName}` : item.supplierName ? `供应商｜${item.supplierName}` : '未关联';
-    return `<tr><td><strong>${escapeHtml(item.channelName)}</strong><small>${escapeHtml(item.remark || '自动归档渠道')}</small></td><td>${escapeHtml(item.channelTypeName)}<small>${escapeHtml(related)}</small></td><td><strong>${item.employeeCount} 人</strong><small>在职 ${item.activeEmployeeCount} · ${escapeHtml(item.employeeNames || '暂无员工')}</small></td><td><strong>${item.customerCount} 家</strong><small>${escapeHtml(item.customerNames || '暂无客户单位')}</small></td><td>${escapeHtml(item.feeModes || '-')}</td><td>${badge(item.status === 1 ? '启用' : '停用', item.status === 1 ? 'green' : 'amber')}</td><td><button class="table-button" data-view-channel-employees="${item.id}">关联明细</button> <button class="table-button" data-edit-channel="${item.id}">编辑</button></td></tr>`;
-  }).join('') || emptyRow(7, '暂无招聘渠道', '新增员工时填写的渠道会自动沉淀到这里');
-  $('#recruiterTableBody').innerHTML = recruiters.map(item => `<tr><td>${item.recruiterNo}</td><td><strong>${item.recruiterName}</strong></td><td>${item.phone || '-'}</td><td>${badge(item.status === 1 ? '启用' : '停用', item.status === 1 ? 'green' : 'amber')}</td><td><button class="table-button" data-edit-recruiter="${item.id}">编辑</button></td></tr>`).join('') || emptyRow(5, '暂无招聘人');
-  $('#supplierTableBody').innerHTML = suppliers.map(item => {
-    const expired = item.contractEndDate && item.contractEndDate < new Date().toISOString().slice(0, 10);
-    return `<tr><td><strong>${item.supplierName}</strong><small>${item.supplierNo}</small></td><td>${item.contactName || '-'}<small>${item.contactPhone || '-'}</small></td><td>${item.contractStartDate || '-'} 至 ${item.contractEndDate || '-'}${expired ? '<small class="money-risk">合同已到期</small>' : ''}</td><td>${badge(item.riskLevel === 3 ? '高' : item.riskLevel === 2 ? '中' : '低', item.riskLevel === 3 ? 'red' : item.riskLevel === 2 ? 'amber' : 'green')}</td><td>${badge(item.status === 1 ? '启用' : '停用', item.status === 1 ? 'green' : 'amber')}</td><td><button class="table-button" data-edit-supplier="${item.id}">编辑</button></td></tr>`;
-  }).join('') || emptyRow(6, '暂无供应商');
+  setPanelLoading('#channelTableBody');
+  try {
+    const channels = await api('/api/recruitment-channels');
+    state.recruitmentChannels = channels;
+    const permissions = state.user?.permissions || [];
+    const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+    const canEditChannels = isCompanyAdmin || permissions.includes('employee:update');
+    const enabledChannels = channels.filter(item => Number(item.status) === 1);
+    const channelOptions = enabledChannels.map(item => `<option value="${escapeHtml(item.channelName)}"></option>`).join('');
+    ['#desktopRecruitmentChannelOptions', '#mobileRecruitmentChannelOptions'].forEach(selector => { if ($(selector)) $(selector).innerHTML = channelOptions; });
+    const totalEmployees = channels.reduce((sum, item) => sum + Number(item.employeeCount || 0), 0);
+    $('#channelSummary').innerHTML = `<span>启用 <strong>${enabledChannels.length}</strong></span><span>归档员工 <strong>${totalEmployees}</strong></span>`;
+    $('#channelTableBody').innerHTML = channels.map(item => `<tr><td><strong>${escapeHtml(item.channelName)}</strong><small>${escapeHtml(item.remark || '员工登记渠道')}</small></td><td><strong>${item.employeeCount} 人</strong><small>在职 ${item.activeEmployeeCount} · ${escapeHtml(item.employeeNames || '暂无员工')}</small></td><td><strong>${item.customerCount} 家</strong><small>${escapeHtml(item.customerNames || '暂无客户单位')}</small></td><td>${escapeHtml(item.feeModes || '-')}</td><td>${badge(item.status === 1 ? '启用' : '停用', item.status === 1 ? 'green' : 'amber')}</td><td><button class="table-button" data-view-channel-employees="${item.id}">关联明细</button> ${canEditChannels ? `<button class="table-button" data-edit-channel="${item.id}">编辑</button>` : ''}</td></tr>`).join('') || emptyRow(6, '暂无招聘渠道', '新增员工时填写的渠道会自动沉淀到这里');
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    state.recruitmentChannels = [];
+    $('#channelSummary').innerHTML = '';
+    renderTableFailure('#channelTableBody', 6, '招聘渠道加载失败', error, 'recruitmentSources');
+    throw error;
+  } finally {
+    setPanelLoaded('#channelTableBody');
+  }
 }
 
 async function openChannelEmployees(channelId) {
@@ -1445,15 +1606,24 @@ async function openChannelEmployees(channelId) {
   const customers = new Set(data.rows.map(item => item.customerName).filter(Boolean)).size;
   const feeModes = new Set(data.rows.map(item => item.feeMode).filter(Boolean)).size;
   $('#channelEmployeesSummary').innerHTML = `<span>员工 <strong>${data.rows.length}</strong></span><span>在职 <strong>${active}</strong></span><span>客户单位 <strong>${customers}</strong></span><span>费用模式 <strong>${feeModes}</strong></span>`;
-  const statusNames = { 1: '待入职', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' };
+  const statusNames = { 1: '待到岗', 2: '在职', 3: '离职', 4: '黑名单', 5: '未入职', 6: '面试' };
   $('#channelEmployeesBody').innerHTML = data.rows.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.customerName || '未分配')}</td><td>${escapeHtml(item.positionName || '-')}</td><td>${escapeHtml(item.feeMode || '-')}</td><td>${escapeHtml(item.hireDate || '-')}</td><td>${badge(statusNames[item.employeeStatus] || '未知', Number(item.employeeStatus) === 2 ? 'green' : Number(item.employeeStatus) === 1 ? 'amber' : 'neutral')}</td><td><button class="table-button" data-channel-employee-detail="${item.id}">查看员工</button></td></tr>`).join('') || emptyRow(7, '该渠道暂无权限范围内的关联员工');
   $('#channelEmployeesModal').showModal();
 }
 
 async function ensureRecruitmentChannelOptions() {
-  if (!state.recruitmentChannels.length) state.recruitmentChannels = await api('/api/recruitment-channels');
+  if (!state.recruitmentChannels.length) {
+    try {
+      state.recruitmentChannels = await api('/api/recruitment-channels');
+    } catch (error) {
+      if (isSessionSupersededError(error)) throw error;
+      console.warn('Recruitment channels unavailable:', error.message);
+      toast('招聘渠道列表暂时无法加载，可直接手工填写', 'error');
+      state.recruitmentChannels = [];
+    }
+  }
   const options = state.recruitmentChannels.filter(item => Number(item.status) === 1)
-    .map(item => `<option value="${item.channelName}">${item.channelTypeName || ''}</option>`).join('');
+    .map(item => `<option value="${escapeHtml(item.channelName)}"></option>`).join('');
   ['#desktopRecruitmentChannelOptions', '#mobileRecruitmentChannelOptions'].forEach(selector => {
     if ($(selector)) $(selector).innerHTML = options;
   });
@@ -1469,42 +1639,23 @@ function openChannelModal(id = 0) {
   $('#channelModal').showModal();
 }
 
-function openRecruiterModal(id = 0) {
-  const form = $('#recruiterForm');
-  form.reset();
-  $('#recruiterModalTitle').textContent = id ? '编辑招聘人' : '新增招聘人';
-  const item = state.recruiters.find(row => Number(row.id) === Number(id));
-  if (item) Object.entries(item).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value ?? ''; });
-  form.elements.id.value = id || '';
-  $('#recruiterModal').showModal();
-}
-
-function openSupplierModal(id = 0) {
-  const form = $('#supplierForm');
-  form.reset();
-  $('#supplierModalTitle').textContent = id ? '编辑供应商' : '新增供应商';
-  const item = state.recruitmentSuppliers.find(row => Number(row.id) === Number(id));
-  if (item) Object.entries(item).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value ?? ''; });
-  form.elements.id.value = id || '';
-  $('#supplierModal').showModal();
-}
-
-async function saveRecruitmentSource(form, type) {
+async function saveRecruitmentSource(form) {
   const body = formToObject(form);
   const id = Number(body.id || 0);
   delete body.id;
-  const base = type === 'recruiter' ? '/api/recruiters' : type === 'supplier' ? '/api/recruitment-suppliers' : '/api/recruitment-channels';
+  const base = '/api/recruitment-channels';
   await api(id ? `${base}/${id}` : base, { method: id ? 'PUT' : 'POST', body: JSON.stringify(body) });
-  $(`#${type === 'recruiter' ? 'recruiterModal' : type === 'supplier' ? 'supplierModal' : 'channelModal'}`).close();
+  $('#channelModal').close();
   clearCache('/api/bootstrap');
   await Promise.all([loadRecruitmentSources(), loadBootstrap()]);
-  toast('招聘来源已保存', 'success');
+  toast('招聘渠道已保存', 'success');
 }
 
 async function loadAdvances() {
   setPanelLoading('#advanceTableBody');
   try {
-  const result = await apiAllPages('/api/advances');
+  const month = $('#advanceMonthFilter')?.value || '';
+  const result = await apiAllPages('/api/advances', month ? `month=${encodeURIComponent(month)}` : '');
   const statusMap = { 1: ['PENDING_APPROVAL', '历史待审批'], 2: ['APPROVED', '历史待放款'], 3: ['REJECTED', '已驳回'], 4: ['PAID', '已登记'], 5: ['REPAID', '已扣回'], 6: ['CANCELLED', '已取消'] };
   state.advances = (result.list || result).map(item => ({
     ...item,
@@ -1516,12 +1667,12 @@ async function loadAdvances() {
     advanceAtText: String(item.advanceAt || '').replace('T', ' ').slice(0, 16) || '-',
     recordedByName: item.recordedByName || item.recordedByUsername || '-'
   }));
-  const outstanding = state.advances.reduce((sum, item) => sum + item.outstandingAmount, 0);
-  const today = localDateTimeInputValue().slice(0, 10);
-  const todayRows = state.advances.filter(item => String(item.advanceAt || '').slice(0, 10) === today && [4, 5].includes(Number(item.advanceStatus)));
-  const paid = state.advances.reduce((sum, item) => sum + Number(item.paidAmount || 0), 0);
+  const summary = result.summary || {};
   $('#advanceKpis').innerHTML = [
-    ['今日登记', todayRows.length, 'neutral'], ['累计预支', money(paid), 'neutral'], ['未结余额', money(outstanding), 'danger']
+    ['预支笔数', Number(summary.count || state.advances.length), 'neutral'],
+    ['预支总额', money(summary.advanceAmount || 0), 'neutral'],
+    ['已扣回', money(summary.recoveredAmount || 0), 'good'],
+    ['未结余额', money(summary.outstandingAmount || 0), 'danger']
   ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
   const canApprove = (state.user?.permissions || []).includes('advance:approve');
   const canPay = (state.user?.permissions || []).includes('advance:pay');
@@ -1530,18 +1681,27 @@ async function loadAdvances() {
       ? `<button class="table-button" data-action="approve-advance" data-id="${item.id}">审批通过</button>`
       : item.status === 'APPROVED' && canPay ? `<button class="table-button" data-action="pay-advance" data-id="${item.id}">登记放款</button>` : '-';
     return `<tr><td><strong>${escapeHtml(item.advanceAtText)}</strong><small>${escapeHtml(item.advanceNo)}</small></td><td><strong>${escapeHtml(item.employeeName)}</strong></td><td><strong>${escapeHtml(item.customerName || '-')}</strong><small>${escapeHtml(item.projectName || '暂未关联具体项目')}</small></td><td><strong>${money(item.applyAmount)}</strong></td><td>${escapeHtml(item.applyReason || '-')}</td><td>${escapeHtml(item.recordedByName)}</td><td><strong class="money-risk">${money(item.outstandingAmount)}</strong></td><td>${badge(item.statusName, item.status === 'PENDING_APPROVAL' ? 'amber' : item.status === 'REJECTED' ? 'red' : 'green')}</td><td>${actions}</td></tr>`;
-  }).join('');
+  }).join('') || emptyRow(9, '暂无预支记录', '可切换月份查看历史台账，或点击“登记预支”新增记录');
   $('#advanceEmployeeSelect').innerHTML = activeEmployeeOptionHtml();
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    state.advances = [];
+    $('#advanceKpis').innerHTML = '';
+    renderTableFailure('#advanceTableBody', 9, '预支台账加载失败', error, 'advances');
+    throw error;
   } finally { setPanelLoaded('#advanceTableBody'); }
 }
 
 async function submitSimpleForm(form, path, successMessage, modalId, reload) {
-  await api(path, { method: 'POST', body: JSON.stringify(formToObject(form)) });
-  $(`#${modalId}`).close();
-  form.reset();
-  toast(successMessage);
-  await reload();
-  await loadSummary();
+  const submitButton = form.querySelector('button[type="submit"], input[type="submit"]');
+  return withSubmitLock(submitButton, async () => {
+    await api(path, { method: 'POST', body: JSON.stringify(formToObject(form)) });
+    $(`#${modalId}`).close();
+    form.reset();
+    toast(successMessage);
+    await reload();
+    await loadSummary();
+  });
 }
 
 async function approveAdvance(id) {
@@ -1559,28 +1719,24 @@ async function payAdvance(id) {
 
 const officeEmployeeActions = [
   ['人员录入', '新增员工档案', '＋', 'blue', 'employee-create'],
-  ['人员安排', '客户与项目分配', '排', 'cyan', 'employee-arrange'],
-  ['我的员工', '在职员工档案', '人', 'green', 'employees'],
+  ['待到岗确认', '确认入职或标记未入职', '待', 'cyan', 'pending-arrival'],
+  ['在职员工', '查看与管理员工档案', '人', 'green', 'employees'],
+  ['客户项目', '客户、项目与驻厂关联', '客', 'cyan', 'projects'],
   ['人才库', '候选人与离职回流', '才', 'gold', 'talents'],
-  ['黑名单', '风险人员管控', '禁', 'charcoal', 'blacklist'],
-  ['员工统计', '结构与流动分析', '统', 'orange', 'dashboard'],
-  ['用工记录', '入职调动历史', '录', 'cyan', 'employment-records'],
-  ['离职申请', '结算与雇主险减保', '离', 'blue', 'offboarding'],
-  ['员工反馈', '考勤与工资异议', '言', 'gold', 'feedback']
+  ['招聘渠道', '渠道与员工来源关联', '渠', 'orange', 'recruitment-sources']
 ];
 
 const officeFinanceActions = [
   ['登记预支', '记录时间、金额和用途', '记', 'blue', 'advance-create'],
   ['预支台账', '按客户查看现场记录', '账', 'cyan', 'advances'],
-  ['未结查询', '核对待扣回余额', '余', 'green', 'advances'],
-  ['还款管理', '工资扣回与还款', '还', 'blue', 'advances'],
-  ['预支统计', '项目预支趋势', '统', 'gold', 'advances'],
-  ['工资发放', '批次、工资条与签收', '薪', 'orange', 'payroll']
+  ['工资条发放', '发放、撤回与签收管理', '薪', 'orange', 'payroll']
 ];
 
 const officeActionPermissions = {
   'employee-create': ['employee:create'],
   'employee-arrange': ['project:view'],
+  'interviews': ['employee:view'],
+  'pending-arrival': ['employee:view'],
   employees: ['employee:view'],
   talents: ['talent:menu'],
   blacklist: ['blacklist:view', 'blacklist:menu'],
@@ -1593,8 +1749,16 @@ const officeActionPermissions = {
   payroll: ['payroll:view'],
   projects: ['project:view'],
   risk: ['risk:view'],
-  'payroll-create': ['payroll:manage']
+  'payroll-create': ['payroll:manage'],
+  'recruitment-sources': ['employee:view']
 };
+
+function openRosterStatus(status) {
+  switchView('roster');
+  const select = $('#statusSelect');
+  if (select) select.value = String(status ?? '');
+  return loadEmployees().catch(error => toast(error.message, 'error'));
+}
 
 function canRunOfficeAction(action) {
   const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
@@ -1625,11 +1789,10 @@ async function loadOffice() {
     // 兼容尚未提供独立公告接口的旧环境，办公中心仍可正常使用。
     if (!/接口不存在|404/.test(String(error?.message || ''))) throw error;
   }
+  notices = notices.filter(item => !/合同|雇主险|保险减员/.test(`${item.category || ''} ${item.title || ''}`));
   const workforce = data.workforce || {};
   const finance = data.finance || {};
   const delivery = data.delivery || {};
-  const compliance = data.compliance || {};
-  const todos = Array.isArray(data.todos) ? data.todos.filter(item => Number(item.count || 0) > 0) : [];
   const hourPart = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour: '2-digit',
@@ -1647,12 +1810,25 @@ async function loadOffice() {
   $('#officeStatline').innerHTML = [
     ['用工总数', workforce.total || 0], ['在职人数', workforce.active || 0], ['离职人数', workforce.left || 0], ['人才储备', workforce.talents || 0], ['预支未结', money(finance.advanceOutstanding || 0)]
   ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+  const lifecycleRows = [
+    ['面试', workforce.interview || 0, 6, '登记候选人'],
+    ['待到岗', workforce.pendingArrival || 0, 1, '确认入职'],
+    ['在职', workforce.active || 0, 2, '日常管理'],
+    ['未入职', workforce.notJoined || 0, 5, '回流人才库'],
+    ['已离职', workforce.left || 0, 3, '历史档案']
+  ];
+  $('#officeLifecycleFlow').innerHTML = lifecycleRows.map(([label, value, status, note], index) => `
+    <button type="button" class="office-lifecycle-step" data-lifecycle-status="${status}">
+      <span>${String(index + 1).padStart(2, '0')}</span>
+      <strong>${label}<b>${value}</b></strong>
+      <small>${note}</small>
+    </button>
+  `).join('');
   const pulseRows = (rows) => rows.map(([label, value, tone = '']) => `<span class="pulse-row ${tone}"><i>${label}</i><b>${value}</b></span>`).join('');
   const pulseCard = (heroLabel, heroValue, heroTone, rows) => `
     <div class="pulse-hero ${heroTone}"><span>${heroLabel}</span><strong>${heroValue}</strong></div>
     <div class="pulse-stats-list">${pulseRows(rows)}</div>
   `;
-  const complianceUrgent = (compliance.pendingContracts || 0) + (compliance.pendingInsurance || 0);
   $('#projectDeliveryPulse').innerHTML = pulseCard(
     '在营项目', delivery.activeProjects || 0, delivery.activeProjects ? 'good' : 'warning',
     [
@@ -1661,20 +1837,8 @@ async function loadOffice() {
       ['预支未结', money(finance.advanceOutstanding || 0)]
     ]
   );
-  $('#complianceQueuePulse').innerHTML = pulseCard(
-    '合规紧急项', complianceUrgent, complianceUrgent ? 'danger' : 'good',
-    [
-      ['合同待处理', compliance.pendingContracts || 0, compliance.pendingContracts ? 'danger' : 'good'],
-      ['雇主险待增', compliance.pendingInsurance || 0, compliance.pendingInsurance ? 'danger' : 'good'],
-      ['工资条待签', compliance.unsignedPayslips || 0, compliance.unsignedPayslips ? 'warning' : 'good']
-    ]
-  );
   renderOfficeActions('#employeeOfficeGrid', officeEmployeeActions);
   renderOfficeActions('#financeOfficeGrid', officeFinanceActions);
-  $('#todoTotal').textContent = todos.reduce((sum, item) => sum + Number(item.count || 0), 0);
-  $('#officeTodos').innerHTML = todos.length
-    ? todos.map(item => `<button type="button" data-view="${item.view}" data-todo-id="${escapeHtml(item.id)}" class="todo-item ${item.tone}"><span>${item.title}</span><strong>${item.count}</strong><small>立即处理 →</small></button>`).join('')
-    : '<div class="empty-state compact"><h3>今日待办已清空</h3><p>新增员工、到岗、转岗和离职后会自动生成事项。</p></div>';
   $('#officeNotices').innerHTML = notices.length
     ? notices.map(item => item.targetView
       ? `<button type="button" class="office-notice-item" data-notice-view="${escapeHtml(item.targetView)}"><span>${escapeHtml(item.category)}</span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.time)}</small></button>`
@@ -1683,52 +1847,843 @@ async function loadOffice() {
   } finally { setPanelLoaded('#officeView'); }
 }
 
-async function loadPayroll() {
-  setPanelLoading('#payrollTableBody');
-  try {
-  const data = await api('/api/payroll/overview');
-  $('#payrollKpis').innerHTML = [
-    ['累计应发', money(data.grossTotal), 'neutral'], ['累计实发', money(data.netTotal), 'good'], ['工资条待签收', data.unsignedTotal, 'danger']
-  ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
-  $('#payrollTableBody').innerHTML = data.batches.map(item => {
-    const permissions = state.user?.permissions || [];
-    const canManage = permissions.includes('payroll:manage');
-    const canReview = permissions.includes('payroll:review');
-    let action = '<span class="muted">等待下一环节</span>';
-    if (item.status === 'PUBLISHED') action = '<span class="muted">已发布</span>';
-    else if (Number(item.batchStatus) === 1 && canManage) action = `<button class="table-button" type="button" data-submit-payroll="${item.id}">提交复核</button>`;
-    else if (Number(item.batchStatus) === 3 && canReview) action = `<button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="1">复核通过</button> <button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="0">退回</button>`;
-    else if (Number(item.batchStatus) === 4 && canManage) action = `<button class="table-button" type="button" data-publish-payroll="${item.id}">发布工资条</button>`;
-    return `<tr><td><strong>${item.salaryMonth}</strong></td><td>${item.batchNo}</td><td>${item.projectName}</td><td>${item.employeeCount}</td><td>${money(item.grossTotal)}</td><td>${money(item.advanceDeduction)}</td><td><strong>${money(item.netTotal)}</strong></td><td>${badge(item.unsignedCount, item.unsignedCount ? 'amber' : 'green')}</td><td>${badge(item.statusName, item.status === 'PUBLISHED' ? 'green' : 'blue')}</td><td>${action}</td></tr>`;
-  }).join('') || emptyRow(10, '暂无工资批次', '点击“创建工资批次”录入本月工资');
-  } finally { setPanelLoaded('#payrollTableBody'); }
+function payrollBatchActions(item) {
+  const permissions = state.user?.permissions || [];
+  const canManage = permissions.includes('payroll:manage');
+  const canReview = permissions.includes('payroll:review');
+  let flowAction = '<span class="muted">等待下一环节</span>';
+  if (item.status === 'PUBLISHED' && canManage && item.canWithdraw) {
+    flowAction = `<button class="table-button danger" type="button" data-withdraw-payroll="${item.id}">撤回</button>`;
+  } else if (item.status === 'PUBLISHED' && canManage && item.withdrawBlockedReason) {
+    flowAction = `<span class="muted payroll-withdraw-blocked">${escapeHtml(item.withdrawBlockedReason)}</span>`;
+  } else if (item.status === 'PUBLISHED') flowAction = '<span class="muted">已发放</span>';
+  else if (Number(item.batchStatus) === 1 && canManage) flowAction = `<button class="table-button" type="button" data-submit-payroll="${item.id}">提交复核</button>`;
+  else if (Number(item.batchStatus) === 3 && canReview) flowAction = `<button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="1">复核通过</button> <button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="0">退回</button>`;
+  else if (Number(item.batchStatus) === 4 && canManage) flowAction = `<button class="table-button" type="button" data-publish-payroll="${item.id}">发布工资条</button>`;
+  return `<div class="payroll-row-actions"><button class="table-button" type="button" data-payroll-batch-detail="${item.id}">发放详情</button>${flowAction}</div>`;
 }
 
-async function submitPayrollBatch(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const columns = [
-    'employeeNo', 'baseSalary', 'positionSalary', 'performanceSalary', 'allowanceAmount',
-    'pieceAmount', 'overtime15Amount', 'overtime20Amount', 'overtime30Amount',
-    'socialDeduction', 'taxDeduction', 'advanceDeduction', 'otherDeduction'
-  ];
-  const rows = parseBatchTable(form.elements.tableData.value, columns, '工号');
-  const data = await api('/api/payroll/batches', {
+function payrollBatchProgress(item) {
+  const employeeCount = Number(item.employeeCount || 0);
+  const viewedCount = Math.min(employeeCount, Number(item.viewedCount || 0));
+  const signedCount = Math.min(employeeCount, Number(item.signedCount || 0));
+  return {
+    viewRate: employeeCount ? Math.round((viewedCount / employeeCount) * 100) : 0,
+    signRate: employeeCount ? Math.round((signedCount / employeeCount) * 100) : 0,
+    viewedCount,
+    signedCount
+  };
+}
+
+function switchPayrollWorkspace(workspace = 'overview') {
+  const target = ['overview', 'records', 'disputes'].includes(workspace) ? workspace : 'overview';
+  state.payrollWorkspace = target;
+  $$('[data-payroll-workspace-tab]').forEach(button => {
+    const active = button.dataset.payrollWorkspaceTab === target;
+    button.classList.toggle('active', active);
+    if (button.getAttribute('role') === 'tab') button.setAttribute('aria-selected', String(active));
+  });
+  $$('[data-payroll-workspace-panel]').forEach(panel => panel.classList.toggle('hidden', panel.dataset.payrollWorkspacePanel !== target));
+}
+
+function renderPayrollOverview(data = state.payrollOverviewData || { batches: [] }) {
+  const batches = data.batches || [];
+  const employeeCount = Number(data.employeeTotal || 0);
+  const viewedCount = Number(data.viewedTotal || 0);
+  const signedCount = Number(data.signedTotal || 0);
+  $('#payrollKpis').innerHTML = [
+    ['计薪人数', employeeCount, 'neutral'], ['已查看', viewedCount, 'good'],
+    ['已签收', signedCount, 'good'], ['待签收', data.unsignedTotal || 0, Number(data.unsignedTotal) ? 'danger' : 'good']
+  ].map(([label, value, tone]) => `<article class="mini-kpi ${tone}"><span>${label}</span><strong>${value}</strong></article>`).join('');
+
+  $('#payrollRecentBatches').innerHTML = batches.slice(0, 6).map(item => {
+    const progress = payrollBatchProgress(item);
+    return `<article class="payroll-recent-row"><div><span>${escapeHtml(item.salaryMonth)}</span><strong>${escapeHtml(item.projectName || '未关联项目')}</strong><small>${item.employeeCount || 0} 人 · ${escapeHtml(item.statusName)}</small></div><div class="payroll-recent-progress"><span>查看 ${progress.viewedCount}/${item.employeeCount || 0}</span><div class="payroll-progress-track"><i style="width:${progress.viewRate}%"></i></div><span>签收 ${progress.signedCount}/${item.employeeCount || 0}</span><div class="payroll-progress-track signed"><i style="width:${progress.signRate}%"></i></div></div><button class="table-button" type="button" data-payroll-batch-detail="${item.id}">详情</button></article>`;
+  }).join('') || '<div class="empty-panel"><strong>暂无工资批次</strong><small>导入工资表后会显示在这里</small></div>';
+
+  const pendingPublish = Number(data.pendingBatchCount || 0);
+  const failed = batches.reduce((sum, item) => sum + Number(item.deliveryFailedCount || 0), 0);
+  const unread = Math.max(0, employeeCount - viewedCount);
+  const unsigned = Number(data.unsignedTotal || 0);
+  const disputes = (state.payrollDisputes || []).filter(item => [0, 1].includes(Number(item.handleStatus))).length;
+  $('#payrollOverviewTasks').innerHTML = [
+    ['待处理批次', pendingPublish, 'pending', '草稿、复核和待发放统一查看'], ['发送失败', failed, 'failed', '需检查手机号或短信状态'],
+    ['员工未查看', unread, 'unread', '可进入记录查看并催签'], ['员工待签收', unsigned, 'unsigned', '已查看但尚未确认'],
+    ['待处理异议', disputes, 'disputes', '需薪资专员核对处理']
+  ].map(([label, value, filter, note]) => `<button type="button" data-payroll-record-filter="${filter}"><span>${label}</span><strong>${value}</strong><small>${note}</small></button>`).join('');
+}
+
+function payrollRecordMatches(item) {
+  if (state.payrollRecordMonth && item.salaryMonth !== state.payrollRecordMonth) return false;
+  if (state.payrollRecordFilter === 'published') return item.status === 'PUBLISHED';
+  const pendingBatchStatuses = new Set([1, 2, 3, 4]);
+  if (state.payrollRecordFilter === 'pending') return pendingBatchStatuses.has(Number(item.batchStatus));
+  if (state.payrollRecordFilter === 'failed') return Number(item.deliveryFailedCount || 0) > 0;
+  if (state.payrollRecordFilter === 'unsigned') return Number(item.unsignedCount || 0) > 0;
+  if (state.payrollRecordFilter === 'unread') return item.status === 'PUBLISHED' && Number(item.viewedCount || 0) < Number(item.employeeCount || 0);
+  return true;
+}
+
+function renderPayrollRecords(data = state.payrollOverviewData || { batches: [] }) {
+  const batches = (data.batches || []).filter(payrollRecordMatches);
+  const groups = batches.reduce((result, item) => {
+    const month = item.salaryMonth || '未设置月份';
+    if (!result[month]) result[month] = [];
+    result[month].push(item);
+    return result;
+  }, {});
+  $('#payrollRecordSummary').textContent = `共 ${batches.length} 个批次`;
+  $('#payrollRecordsGroups').innerHTML = Object.entries(groups).sort(([left], [right]) => right.localeCompare(left)).map(([month, items]) => `
+    <section class="payroll-record-month"><div class="payroll-record-month-head"><strong>${escapeHtml(month)}</strong><span>${items.length} 个批次 · ${items.reduce((sum, item) => sum + Number(item.employeeCount || 0), 0)} 人</span></div><div class="payroll-record-list">${items.map(item => {
+      const progress = payrollBatchProgress(item);
+      const expiry = item.viewExpiresMinutes == null ? '不限时' : item.viewExpiresMinutes < 1440 ? `${item.viewExpiresMinutes}分钟` : `${Math.round(item.viewExpiresMinutes / 1440)}天`;
+      return `<article class="payroll-record-card"><div class="payroll-record-title"><div><strong>${escapeHtml(item.projectName || '未关联项目')}</strong><small>${escapeHtml(item.batchNo)}</small></div>${badge(item.statusName, item.status === 'PUBLISHED' ? 'green' : 'blue')}</div><div class="payroll-record-metrics"><span><small>计薪人数</small><strong>${item.employeeCount || 0}人</strong></span><span><small>应发工资</small><strong>${money(item.grossTotal)}</strong></span><span><small>实发工资</small><strong>${money(item.netTotal)}</strong></span><span><small>有效查看</small><strong>${expiry}</strong></span></div><div class="payroll-record-progress"><div><span>员工已查看 ${progress.viewedCount}/${item.employeeCount || 0}</span><strong>${progress.viewRate}%</strong></div><div class="payroll-progress-track"><i style="width:${progress.viewRate}%"></i></div><div><span>员工已签收 ${progress.signedCount}/${item.employeeCount || 0}</span><strong>${progress.signRate}%</strong></div><div class="payroll-progress-track signed"><i style="width:${progress.signRate}%"></i></div></div><div class="payroll-record-footer"><span>发放成功 ${item.deliverySuccessCount || 0} 人 · 发放失败 ${item.deliveryFailedCount || 0} 人</span>${payrollBatchActions(item)}</div></article>`;
+    }).join('')}</div></section>`).join('') || '<div class="empty-panel"><strong>暂无符合条件的发放记录</strong><small>可调整工资月份或状态筛选</small></div>';
+}
+
+async function loadPayrollOverview() {
+  setPanelLoading('#payrollView');
+  try {
+    const data = await api('/api/payroll/overview');
+    state.payrollOverviewData = data;
+    renderPayrollOverview(data);
+    renderPayrollRecords(data);
+  } finally { setPanelLoaded('#payrollView'); }
+}
+
+function payrollDisputeTone(status) {
+  return { 0: 'amber', 1: 'blue', 2: 'green', 3: 'red' }[Number(status)] || 'blue';
+}
+
+async function loadPayrollDisputes() {
+  setPanelLoading('#payrollDisputeTableBody');
+  try {
+    const handleStatus = encodeURIComponent($('#payrollDisputeStatusFilter')?.value ?? '0');
+    const result = await api(`/api/payroll/disputes?handleStatus=${handleStatus}&page=1&pageSize=50`);
+    state.payrollDisputes = result.list || [];
+    const openCount = state.payrollDisputes.filter(item => [0, 1].includes(Number(item.handleStatus))).length;
+    $('#payrollDisputeSummary').textContent = `当前列表 ${result.total || 0} 项 · 待推进 ${openCount} 项`;
+    const canManage = (state.user?.permissions || []).includes('payroll:manage');
+    $('#payrollDisputeTableBody').innerHTML = state.payrollDisputes.map(item => {
+      const action = [0, 1].includes(Number(item.handleStatus)) && canManage
+        ? `<button class="table-button" type="button" data-handle-payroll-dispute="${item.id}">立即处理</button>`
+        : '<span class="muted">已完成</span>';
+      return `<tr><td><strong>${escapeHtml(item.employeeName)}</strong></td><td>${escapeHtml(item.salaryMonth)}</td><td>${escapeHtml(item.customerName || '-')}<small>${escapeHtml(item.projectName || '-')}</small></td><td><strong>${money(item.netAmount)}</strong></td><td class="payroll-dispute-reason">${escapeHtml(item.disputeReason)}</td><td>${badge(item.handleStatusName, payrollDisputeTone(item.handleStatus))}</td><td>${escapeHtml(item.handleRemark || '-')}<small>${escapeHtml(item.handlerName || '')}</small></td><td>${action}</td></tr>`;
+    }).join('') || emptyRow(8, '暂无工资异议', '员工提交工资异议后会显示在这里');
+  } finally {
+    setPanelLoaded('#payrollDisputeTableBody');
+  }
+}
+
+async function loadPayroll() {
+  await Promise.all([loadPayrollOverview(), loadPayrollDisputes()]);
+  renderPayrollOverview();
+}
+
+function payrollDetailTone(status) {
+  return { 未发布: 'blue', 未发放: 'blue', 发放成功: 'green', 发放失败: 'red', 待查看: 'amber', 待签字: 'amber', 已签收: 'green', 有异议: 'red' }[status] || 'blue';
+}
+
+function renderPayrollSmsSummary(summary, progress = {}) {
+  const data = summary || { total: 0, pending: 0, sent: 0, failed: 0, skippedNoPhone: 0, items: [] };
+  const retryableCount = Number(data.retryableCount || 0);
+  const remindableCount = Number(progress.pendingViewCount || 0) + Number(progress.pendingSignCount || 0);
+  const retryButton = $('[data-payroll-sms-action="retry"]');
+  const remindButton = $('[data-payroll-sms-action="remind"]');
+  if (retryButton) {
+    retryButton.disabled = Boolean(state.payrollSmsBusy) || retryableCount === 0;
+    retryButton.textContent = retryableCount ? `补发失败短信（${retryableCount}）` : '无可补发短信';
+  }
+  if (remindButton) {
+    const batchStatus = Number(state.payrollBatchDetail?.batch?.batchStatus || 0);
+    const batchPublished = batchStatus === 5;
+    remindButton.disabled = Boolean(state.payrollSmsBusy) || !batchPublished || remindableCount === 0;
+    remindButton.textContent = !batchPublished
+      ? '批次未发布'
+      : remindableCount
+      ? `催签未签收员工（${remindableCount}）`
+      : '全部已签收';
+  }
+  $('#payrollSmsSummary').innerHTML = [
+    ['任务总数', data.total || 0],
+    ['待发送', data.pending || 0],
+    ['已发送', data.sent || 0],
+    ['失败', data.failed || 0],
+    ['无手机号', data.skippedNoPhone || 0]
+  ].map(([label, value]) => `<article><span>${label}</span><strong>${value}</strong></article>`).join('');
+  $('#payrollSmsList').innerHTML = (data.items || []).slice(0, 12).map(item => `
+    <div class="payroll-sms-item">
+      <strong>${escapeHtml(item.employeeName || '-')}</strong>
+      <span>****${escapeHtml(item.phoneTail || '----')}</span>
+      <span>${escapeHtml(item.deliveryStatusName || '-')}</span>
+      <small>${escapeHtml(item.errorSummary || item.lastAttemptAt || '-')}</small>
+    </div>`).join('') || '<p class="muted">暂无短信发送记录</p>';
+}
+
+const payrollDetailStatusLabels = {
+  all: '全部',
+  pending: '待送达',
+  unviewed: '已送达未查看',
+  viewed_unsigned: '已查看未签收',
+  signed: '已签收',
+  dispute: '员工反馈',
+  failed: '发送失败',
+  withdrawn: '已撤回'
+};
+
+function renderPayrollBatchStatusTabs(rows) {
+  const counts = PayrollWorkbench.countStatuses(rows);
+  $('#payrollBatchProgress').innerHTML = Object.entries(payrollDetailStatusLabels).map(([key, label]) => `
+    <button type="button" role="tab" class="payroll-status-tab ${state.payrollDetailFilter === key ? 'active' : ''}"
+      aria-selected="${state.payrollDetailFilter === key}" data-payroll-detail-filter="${key}">
+      <span>${label}</span><strong>${counts[key] || 0}</strong>
+    </button>`).join('');
+}
+
+function renderPayrollBatchEmployeeRows() {
+  const detail = state.payrollBatchDetail || {};
+  const rows = detail.list || [];
+  renderPayrollBatchStatusTabs(rows);
+  const visibleRows = PayrollWorkbench.filterRows(rows, {
+    status: state.payrollDetailFilter,
+    keyword: state.payrollDetailKeyword
+  });
+  const activeLabel = payrollDetailStatusLabels[state.payrollDetailFilter] || '全部';
+  $('#payrollBatchVisibleSummary').textContent = `${activeLabel} · 当前显示 ${visibleRows.length} 人${state.payrollDetailKeyword ? ` · 搜索“${state.payrollDetailKeyword}”` : ''}`;
+  $('#payrollBatchEmployeeBody').innerHTML = visibleRows.map(item => {
+    const smsNote = item.smsErrorSummary
+      ? `<small class="payroll-delivery-error" title="${escapeHtml(item.smsErrorSummary)}">${escapeHtml(item.smsErrorSummary)}</small>`
+      : '';
+    const signatureInfo = item.signaturePreviewUrl
+      ? `<div class="payroll-signature-cell"><strong>${escapeHtml(item.signedName || '已签名')}</strong><button class="table-button" type="button" data-view-payroll-signature="${item.id}" data-signed-name="${escapeHtml(item.signedName || item.employeeName)}" data-signed-at="${escapeHtml(item.signedAt || '')}">查看签名</button></div>`
+      : '<span class="muted">暂无签名</span>';
+    const feedback = item.displayStatus === '有异议'
+      ? '<span class="payroll-feedback-state has-feedback">待处理反馈</span>'
+      : '<span class="payroll-feedback-state">无反馈</span>';
+    const itemsHtml = (item.items && item.items.length)
+      ? `<details class="payroll-items-detail"><summary>${item.items.length} 项</summary><div class="payroll-items-list">${item.items.map(entry => `<div class="payroll-item-row"><span>${escapeHtml(entry.label)}</span><strong>${escapeHtml(String(entry.value ?? ''))}</strong></div>`).join('')}</div></details>`
+      : '<span class="muted">无</span>';
+    const amountWarningHtml = item.hasAmountWarning && Array.isArray(item.amountWarnings)
+      ? `<details class="payroll-amount-warning"><summary>金额异常</summary><ul>${item.amountWarnings.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul></details>`
+      : '';
+    return `<tr>
+      <td><strong>${escapeHtml(item.employeeName)}</strong><small>${escapeHtml(item.deptName || '未关联部门')} · ${escapeHtml(item.phoneMasked || '手机号未登记')}</small></td>
+      <td><span class="payroll-amount-pair"><small>应发 ${money(item.grossAmount)}</small><strong>实发 ${money(item.netAmount)}</strong></span>${amountWarningHtml}</td>
+      <td>${itemsHtml}</td>
+      <td><div class="payroll-channel-stack"><span class="payroll-bind-state ${item.wechatBound ? 'bound' : 'unbound'}">微信${item.wechatBound ? '已绑定' : '未绑定'}</span><span class="payroll-sms-state">短信 · ${escapeHtml(item.smsStatusName || '未创建通知')}</span>${smsNote}</div></td>
+      <td>${badge(item.deliveryStatus, payrollDetailTone(item.deliveryStatus))}</td>
+      <td><div class="payroll-receipt-stack">${badge(item.viewed ? '已查看' : '未查看', item.viewed ? 'blue' : 'amber')}${badge(item.displayStatus, payrollDetailTone(item.displayStatus))}</div></td>
+      <td>${feedback}</td>
+      <td>${signatureInfo}</td>
+      <td><span class="payroll-time-cell"><small>查看/签收</small><strong>${escapeHtml(item.receiptAt || item.signedAt || '-')}</strong></span></td>
+    </tr>`;
+  }).join('') || emptyRow(9, '没有符合条件的员工', '可切换状态页签或重置搜索条件');
+}
+
+async function exportPayrollBatchDetail(type) {
+  const batch = state.payrollBatchDetail?.batch;
+  if (!batch?.id) throw new Error('工资批次信息无效，请重新打开详情');
+  const ext = type === 'receipt' ? 'pdf' : 'csv';
+  const requestSessionVersion = state.sessionVersion;
+  const response = await fetch(`/api/payroll/batches/${batch.id}/${type}-export.${ext}`, {
+    credentials: 'same-origin',
+    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
+  });
+  assertCurrentSession(requestSessionVersion);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.message || '工资条记录导出失败');
+  }
+  const suffix = type === 'receipt' ? '签收记录' : '发放明细';
+  const blob = await response.blob();
+  assertCurrentSession(requestSessionVersion);
+  triggerBlobDownload(blob, `${batch.salaryMonth || '工资条'}-${suffix}.${ext}`);
+  toast(`${suffix}已导出`, 'success');
+}
+
+async function openPayrollBatchDetail(batchId, page = 1) {
+  const modal = $('#payrollBatchDetailModal');
+  if (!modal.open) modal.showModal();
+  if (Number(state.payrollBatchDetail?.batch?.id || 0) !== Number(batchId)) {
+    state.payrollDetailFilter = 'all';
+    state.payrollDetailKeyword = '';
+    $('#payrollBatchEmployeeSearch').value = '';
+  }
+  setPanelLoading('#payrollBatchEmployeeBody');
+  try {
+    const [result, smsSummary] = await Promise.all([
+      api(`/api/payroll/batches/${batchId}/details?page=${page}&pageSize=100`),
+      api(`/api/payroll/batches/${batchId}/sms-summary`, { context: '加载短信发送状态' }).catch(error => {
+        if (isSessionSupersededError(error)) throw error;
+        toast(`工资批次已加载，但短信状态加载失败：${error.message}`, 'error');
+        return null;
+      })
+    ]);
+    state.payrollBatchDetail = result;
+    state.payrollBatchDetail.smsSummary = smsSummary;
+    const { batch, progress } = result;
+    renderPayrollSmsSummary(smsSummary, progress);
+    $('#payrollBatchDetailMonth').textContent = batch.salaryMonth || '-';
+    $('#payrollBatchDetailProject').textContent = `${batch.customerName || '-'} / ${batch.projectName || '-'}`;
+    $('#payrollBatchDetailNo').textContent = batch.batchNo || '-';
+    $('#payrollBatchDetailNet').textContent = money(batch.netTotal);
+    $('#payrollBatchDetailStatus').textContent = batch.statusName || '-';
+    $('#payrollDetailEmployeeView').value = String(batch.employeeViewEnabled ?? 1);
+    $('#payrollDetailViewOnce').value = String(batch.viewOnce || 0);
+    $('#payrollDetailViewExpires').value = batch.viewExpiresMinutes == null ? '' : String(batch.viewExpiresMinutes);
+    const policyButton = $('#payrollSaveViewPolicy');
+    if (policyButton) policyButton.disabled = Number(batch.batchStatus) > 4;
+    renderPayrollBatchEmployeeRows();
+    const pageCount = Math.max(1, Math.ceil(Number(result.total || 0) / Number(result.pageSize || 100)));
+    $('#payrollBatchDetailPager').innerHTML = pageCount > 1
+      ? `<button type="button" class="secondary-button" data-payroll-detail-page="${Math.max(1, result.page - 1)}" ${result.page <= 1 ? 'disabled' : ''}>上一页</button><span>第 ${result.page} / ${pageCount} 页</span><button type="button" class="secondary-button" data-payroll-detail-page="${Math.min(pageCount, result.page + 1)}" ${result.page >= pageCount ? 'disabled' : ''}>下一页</button>`
+      : `<span>共 ${result.total || 0} 名员工</span>`;
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    $('#payrollBatchEmployeeBody').innerHTML = emptyRow(8, '批次详情加载失败', escapeHtml(error.message));
+    throw error;
+  } finally {
+    setPanelLoaded('#payrollBatchEmployeeBody');
+  }
+}
+
+async function savePayrollViewPolicy() {
+  const batchId = Number(state.payrollBatchDetail?.batch?.id || 0);
+  if (!batchId) return;
+  const employeeViewEnabled = Number($('#payrollDetailEmployeeView').value);
+  const viewOnce = Number($('#payrollDetailViewOnce').value);
+  if (viewOnce === 1 && employeeViewEnabled !== 1) throw new Error('阅后即焚必须先开启员工端查看权限');
+  await api(`/api/payroll/batches/${batchId}/view-policy`, {
+    method: 'PUT',
+    body: JSON.stringify({ employeeViewEnabled, viewOnce, viewExpiresMinutes: $('#payrollDetailViewExpires').value ? Number($('#payrollDetailViewExpires').value) : null })
+  });
+  toast('工资条查看策略已保存', 'success');
+  await openPayrollBatchDetail(batchId);
+}
+
+async function withdrawPayrollBatch(batchId) {
+  const reason = window.prompt('请输入撤回原因（5-200字）');
+  if (reason === null) return;
+  const normalizedReason = String(reason).trim();
+  if (normalizedReason.length < 5 || normalizedReason.length > 200) {
+    throw new Error('撤回原因需填写5至200字');
+  }
+  const confirmed = await confirmDialog({
+    title: '确认撤回工资条',
+    message: '撤回后，该批次全部工资条将暂时无法在员工端查看，历史审计记录仍会保留。',
+    confirmText: '确认撤回',
+    danger: true
+  });
+  if (!confirmed) return;
+  await api(`/api/payroll/batches/${batchId}/withdraw`, {
+    method: 'PUT',
+    body: JSON.stringify({ confirmed: true, reason: normalizedReason })
+  });
+  toast('工资条已撤回至待发放', 'success');
+  await Promise.all([loadPayroll(), loadOffice()]);
+}
+
+async function openPayrollSignature(payslipId, signedName, signedAt) {
+  const requestSessionVersion = state.sessionVersion;
+  const response = await fetch(`/api/payroll/payslips/${payslipId}/signature`, {
+    credentials: 'same-origin',
+    headers: state.token ? { Authorization: `Bearer ${state.token}` } : {}
+  });
+  assertCurrentSession(requestSessionVersion);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    if (response.status === 401) {
+      const message = payload?.message || '登录已过期，请重新登录';
+      rememberAuthMessage(message);
+      logout(false, false);
+      setLoginError(message);
+    }
+    throw new Error(payload?.message || '员工签名加载失败');
+  }
+  const blob = await response.blob();
+  assertCurrentSession(requestSessionVersion);
+  if (state.payrollSignatureObjectUrl) URL.revokeObjectURL(state.payrollSignatureObjectUrl);
+  state.payrollSignatureObjectUrl = URL.createObjectURL(blob);
+  $('#payrollSignatureImage').src = state.payrollSignatureObjectUrl;
+  $('#payrollSignatureEmployee').textContent = signedName || '员工已签名';
+  $('#payrollSignatureTime').textContent = signedAt || '-';
+  $('#payrollSignatureModal').showModal();
+}
+
+async function handlePayrollSmsAction(action) {
+  if (state.payrollSmsBusy) return;
+  const batchId = Number(state.payrollBatchDetail?.batch?.id || 0);
+  if (!batchId) return;
+  const reminder = action === 'remind';
+  const confirmed = await confirmDialog({
+    title: reminder ? '发送工资条催签提醒' : '重试工资条短信',
+    message: reminder
+      ? '确认向该批次尚未签收的员工创建催签短信任务？'
+      : '确认重试该批次发送失败或原无手机号的短信？',
+    confirmText: reminder ? '确认催签' : '确认重试'
+  });
+  if (!confirmed) return;
+  state.payrollSmsBusy = true;
+  const buttons = $$('[data-payroll-sms-action]');
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    const url = reminder
+      ? `/api/payroll/batches/${batchId}/sms-reminders`
+      : `/api/payroll/batches/${batchId}/sms-retry`;
+    const result = await api(url, {
+      method: 'POST', body: JSON.stringify({ confirmed: true })
+    });
+    toast(reminder
+      ? `催签任务已创建：${result.created || 0}条`
+      : `已重置${result.queued || 0}条补发任务`, 'success');
+    const summary = await api(`/api/payroll/batches/${batchId}/sms-summary`);
+    state.payrollBatchDetail.smsSummary = summary;
+    renderPayrollSmsSummary(summary, state.payrollBatchDetail?.progress);
+  } finally {
+    state.payrollSmsBusy = false;
+    renderPayrollSmsSummary(
+      state.payrollBatchDetail?.smsSummary,
+      state.payrollBatchDetail?.progress
+    );
+  }
+}
+
+function openPayrollDispute(disputeId) {
+  const item = state.payrollDisputes.find(row => Number(row.id) === Number(disputeId));
+  if (!item) return;
+  $('#payrollDisputeId').value = item.id;
+  $('#payrollDisputeEmployee').textContent = item.employeeName || '-';
+  $('#payrollDisputeMonth').textContent = item.salaryMonth || '-';
+  $('#payrollDisputeProject').textContent = `${item.customerName || '-'} / ${item.projectName || '-'}`;
+  $('#payrollDisputeNet').textContent = money(item.netAmount);
+  $('#payrollDisputeReason').textContent = item.disputeReason || '-';
+  $('#payrollDisputeRemark').value = item.handleRemark || '';
+  $('#payrollDisputeModal').showModal();
+}
+
+async function handlePayrollDisputeAction(action) {
+  const disputeId = Number($('#payrollDisputeId').value || 0);
+  const remark = String($('#payrollDisputeRemark').value || '').trim();
+  if (!disputeId) throw new Error('工资异议记录无效，请刷新后重试');
+  if (remark.length < 5 || remark.length > 500) throw new Error('处理说明需填写5至500字');
+  const actionNames = { processing: '标记为处理中', resolve: '确认已经解决', reject: '核对后驳回' };
+  if (!actionNames[action]) throw new Error('工资异议处理操作无效');
+  if (action === 'resolve' || action === 'reject') {
+    const confirmed = await confirmDialog({
+      title: actionNames[action],
+      message: '完成后员工工资条将恢复为待签收状态。',
+      confirmText: actionNames[action],
+      danger: action === 'reject'
+    });
+    if (!confirmed) return;
+  }
+  await api(`/api/payroll/disputes/${disputeId}/handle`, {
+    method: 'PUT',
+    body: JSON.stringify({ action, remark })
+  });
+  $('#payrollDisputeModal').close();
+  toast('工资异议处理完成', 'success');
+  return loadPayroll();
+}
+
+function resetPayrollImport(options = {}) {
+  const templates = state.payrollImport.templates || [];
+  state.payrollImport = {
+    sourceRows: [], headers: [], header: null, headerSignature: '', suggestedMapping: [], mapping: [],
+    mappingRequired: false, parsedRows: [], preview: null, fileName: '', sheetName: '',
+    templates, activeTemplateId: 0
+  };
+  const preview = $('#payrollImportPreview');
+  const summary = $('#payrollImportSummary');
+  const body = $('#payrollImportPreviewBody');
+  const fileName = $('#payrollFileName');
+  const confirmButton = $('#payrollConfirmButton');
+  const mappingPanel = $('#payrollMappingPanel');
+  if (preview) preview.classList.add('hidden');
+  if (summary) summary.innerHTML = '';
+  if (body) body.innerHTML = '';
+  if (fileName) fileName.textContent = '';
+  if (confirmButton) confirmButton.disabled = true;
+  if (mappingPanel) {
+    mappingPanel.classList.add('hidden');
+    mappingPanel.classList.remove('needs-review');
+    mappingPanel.open = false;
+  }
+  if ($('#payrollMappingRows')) $('#payrollMappingRows').innerHTML = '';
+  if (!options.keepResult) {
+    $('#payrollBatchResult')?.classList.add('hidden');
+    if ($('#payrollBatchResult')) $('#payrollBatchResult').innerHTML = '';
+  }
+}
+
+const payrollMappingChoices = [
+  ['employeeName', '员工姓名'], ['employeeNo', '工号'], ['idCardNo', '身份证号'], ['phone', '手机号'],
+  ['baseSalary', '基本工资'], ['positionSalary', '岗位工资'], ['performanceSalary', '绩效工资'],
+  ['allowanceAmount', '补贴'], ['pieceAmount', '计件工资'], ['overtime15Amount', '1.5倍加班费'],
+  ['overtime20Amount', '2倍加班费'], ['overtime30Amount', '3倍加班费'], ['grossAmount', '应发工资'],
+  ['socialDeduction', '社保扣款'], ['taxDeduction', '个税'], ['advanceDeduction', '预支扣回'],
+  ['otherDeduction', '其他扣款'], ['netAmount', '实发工资'], ['custom:income', '收入项目'],
+  ['custom:deduction', '扣款项目'], ['custom:display', '展示项'], ['ignore', '不导入']
+];
+
+async function payrollHeaderSignature(headers) {
+  if (!globalThis.crypto?.subtle) throw new Error('当前浏览器不支持工资表安全签名，请升级浏览器');
+  const normalized = (headers || []).map(header => PayrollImport.normalizeHeader(header)).join('\u001f');
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function loadPayrollTemplates(projectId) {
+  const projectIdNum = Number(projectId);
+  if (!Number.isSafeInteger(projectIdNum) || projectIdNum <= 0) {
+    state.payrollImport.templates = [];
+    renderPayrollTemplateSelect();
+    return;
+  }
+  const data = await api(`/api/payroll/templates?projectId=${projectIdNum}`);
+  state.payrollImport.templates = (data && data.list) || [];
+  renderPayrollTemplateSelect();
+}
+
+function renderPayrollTemplateSelect() {
+  const select = $('#payrollTemplateSelect');
+  if (!select) return;
+  const templates = state.payrollImport.templates || [];
+  const options = [
+    '<option value="0">默认（自动识别）</option>',
+    ...templates.map(template => `<option value="${template.id}">${escapeHtml(template.name)}</option>`)
+  ].join('');
+  const current = String(state.payrollImport.activeTemplateId || 0);
+  select.innerHTML = options;
+  select.value = current;
+}
+
+function applyPayrollTemplate(templateId) {
+  const id = Number(templateId) || 0;
+  state.payrollImport.activeTemplateId = id;
+  if (!id || !state.payrollImport.headers.length) return;
+  const template = (state.payrollImport.templates || []).find(item => Number(item.id) === id);
+  if (!template) return;
+  const mapping = PayrollColumnMapping.applyTemplateMapping(
+    template,
+    state.payrollImport.headers,
+    state.payrollImport.suggestedMapping
+  );
+  try {
+    reparsePayrollImport(mapping);
+  } catch (_error) {
+    // 模板与当前表不兼容时保留原映射，由映射面板提示缺失项。
+  }
+}
+
+function showPayrollTemplateSaveForm() {
+  $('#payrollSaveTemplateButton')?.classList.add('hidden');
+  $('#payrollTemplateNameInput')?.classList.remove('hidden');
+  $('#payrollTemplateNameInput')?.focus();
+  $('#payrollSaveTemplateConfirm')?.classList.remove('hidden');
+  $('#payrollSaveTemplateCancel')?.classList.remove('hidden');
+}
+
+function hidePayrollTemplateSaveForm() {
+  $('#payrollSaveTemplateButton')?.classList.remove('hidden');
+  const input = $('#payrollTemplateNameInput');
+  if (input) { input.classList.add('hidden'); input.value = ''; }
+  $('#payrollSaveTemplateConfirm')?.classList.add('hidden');
+  $('#payrollSaveTemplateCancel')?.classList.add('hidden');
+}
+
+async function savePayrollTemplate() {
+  if (!state.payrollImport.headers.length || !state.payrollImport.mapping.length) {
+    toast('请先上传工资表并完成字段识别', 'error');
+    return;
+  }
+  const projectId = Number($('#payrollProjectSelect').value);
+  if (!Number.isSafeInteger(projectId) || projectId <= 0) {
+    toast('请先选择所属项目', 'error');
+    return;
+  }
+  const name = String($('#payrollTemplateNameInput').value || '').trim();
+  if (!name) {
+    toast('请输入模板名称', 'error');
+    return;
+  }
+  await api('/api/payroll/templates', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId,
+      name,
+      sourceHeaders: state.payrollImport.headers,
+      mapping: state.payrollImport.mapping
+    })
+  });
+  toast('工资表模板已保存', 'success');
+  hidePayrollTemplateSaveForm();
+  await loadPayrollTemplates(projectId);
+  state.payrollImport.activeTemplateId = 0;
+  renderPayrollTemplateSelect();
+}
+
+function renderPayrollMappingPanel() {
+  const panel = $('#payrollMappingPanel');
+  const rows = $('#payrollMappingRows');
+  const status = $('#payrollMappingStatus');
+  if (!panel || !rows || !status || !state.payrollImport.mapping.length) return;
+  panel.classList.remove('hidden');
+  panel.classList.toggle('needs-review', state.payrollImport.mappingRequired);
+  panel.open = PayrollColumnMapping.shouldKeepPanelOpen(panel.open, state.payrollImport.mappingRequired);
+  status.textContent = state.payrollImport.mappingRequired
+    ? '需要补全员工身份或实发工资用途'
+    : '系统已自动识别，可展开检查';
+  rows.innerHTML = state.payrollImport.mapping.map((item, index) => {
+    const selectedChoice = PayrollColumnMapping.choiceForMapping(item);
+    const options = payrollMappingChoices.map(([value, label]) => (
+      `<option value="${value}"${value === selectedChoice ? ' selected' : ''}>${label}</option>`
+    )).join('');
+    return `<label class="payroll-mapping-row"><span class="payroll-mapping-source"><strong>${escapeHtml(item.sourceHeader || `第${index + 1}列`)}</strong><small>原表第 ${index + 1} 列</small></span><select data-payroll-mapping-choice="${index}" aria-label="${escapeHtml(item.sourceHeader || `第${index + 1}列`)}用途">${options}</select></label>`;
+  }).join('');
+}
+
+function reparsePayrollImport(mapping = state.payrollImport.mapping) {
+  state.payrollImport.mapping = mapping;
+  state.payrollImport.mappingRequired = PayrollColumnMapping.mappingRequiresReview(mapping);
+  state.payrollImport.preview = null;
+  $('#payrollImportPreview')?.classList.add('hidden');
+  if ($('#payrollConfirmButton')) $('#payrollConfirmButton').disabled = true;
+  renderPayrollMappingPanel();
+  try {
+    const parsed = PayrollImport.parseMappedPayrollRows(
+      state.payrollImport.sourceRows,
+      state.payrollImport.header,
+      mapping
+    );
+    state.payrollImport.parsedRows = parsed.rows;
+    state.payrollImport.mappingRequired = false;
+    renderPayrollMappingPanel();
+    return parsed;
+  } catch (error) {
+    state.payrollImport.parsedRows = [];
+    state.payrollImport.mappingRequired = true;
+    renderPayrollMappingPanel();
+    $('#payrollMappingStatus').textContent = error.message;
+    throw error;
+  }
+}
+
+async function preparePayrollMapping(parsed, projectId) {
+  if (typeof PayrollColumnMapping === 'undefined') throw new Error('工资字段映射模块未加载，请刷新页面重试');
+  const headers = parsed.headers || [];
+  const headerSignature = await payrollHeaderSignature(headers);
+  let profile = null;
+  if (Number(projectId) > 0) {
+    profile = await api(`/api/payroll/import-profiles?projectId=${Number(projectId)}&headerSignature=${headerSignature}`);
+  }
+  const mapping = PayrollColumnMapping.selectReusableMapping({
+    headers,
+    headerSignature,
+    profile,
+    suggestedMapping: parsed.columnMapping
+  });
+  state.payrollImport.sourceRows = parsed.sourceRows || [];
+  state.payrollImport.headers = headers;
+  state.payrollImport.header = {
+    index: Number(parsed.headerRowIndex || 0),
+    rowCount: Number(parsed.headerRowCount || 1),
+    headers
+  };
+  state.payrollImport.headerSignature = headerSignature;
+  state.payrollImport.suggestedMapping = parsed.suggestedMapping || parsed.columnMapping || [];
+  state.payrollImport.mapping = mapping;
+  state.payrollImport.mappingRequired = PayrollColumnMapping.mappingRequiresReview(mapping);
+  renderPayrollMappingPanel();
+  return reparsePayrollImport(mapping);
+}
+
+function payrollRowsFromText(text) {
+  const rows = PayrollImport.parseDelimitedRows(text);
+  if (!rows.length) throw new Error('请选择工资表文件，或粘贴 Excel 内容');
+  return { ...PayrollImport.parseFlexiblePayrollRows(rows), sourceRows: rows };
+}
+
+async function readPayrollFile(file) {
+  if (!file) throw new Error('请选择工资表文件');
+  if (/\.xls$/i.test(file.name || '')) throw new Error('旧版 .xls 暂不支持，请在 Excel 中另存为 .xlsx 或 .csv 后上传');
+  if (!/\.(csv|xlsx)$/i.test(file.name || '')) throw new Error('仅支持 .csv / .xlsx 文件');
+  if (file.size > 10 * 1024 * 1024) throw new Error('工资表文件不能超过10MB');
+  if (typeof PayrollImport === 'undefined') throw new Error('工资智能解析模块未加载，请刷新页面重试');
+  if (/\.csv$/i.test(file.name || '')) {
+    const text = await readFileAsText(file, '工资表读取失败');
+    return { ...payrollRowsFromText(text), sheetName: 'CSV' };
+  }
+  if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+  const buffer = await readFileAsArrayBuffer(file, '工资表读取失败');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const failures = [];
+  for (const worksheet of workbook.worksheets) {
+    const rows = worksheetToRows(worksheet);
+    try {
+      const parsed = PayrollImport.parseFlexiblePayrollRows(rows);
+      return { ...parsed, sourceRows: rows, sheetName: worksheet.name };
+    } catch (error) {
+      failures.push(`${worksheet.name}：${error.message}`);
+    }
+  }
+  throw new Error(`没有找到可识别的工资明细工作表。${failures.slice(0, 3).join('；')}`);
+}
+
+function renderPayrollImportPreview(preview) {
+  const panel = $('#payrollImportPreview');
+  const summary = $('#payrollImportSummary');
+  const body = $('#payrollImportPreviewBody');
+  const confirmButton = $('#payrollConfirmButton');
+  if (!panel || !summary || !body || !confirmButton) return;
+  panel.classList.remove('hidden');
+  const warningRows = Number(preview.warningRows ?? preview.rows.filter(item => item.warnings?.length).length);
+  summary.innerHTML = [
+    `<span>总计 <strong>${preview.totalRows}</strong> 行</span>`,
+    `<span class="success">可导入 <strong>${preview.validRows}</strong> 行</span>`,
+    `<span class="${preview.errorRows ? 'danger' : ''}">无法创建 <strong>${preview.errorRows}</strong> 行</span>`,
+    `<span class="${warningRows ? 'warning' : ''}">异常提示 <strong>${warningRows}</strong> 行</span>`
+  ].join('');
+  body.innerHTML = preview.rows.map(item => {
+    const gross = Number(item.grossAmount || 0);
+    const net = Number(item.netAmount || 0);
+    const sourceItems = Array.isArray(item.itemSnapshot) ? item.itemSnapshot : [];
+    const itemsHtml = sourceItems.length
+      ? `<details class="payroll-items-detail" open><summary>${sourceItems.length} 项</summary><div class="payroll-items-list">${sourceItems.map(entry => `<div class="payroll-item-row"><span>${escapeHtml(entry.label || '')}</span><strong>${escapeHtml(String(entry.value ?? ''))}</strong></div>`).join('')}</div></details>`
+      : '<span class="muted">无可展示项目</span>';
+    const messages = [
+      ...(item.errors || []).map(message => `<span class="payroll-row-error">${escapeHtml(message)}</span>`),
+      ...(item.warnings || []).map(message => `<span class="payroll-row-warning">${escapeHtml(message)}</span>`)
+    ].join('') || '<span class="payroll-row-success">校验通过</span>';
+    return `<tr class="${item.errors?.length ? 'has-error' : ''}"><td>${item.rowNumber}</td><td><strong>${escapeHtml(item.employeeName || '-')}</strong><small>${escapeHtml(item.employeeNo || '')}</small></td><td>${money(gross)}</td><td>${money(Math.max(0, gross - net))}</td><td><strong>${money(net)}</strong></td><td>${itemsHtml}</td><td>${messages}</td></tr>`;
+  }).join('');
+  confirmButton.disabled = preview.errorRows > 0;
+}
+
+async function previewPayrollImport(event) {
+  if (event) event.preventDefault();
+  const form = $('#payrollBatchForm');
+  if (!form.reportValidity()) return;
+  if (!state.payrollImport.parsedRows.length) {
+    if (typeof PayrollImport === 'undefined') throw new Error('工资智能解析模块未加载，请刷新页面重试');
+    const parsed = payrollRowsFromText(form.elements.tableData.value);
+    state.payrollImport.sourceRows = parsed.sourceRows;
+    state.payrollImport.sheetName = '粘贴内容';
+    await preparePayrollMapping(parsed, Number(form.projectId.value));
+  }
+  const preview = await api('/api/payroll/batches/preview', {
     method: 'POST',
     body: JSON.stringify({
       projectId: Number(form.projectId.value),
-      salaryMonth: form.salaryMonth.value,
-      payrollType: 3,
-      rows
+      headerSignature: state.payrollImport.headerSignature,
+      sourceHeaders: state.payrollImport.headers,
+      mapping: state.payrollImport.mapping,
+      sheetName: state.payrollImport.sheetName,
+      rows: state.payrollImport.parsedRows
     })
   });
-  $('#payrollBatchResult').classList.remove('hidden');
-  $('#payrollBatchResult').innerHTML = `<strong>工资批次 ${escapeHtml(data.batchNo)} 创建成功，共 ${data.employeeCount} 人。</strong>`;
-  await Promise.all([loadPayroll(), loadOffice()]);
-  window.setTimeout(() => {
-    $('#payrollBatchModal').close();
-    form.reset();
-  }, 900);
+  state.payrollImport.preview = preview;
+  renderPayrollImportPreview(preview);
+  const manualEntry = document.querySelector('.payroll-manual-entry');
+  if (manualEntry) manualEntry.open = false;
+  if (preview.errorRows > 0) toast(`发现 ${preview.errorRows} 行无法创建，请修改员工身份或非法数据`, 'error');
+  else if (preview.warningRows > 0) toast(`发现 ${preview.warningRows} 行金额异常提示，仍可继续创建工资条`, 'warning');
+  else toast(`校验通过，可创建 ${preview.validRows} 人工资批次`, 'success');
+}
+
+async function confirmPayrollBatchImport() {
+  const form = $('#payrollBatchForm');
+  const preview = state.payrollImport.preview;
+  if (!preview) throw new Error('请先解析并预览工资表');
+  if (preview.errorRows > 0) throw new Error('工资表存在无法创建的数据，请修正员工身份或非法金额后重新预览');
+  if (!state.payrollImport.parsedRows.length) throw new Error('工资表数据已失效，请重新上传');
+  const warningRows = preview.rows.filter(item => item.warnings?.length).length;
+  if (warningRows > 0) {
+    const confirmed = await confirmDialog({
+      title: '工资数据存在异常提示',
+      message: `${warningRows} 行工资的应发、实发或明细核对存在差异。系统将保留原表金额，确认仍然创建工资条吗？`,
+      confirmText: '仍然创建工资条',
+      danger: true
+    });
+    if (!confirmed) return;
+  }
+  const button = $('#payrollConfirmButton');
+  button.disabled = true;
+  try {
+    const data = await api('/api/payroll/batches', {
+      method: 'POST',
+      body: JSON.stringify({
+        projectId: Number(form.projectId.value),
+        salaryMonth: form.salaryMonth.value,
+        payrollType: 3,
+        employeeViewEnabled: Number(form.employeeViewEnabled.value),
+        viewOnce: Number(form.viewOnce.value),
+        viewExpiresMinutes: form.viewExpiresMinutes.value ? Number(form.viewExpiresMinutes.value) : null,
+        headerSignature: state.payrollImport.headerSignature,
+        sourceHeaders: state.payrollImport.headers,
+        mapping: state.payrollImport.mapping,
+        sheetName: state.payrollImport.sheetName,
+        rows: state.payrollImport.parsedRows
+      })
+    });
+    $('#payrollBatchResult').classList.remove('hidden');
+    $('#payrollBatchResult').innerHTML = `<strong>工资批次 ${escapeHtml(data.batchNo)} 创建成功，共 ${data.employeeCount} 人。</strong>`;
+    await Promise.all([loadPayroll(), loadOffice()]);
+    window.setTimeout(() => {
+      $('#payrollBatchModal').close();
+      form.reset();
+      resetPayrollImport({ keepResult: true });
+    }, 900);
+  } catch (error) {
+    button.disabled = false;
+    throw error;
+  }
+}
+
+function bindPayrollFileZone() {
+  const zone = $('#payrollFileZone');
+  const input = $('#payrollFileInput');
+  if (!zone || !input) return;
+  const loadFile = async file => {
+    if (!file) return;
+    resetPayrollImport();
+    $('#payrollFileName').textContent = `正在智能识别：${file.name} …`;
+    try {
+      const parsed = await readPayrollFile(file);
+      state.payrollImport.fileName = file.name;
+      state.payrollImport.sheetName = parsed.sheetName;
+      try {
+        await preparePayrollMapping(parsed, Number($('#payrollProjectSelect').value));
+      } catch (error) {
+        if (!state.payrollImport.mappingRequired) throw error;
+      }
+      $('#payrollBatchForm').elements.tableData.value = '';
+      const itemCount = state.payrollImport.mapping.filter(item => item.includeInPayslip).length;
+      const rowCount = state.payrollImport.parsedRows.length || parsed.rows.length;
+      $('#payrollFileName').textContent = `已识别：${file.name} / ${parsed.sheetName}（${rowCount} 行，${itemCount} 个工资项目）`;
+    } catch (error) {
+      $('#payrollFileName').textContent = '';
+      throw error;
+    }
+  };
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      input.click();
+    }
+  });
+  input.addEventListener('change', () => loadFile(input.files?.[0]).catch(error => toast(error.message, 'error')));
+  ['dragenter', 'dragover'].forEach(name => zone.addEventListener(name, event => {
+    event.preventDefault();
+    zone.classList.add('dragover');
+  }));
+  ['dragleave', 'drop'].forEach(name => zone.addEventListener(name, event => {
+    event.preventDefault();
+    zone.classList.remove('dragover');
+  }));
+  zone.addEventListener('drop', event => loadFile(event.dataTransfer?.files?.[0]).catch(error => toast(error.message, 'error')));
 }
 
 async function loadBlacklist() {
@@ -1747,10 +2702,24 @@ async function loadBlacklist() {
     createdBy: item.createdBy || item.createdByName || '企业管理员'
   }));
   $('#blacklistTableBody').innerHTML = rows.map(item => `<tr><td><strong>${escapeHtml(item.name)}</strong></td><td>${escapeHtml(item.idCardMasked)}</td><td>${badge(item.riskLevel, item.riskLevel === '高' ? 'red' : item.riskLevel === '中' ? 'amber' : 'blue')}</td><td class="reason-cell">${escapeHtml(item.reason)}${item.remark ? `<small>${escapeHtml(item.remark)}</small>` : ''}</td><td>${escapeHtml(item.source)}</td><td>${escapeHtml(item.phone || '-')}</td><td>${escapeHtml(item.createdBy)}<small>${new Date(item.createdAt).toLocaleDateString('zh-CN')}</small></td><td>${badge(item.status === 1 ? '生效中' : '已解除', item.status === 1 ? 'red' : 'green')}</td></tr>`  ).join('') || emptyRow(8, '暂无黑名单记录', '点击"录入黑名单"或"批量录入"添加风险人员');
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    renderTableFailure('#blacklistTableBody', 8, '黑名单加载失败', error, 'blacklist');
+    throw error;
   } finally { setPanelLoaded('#blacklistTableBody'); }
 }
 
 let _permRoles = [], _permProjects = [], _permTree = [], _permDepartments = [];
+registerSessionCleanupHook(() => {
+  _permRoles = [];
+  _permProjects = [];
+  _permTree = [];
+  _permDepartments = [];
+  if (duplicateIdentityCheckTimer) {
+    window.clearTimeout(duplicateIdentityCheckTimer);
+    duplicateIdentityCheckTimer = null;
+  }
+});
 
 async function loadPermissions() {
   setPanelLoading('#permissionUserTableBody');
@@ -1767,29 +2736,51 @@ async function loadPermissions() {
     _permTree = permTree;
     _permDepartments = departments;
 
+    const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
+    const canManageRolePermissions = isCompanyAdmin;
+    const canManageSystemUsers = isCompanyAdmin;
+    $('#createPermissionUserButton').classList.toggle('hidden', !canManageSystemUsers);
+
     /* 渲染角色卡片 */
     $('#permissionRoleCards').innerHTML = roles.map((role, index) => {
       const permCount = role.permissions?.length || 0;
       const scopeBadge = role.dataScope === 1 ? '全公司' : (role.dataScopeName || '自定义');
       const statusBadge = role.status === 1 ? '' : badge('停用', 'amber');
-      return `<article class="role-card" data-role-id="${role.id}"><div class="role-number">0${index + 1}</div><div><span>${role.roleCode}</span><h3>${role.roleName}</h3><p>${role.permissions?.map(p => p.permName).join(' · ') || '无权限'}</p><div><strong>${role.userCount}个账号</strong>${badge(scopeBadge, role.dataScope === 1 ? 'green' : 'blue')}${statusBadge}</div></div></article>`;
+      const permissionPreview = (role.permissions || []).slice(0, 3).map(p => p.permName).join(' · ');
+      const configButton = canManageRolePermissions
+        ? `<button class="secondary-button role-card-config" type="button" data-config-role="${role.id}">${role.roleCode === 'company_admin' ? '查看全部权限' : '配置权限'}</button>`
+        : '';
+      return `<article class="role-card" data-role-id="${role.id}"><div class="role-number">0${index + 1}</div><div><span>${escapeHtml(role.roleCode)}</span><h3>${escapeHtml(role.roleName)}</h3><p>${escapeHtml(permissionPreview || '暂无权限')}${permCount > 3 ? ' …' : ''}</p><div class="role-card-meta"><strong>${role.userCount}个账号 · ${permCount}项权限</strong>${badge(scopeBadge, role.dataScope === 1 ? 'green' : 'blue')}${statusBadge}</div>${configButton}</div></article>`;
     }).join('');
 
     /* 渲染用户表格 */
     $('#permissionUserTableBody').innerHTML = users.length ? users.map(user => {
       const roleBadges = (user.roles || []).map(r => badge(r.roleName, 'blue')).join(' ');
-      const projText = renderUserProjects(user.projects);
-      return `<tr><td><strong>${user.realName}</strong><small>${user.username}</small></td><td>${user.mobile || '-'}</td><td>${roleBadges}</td><td>${projText}</td><td>${badge(user.status === 1 ? '启用' : '停用', user.status === 1 ? 'green' : 'amber')}</td><td><div class="row-actions"><button class="link-button" data-edit-user="${user.id}">编辑</button><button class="link-button" data-reset-pwd="${user.id}" data-username="${user.realName}">重置密码</button>${user.status === 1 ? `<button class="link-button danger" data-toggle-user="${user.id}" data-status="0">停用</button>` : `<button class="link-button" data-toggle-user="${user.id}" data-status="1">启用</button>`}</div></td></tr>`;
+      const projText = renderUserProjects(user.projects, user.roles);
+      const canDelete = isCompanyAdmin && user.username !== 'admin' && Number(user.id) !== Number(state.user?.id) && !user.employeeId;
+      const managementActions = canManageSystemUsers
+        ? `<div class="row-actions"><button class="link-button" data-edit-user="${user.id}">编辑</button><button class="link-button" data-reset-pwd="${user.id}" data-username="${escapeHtml(user.realName)}">重置密码</button>${user.status === 1 ? `<button class="link-button danger" data-toggle-user="${user.id}" data-status="0">停用</button>` : `<button class="link-button" data-toggle-user="${user.id}" data-status="1">启用</button>`}${canDelete ? `<button class="link-button danger" data-delete-user="${user.id}" data-user-label="${escapeHtml(`${user.realName}（${user.username}）`)}">删除</button>` : ''}</div>`
+        : '<span class="muted">只读</span>';
+      return `<tr><td><strong>${escapeHtml(user.realName)}</strong><small>${escapeHtml(user.username)}</small></td><td>${user.mobile || '-'}</td><td>${roleBadges}</td><td>${projText}</td><td>${badge(user.status === 1 ? '启用' : '停用', user.status === 1 ? 'green' : 'amber')}</td><td>${managementActions}</td></tr>`;
     }).join('') : emptyRow(6, '暂无系统账号', '点击"新增账号"创建');
-
-    /* 渲染角色配置区域 */
-    $('#roleConfigArea').innerHTML = roles.map(role => `<div class="role-config-item"><div class="role-config-head"><h4>${role.roleName}</h4>${badge(role.roleCode, 'blue')}${role.status === 1 ? '' : badge('停用', 'amber')}</div><p class="muted">${role.permissions?.length || 0}项权限 · ${role.userCount}个账号</p><button class="secondary-button" data-config-role="${role.id}">配置权限</button></div>`).join('');
+  } catch (error) {
+    if (isSessionSupersededError(error)) throw error;
+    _permRoles = [];
+    _permProjects = [];
+    _permTree = [];
+    _permDepartments = [];
+    $('#permissionRoleCards').innerHTML = '';
+    renderTableFailure('#permissionUserTableBody', 6, '权限账号加载失败', error, 'permissions');
+    throw error;
   } finally { setPanelLoaded('#permissionUserTableBody'); }
 }
 
 /* 用户已授权项目按客户分组展示 */
-function renderUserProjects(projects) {
-  if (!projects || !projects.length) return '<span class="muted">全部项目</span>';
+function renderUserProjects(projects, roles = []) {
+  if (!projects || !projects.length) {
+    const hasCompanyAdminRole = roles.some(role => role.roleCode === 'company_admin');
+    return `<span class="muted">${hasCompanyAdminRole ? '全部项目' : '未分配项目'}</span>`;
+  }
   const byCustomer = {};
   for (const p of projects) {
     const customer = p.customerName || '未关联客户';
@@ -1962,90 +2953,36 @@ function runOfficeAction(action) {
     return prepareAdvanceForm().catch(error => toast(error.message));
   }
   if (action === 'employee-arrange') return switchView('projects');
-  if (action === 'employees') return switchView('roster');
+  if (action === 'interviews') return openRosterStatus(6);
+  if (action === 'pending-arrival') return openRosterStatus(1);
+  if (action === 'employees') return openRosterStatus(2);
   if (action === 'talents') return switchView('talents');
   if (action === 'dashboard') return switchView('dashboard');
   if (action === 'projects') return switchView('projects');
-  if (action === 'risk') return switchView('risk');
   if (action === 'advances') return switchView('advances');
   if (action === 'payroll') return switchView('payroll');
   if (action === 'blacklist') return switchView('blacklist');
-  if (action === 'offboarding') {
-    switchView('roster');
-    toast('请选择员工后办理离职');
-    return;
-  }
-  if (action === 'employment-records') {
-    switchView('roster');
-    toast('员工详情中可查看完整用工记录');
-    return;
-  }
-  if (action === 'feedback') {
-    switchView('roster');
-    toast('员工反馈已进入待办中心');
-    return;
-  }
+  if (action === 'recruitment-sources') return switchView('recruitmentSources');
   if (action === 'payroll-create') {
     return loadProjects().then(() => {
       $('#payrollProjectSelect').innerHTML = optionHtml(state.projects, 'id', 'projectName');
       const form = $('#payrollBatchForm');
       form.reset();
-      $('#payrollBatchResult').classList.add('hidden');
+      resetPayrollImport();
+      hidePayrollTemplateSaveForm();
       $('#payrollBatchModal').showModal();
+      const projectId = Number($('#payrollProjectSelect').value);
+      if (projectId > 0) return loadPayrollTemplates(projectId);
     }).catch(error => toast(error.message, 'error'));
   }
 }
 
 async function refreshAll() {
-  const permissions = state.user?.permissions || [];
-  const isCompanyAdmin = (state.user?.roles || []).some(role => role.roleCode === 'company_admin');
-  const tasks = [loadSummary(), loadEmployees()];
-  if (isCompanyAdmin || permissions.includes('risk:view')) tasks.push(loadRisks());
-  await Promise.all(tasks);
+  await Promise.all([loadSummary(), loadEmployees()]);
 }
 
 async function refreshEmployeeWorkspace() {
   await Promise.all([refreshAll(), loadOffice()]);
-}
-
-function bindMetricRiskNavigation() {
-  const unresolvedMetric = $('#unresolvedRiskTotal').closest('.metric-cell');
-  const unsignedMetric = $('#unsignedTotal').closest('.metric-cell');
-  const openRiskCenter = preset => {
-    if (!canRunOfficeAction('risk')) {
-      toast('当前账号没有查看用工风险的权限', 'error');
-      return;
-    }
-    state.selectedRiskProjectId = null;
-    $('#riskKeywordInput').value = '';
-    switchView('risk');
-    window.setTimeout(() => applyRiskPreset(preset), 0);
-  };
-  unresolvedMetric.addEventListener('click', () => openRiskCenter('open'));
-  unsignedMetric.addEventListener('click', () => openRiskCenter('contract'));
-  for (const metric of [unresolvedMetric, unsignedMetric]) {
-    metric.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      metric.click();
-    });
-  }
-}
-
-function configureMetricRiskAccess() {
-  const allowed = canRunOfficeAction('risk');
-  const metrics = [$('#unresolvedRiskTotal')?.closest('.metric-cell'), $('#unsignedTotal')?.closest('.metric-cell')].filter(Boolean);
-  for (const metric of metrics) {
-    metric.classList.toggle('metric-action', allowed);
-    metric.setAttribute('aria-disabled', allowed ? 'false' : 'true');
-    if (allowed) {
-      metric.setAttribute('role', 'button');
-      metric.setAttribute('tabindex', '0');
-    } else {
-      metric.removeAttribute('role');
-      metric.removeAttribute('tabindex');
-    }
-  }
 }
 
 function bindEvents() {
@@ -2058,6 +2995,9 @@ function bindEvents() {
   });
   $('#exportLink').addEventListener('click', event => exportEmployees(event).catch(error => toast(error.message)));
   $('#exportXlsxLink').addEventListener('click', event => exportEmployees(event, 'xlsx').catch(error => toast(error.message)));
+  $('#copyEmployeeBindCodeButton').addEventListener('click', () => {
+    copyEmployeeBindCode().catch(error => toast(error.message || '复制失败', 'error'));
+  });
 
   $('#filterForm').addEventListener('submit', event => {
     event.preventDefault();
@@ -2087,6 +3027,10 @@ function bindEvents() {
     console.error('Unhandled rejection:', event.reason);
     if (event.reason?.message) toast(event.reason.message, 'error');
   });
+  window.addEventListener('error', event => {
+    console.error('Unhandled window error:', event.error || event.message);
+    toast(event.error?.message || event.message || '页面操作出现异常，请刷新后重试', 'error');
+  });
 
   $('#createEmployeeButton').addEventListener('click', () => {
     openEmployeeModal().catch(error => toast(error.message));
@@ -2106,26 +3050,16 @@ function bindEvents() {
   });
   $('#employeeTemplateButton').addEventListener('click', () => downloadCsvTemplate(
     '员工批量录入模板.csv',
-    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态'],
-    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000', '待入职']
+    EmployeeBatch.headers,
+    EmployeeBatch.example
   ));
   $('#employeeXlsxTemplateButton').addEventListener('click', () => downloadXlsxTemplate(
     '员工批量录入模板.xlsx',
-    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态'],
-    ['张三', '男', '大专', '410xxxxxxxxxxxxxxx', '13800138000', '某制造公司', '一厂项目', '装配工', '计时', '2026-07-30', '派遣', '', '内部推荐', '', '工商银行常州分行', '6212xxxxxxxxxxxx', '李四', '13900139000', '待入职']
-  ));
+    EmployeeBatch.headers,
+    EmployeeBatch.example
+  ).catch(error => toast(error.message || '模板下载失败', 'error')));
   bindBatchFileZone('employeeFileZone', 'employeeFileInput', 'batchEmployeeForm', 'employeeFileName',
-    ['姓名', '性别', '学历', '身份证号码', '地址', '电话', '工作单位', '所属项目', '岗位', '工资类型', '入职日期', '用工模式', '费用模式', '招聘渠道', '备注', '开户行', '银行卡号', '紧急联系人', '紧急电话', '录入状态']);
-  bindMetricRiskNavigation();
-  $('#scanRiskButton').addEventListener('click', () => scanRisks().catch(error => toast(error.message)));
-  $('#riskCenterScanButton').addEventListener('click', () => scanRisks().catch(error => toast(error.message)));
-  $('#riskRefreshButton').addEventListener('click', () => loadRiskCenter().catch(error => toast(error.message)));
-  $('#riskComplianceFilter').addEventListener('change', renderRiskCenter);
-  $('#riskKeywordInput').addEventListener('input', debounce(() => {
-    state.selectedRiskProjectId = null;
-    renderRiskCenter();
-  }, 250));
-  $('#riskCaseForm').elements.status.addEventListener('change', updateRiskStatusHelp);
+    EmployeeBatch.headers);
   $('#auditRefreshButton').addEventListener('click', () => loadAuditLogs().catch(error => toast(error.message)));
   $('#createClientButton').addEventListener('click', () => {
     $('#clientForm').reset();
@@ -2135,6 +3069,15 @@ function bindEvents() {
     $('#customerProjectsEditor').insertAdjacentHTML('beforeend', customerProjectEditorHtml());
   });
   $('#createTalentButton').addEventListener('click', () => $('#talentModal').showModal());
+  $('#talentSearchButton')?.addEventListener('click', submitTalentSearch);
+  $('#talentSearchInput')?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') submitTalentSearch();
+  });
+  $('#talentSearchClear')?.addEventListener('click', () => {
+    const input = $('#talentSearchInput');
+    if (input) input.value = '';
+    submitTalentSearch();
+  });
   $('#createAdvanceButton').addEventListener('click', () => prepareAdvanceForm().catch(error => toast(error.message)));
   $('#advanceEmployeeSelect').addEventListener('change', syncAdvanceCustomerFromEmployee);
   $('#advanceCustomerSelect').addEventListener('change', populateAdvanceProjectOptions);
@@ -2165,12 +3108,18 @@ function bindEvents() {
     '公司黑名单批量录入模板.xlsx',
     ['姓名', '身份证号', '黑名单原因', '风险等级', '联系电话', '来源项目/单位'],
     ['张三', '410xxxxxxxxxxxxxxx', '严重旷工或恶意离职', '高', '13800138000', '某用工项目']
+  ).catch(error => toast(error.message || '模板下载失败', 'error')));
+  $('#payrollCsvExampleButton').addEventListener('click', () => downloadCsvTemplate(
+    '工资导入示例格式.csv',
+    ['员工姓名', '联系电话', '底薪', '夜班奖', '住宿扣款', '实发工资', '班组'],
+    ['张三', '13800138000', '4500', '380', '150', '4730', 'A组']
   ));
-  $('#payrollTemplateButton').addEventListener('click', () => downloadCsvTemplate(
-    '工资批次模板.csv',
-    ['工号', '基本工资', '岗位工资', '绩效工资', '补贴', '计件工资', '1.5倍加班费', '2倍加班费', '3倍加班费', '社保扣款', '个税扣款', '预支扣回', '其他扣款'],
-    ['YG001', '3000', '500', '300', '200', '0', '150', '0', '0', '350', '50', '500', '0']
-  ));
+  $('#payrollXlsxExampleButton').addEventListener('click', () => downloadXlsxTemplate(
+    '工资导入示例格式.xlsx',
+    ['员工姓名', '联系电话', '底薪', '夜班奖', '住宿扣款', '实发工资', '班组'],
+    ['张三', '13800138000', '4500', '380', '150', '4730', 'A组']
+  ).catch(error => toast(error.message || '示例下载失败', 'error')));
+  bindPayrollFileZone();
   bindBatchFileZone('blacklistFileZone', 'blacklistFileInput', 'batchBlacklistForm', 'blacklistFileName',
     ['姓名', '身份证号', '黑名单原因', '风险等级', '联系电话', '来源项目/单位']);
   $('#createPermissionUserButton').addEventListener('click', () => openPermissionUserModal(null).catch(error => toast(error.message)));
@@ -2191,7 +3140,7 @@ function bindEvents() {
     api(url, { method, body: JSON.stringify(body) }).then(() => {
       toast(userId ? '账号已更新' : '账号创建成功', 'success');
       $('#permissionUserModal').close();
-      loadPermissions().catch(() => {});
+      return refreshAfterSuccess(loadPermissions(), '账号列表');
     }).catch(error => toast(error.message, 'error'));
   });
   $('#resetPasswordForm').addEventListener('submit', event => {
@@ -2223,7 +3172,7 @@ function bindEvents() {
       .then(() => {
         toast('角色权限已保存，相关账号重新登录后生效', 'success');
         $('#rolePermissionModal').close();
-        loadPermissions().catch(() => {});
+        return refreshAfterSuccess(loadPermissions(), '权限列表');
       })
       .catch(error => toast(error.message, 'error'));
   });
@@ -2248,16 +3197,22 @@ function bindEvents() {
     loadBlacklist().catch(error => toast(error.message));
   });
   $('#employeeForm').addEventListener('submit', event => saveEmployee(event).catch(error => toast(error.message)));
+  $('#employeeForm')?.elements.idCardNo?.addEventListener('input', event => scheduleWebExistingEmployeeCheck(event.currentTarget.form));
+  $('#mobileEmployeeForm')?.elements.idCardNo?.addEventListener('input', event => scheduleWebExistingEmployeeCheck(event.currentTarget.form));
+  if ($('#advanceMonthFilter') && !$('#advanceMonthFilter').value) {
+    $('#advanceMonthFilter').value = localDateTimeInputValue().slice(0, 7);
+  }
+  $('#advanceMonthFilter')?.addEventListener('change', () => loadAdvances().catch(error => toast(error.message)));
+  $('#advanceAllMonthsButton')?.addEventListener('click', () => {
+    $('#advanceMonthFilter').value = '';
+    loadAdvances().catch(error => toast(error.message));
+  });
   $('#batchEmployeeForm').addEventListener('submit', event => submitEmployeeBatch(event).catch(error => toast(error.message)));
   $('#transferForm').addEventListener('submit', event => submitTransfer(event).catch(error => toast(error.message)));
   $('#transferCustomerSelect').addEventListener('change', updateTransferProjectOptions);
   $('#resignForm').addEventListener('submit', event => submitResign(event).catch(error => toast(error.message)));
-  $('#contractForm').addEventListener('submit', event => submitContract(event).catch(error => toast(error.message)));
-  $('#complianceForm').addEventListener('submit', event => submitOnboardingCompliance(event).catch(error => toast(error.message)));
-  $('#socialForm').addEventListener('submit', event => submitSocial(event).catch(error => toast(error.message)));
   $('#certificateForm').addEventListener('submit', event => submitCertificate(event).catch(error => toast(error.message)));
   $('#passwordForm').addEventListener('submit', event => changePassword(event).catch(error => toast(error.message)));
-  $('#riskCaseForm').addEventListener('submit', event => saveRiskCase(event).catch(error => toast(error.message)));
   $('#clientForm').addEventListener('submit', event => {
     event.preventDefault();
     submitSimpleForm(event.currentTarget, '/api/clients', '客户及首个项目已创建并立即生效', 'clientModal', () => Promise.all([loadProjects(), loadOffice()])).catch(error => toast(error.message));
@@ -2296,61 +3251,132 @@ function bindEvents() {
     submitSimpleForm(event.currentTarget, '/api/blacklist', '黑名单已录入并全公司共享', 'blacklistModal', loadBlacklist).catch(error => toast(error.message));
   });
   $('#batchBlacklistForm').addEventListener('submit', event => submitBlacklistBatch(event).catch(error => toast(error.message)));
-  $('#payrollBatchForm').addEventListener('submit', event => submitPayrollBatch(event).catch(error => toast(error.message, 'error')));
-  $('#recruiterForm').addEventListener('submit', event => { event.preventDefault(); saveRecruitmentSource(event.currentTarget, 'recruiter').catch(error => toast(error.message, 'error')); });
-  $('#supplierForm').addEventListener('submit', event => { event.preventDefault(); saveRecruitmentSource(event.currentTarget, 'supplier').catch(error => toast(error.message, 'error')); });
-  $('#channelForm').addEventListener('submit', event => { event.preventDefault(); saveRecruitmentSource(event.currentTarget, 'channel').catch(error => toast(error.message, 'error')); });
-  $('#createRecruiterButton').addEventListener('click', () => openRecruiterModal());
-  $('#createSupplierButton').addEventListener('click', () => openSupplierModal());
+  $('#payrollBatchForm').addEventListener('submit', event => previewPayrollImport(event).catch(error => toast(error.message, 'error')));
+  $('#payrollBatchEmployeeSearchForm').addEventListener('submit', event => {
+    event.preventDefault();
+    state.payrollDetailKeyword = $('#payrollBatchEmployeeSearch').value.trim();
+    renderPayrollBatchEmployeeRows();
+  });
+  $('#payrollSaveViewPolicy')?.addEventListener('click', () => savePayrollViewPolicy().catch(error => toast(error.message, 'error')));
+  $('#payrollRecordStatusFilter')?.addEventListener('change', event => {
+    state.payrollRecordFilter = event.currentTarget.value || 'all';
+    renderPayrollRecords();
+  });
+  $('#payrollRecordMonthFilter')?.addEventListener('change', event => {
+    state.payrollRecordMonth = event.currentTarget.value || '';
+    renderPayrollRecords();
+  });
+  $('#payrollRecordReset')?.addEventListener('click', () => {
+    state.payrollRecordFilter = 'all';
+    state.payrollRecordMonth = '';
+    $('#payrollRecordStatusFilter').value = 'all';
+    $('#payrollRecordMonthFilter').value = '';
+    renderPayrollRecords();
+  });
+  $('#payrollBatchEmployeeSearchReset').addEventListener('click', () => {
+    $('#payrollBatchEmployeeSearch').value = '';
+    state.payrollDetailKeyword = '';
+    renderPayrollBatchEmployeeRows();
+  });
+  $('#payrollConfirmButton').addEventListener('click', () => confirmPayrollBatchImport().catch(error => toast(error.message, 'error')));
+  $('#payrollProjectSelect').addEventListener('change', () => {
+    state.payrollImport.preview = null;
+    $('#payrollImportPreview').classList.add('hidden');
+    $('#payrollConfirmButton').disabled = true;
+    state.payrollImport.activeTemplateId = 0;
+    loadPayrollTemplates(Number($('#payrollProjectSelect').value)).catch(error => toast(error.message, 'error'));
+    if (state.payrollImport.sourceRows.length) {
+      const parsed = {
+        sourceRows: state.payrollImport.sourceRows,
+        headers: state.payrollImport.headers,
+        headerRowIndex: state.payrollImport.header?.index,
+        headerRowCount: state.payrollImport.header?.rowCount,
+        columnMapping: state.payrollImport.suggestedMapping,
+        suggestedMapping: state.payrollImport.suggestedMapping
+      };
+      preparePayrollMapping(parsed, Number($('#payrollProjectSelect').value))
+        .catch(error => toast(error.message, 'error'));
+    }
+  });
+  $('#payrollMappingRows').addEventListener('change', event => {
+    const select = event.target.closest('[data-payroll-mapping-choice]');
+    if (!select) return;
+    const index = Number(select.dataset.payrollMappingChoice);
+    const mapping = state.payrollImport.mapping.map((item, itemIndex) => (
+      itemIndex === index ? PayrollColumnMapping.applyMappingChoice(item, select.value) : item
+    ));
+    try {
+      reparsePayrollImport(mapping);
+    } catch (_error) {
+      // 映射未补全时保留当前选择，由面板直接提示缺失项。
+    }
+  });
+  $('#payrollTemplateSelect').addEventListener('change', event => {
+    applyPayrollTemplate(event.target.value);
+  });
+  $('#payrollSaveTemplateButton').addEventListener('click', showPayrollTemplateSaveForm);
+  $('#payrollSaveTemplateConfirm').addEventListener('click', () => savePayrollTemplate().catch(error => toast(error.message, 'error')));
+  $('#payrollSaveTemplateCancel').addEventListener('click', hidePayrollTemplateSaveForm);
+  $('#payrollBatchForm').elements.tableData.addEventListener('input', () => {
+    state.payrollImport.parsedRows = [];
+    state.payrollImport.preview = null;
+    state.payrollImport.fileName = '';
+    state.payrollImport.sheetName = '';
+    state.payrollImport.sourceRows = [];
+    state.payrollImport.headers = [];
+    state.payrollImport.header = null;
+    state.payrollImport.headerSignature = '';
+    state.payrollImport.suggestedMapping = [];
+    state.payrollImport.mapping = [];
+    state.payrollImport.mappingRequired = false;
+    $('#payrollFileName').textContent = '';
+    $('#payrollMappingPanel').classList.add('hidden');
+    $('#payrollImportPreview').classList.add('hidden');
+    $('#payrollConfirmButton').disabled = true;
+  });
+  $('#payrollDisputeStatusFilter').addEventListener('change', () => loadPayrollDisputes().catch(error => toast(error.message, 'error')));
+  $('#channelForm').addEventListener('submit', event => { event.preventDefault(); saveRecruitmentSource(event.currentTarget).catch(error => toast(error.message, 'error')); });
   $('#createChannelButton').addEventListener('click', () => openChannelModal());
   $$('[data-roster-mode]').forEach(button => button.addEventListener('click', () => {
     state.rosterViewMode = button.dataset.rosterMode;
     $$('[data-roster-mode]').forEach(item => item.classList.toggle('active', item === button));
     renderEmployees();
   }));
-  $('#refreshTasksButton').addEventListener('click', () => loadWorkTasks().catch(error => toast(error.message, 'error')));
-  $('#taskStatusFilter').addEventListener('change', () => loadWorkTasks().catch(error => toast(error.message, 'error')));
-  $('#taskRiskFilter').addEventListener('change', () => loadWorkTasks().catch(error => toast(error.message, 'error')));
-
-  $$('.nav-item').forEach(button => {
+  $('#primaryNavigation')?.addEventListener('click', event => {
+    const button = event.target.closest('[data-view]');
+    if (button) switchView(button.dataset.view);
+  });
+  $$('.mobile-tabbar button[data-view]').forEach(button => {
     button.addEventListener('click', () => switchView(button.dataset.view));
   });
-  $$('.mobile-tabbar button').forEach(button => {
-    button.addEventListener('click', () => switchView(button.dataset.view));
+  $('[data-mobile-nav-more]')?.addEventListener('click', () => {
+    renderMobileNavigation();
+    updateMobileNavigationActive();
+    $('#mobileNavigationDialog').showModal();
   });
 
-  document.addEventListener('click', event => {
+  document.addEventListener('click', async event => {
+    const retryView = event.target.closest('[data-retry-view]');
+    if (retryView) {
+      switchView(retryView.dataset.retryView);
+      return;
+    }
+
     const closeButton = event.target.closest('[data-close-modal]');
     if (closeButton) {
+      if (closeButton.dataset.closeModal === 'payrollSignatureModal' && state.payrollSignatureObjectUrl) {
+        URL.revokeObjectURL(state.payrollSignatureObjectUrl);
+        state.payrollSignatureObjectUrl = '';
+        $('#payrollSignatureImage').removeAttribute('src');
+      }
       $(`#${closeButton.dataset.closeModal}`).close();
       return;
     }
 
-    const riskPreset = event.target.closest('[data-risk-preset]');
-    if (riskPreset && !riskPreset.classList.contains('metric-cell')) {
-      applyRiskPreset(riskPreset.dataset.riskPreset || '');
-      return;
-    }
-
-    const riskDetail = event.target.closest('[data-risk-detail]');
-    if (riskDetail && !event.target.closest('button')) {
-      state.selectedRiskId = Number(riskDetail.dataset.riskDetail);
-      renderRiskCenter();
-      return;
-    }
-
-    const riskEmployee = event.target.closest('[data-risk-employee]');
-    if (riskEmployee) {
-      switchView('roster');
-      selectEmployee(Number(riskEmployee.dataset.riskEmployee)).catch(error => toast(error.message, 'error'));
-      return;
-    }
-
-    const riskJump = event.target.closest('[data-risk-jump]');
-    if (riskJump) {
-      const risk = state.risks.find(item => Number(item.id) === Number(riskJump.dataset.riskJump));
-      state.selectedRiskId = Number(risk?.employeeId || riskJump.dataset.riskJump);
-      switchView('risk');
+    const mobileNavigationItem = event.target.closest('[data-mobile-nav-view]');
+    if (mobileNavigationItem) {
+      $('#mobileNavigationDialog').close();
+      switchView(mobileNavigationItem.dataset.mobileNavView);
       return;
     }
 
@@ -2373,10 +3399,16 @@ function bindEvents() {
       return;
     }
 
-    const editRecruiter = event.target.closest('[data-edit-recruiter]');
-    if (editRecruiter) { openRecruiterModal(Number(editRecruiter.dataset.editRecruiter)); return; }
-    const editSupplier = event.target.closest('[data-edit-supplier]');
-    if (editSupplier) { openSupplierModal(Number(editSupplier.dataset.editSupplier)); return; }
+    const lifecycleStep = event.target.closest('[data-lifecycle-status]');
+    if (lifecycleStep) {
+      if (!canRunOfficeAction('employees')) {
+        toast('当前账号没有查看员工名单的权限', 'error');
+        return;
+      }
+      openRosterStatus(Number(lifecycleStep.dataset.lifecycleStatus));
+      return;
+    }
+
     const editChannel = event.target.closest('[data-edit-channel]');
     if (editChannel) { openChannelModal(Number(editChannel.dataset.editChannel)); return; }
     const viewChannelEmployees = event.target.closest('[data-view-channel-employees]');
@@ -2394,49 +3426,120 @@ function bindEvents() {
       loadEmployees().catch(error => toast(error.message, 'error'));
       return;
     }
-    const startTask = event.target.closest('[data-start-task]');
-    if (startTask) {
-      api(`/api/work-tasks/${startTask.dataset.startTask}/start`, { method: 'PUT', body: '{}' })
-        .then(() => loadWorkTasks()).catch(error => toast(error.message, 'error'));
-      return;
-    }
-    const completeTask = event.target.closest('[data-complete-task]');
-    if (completeTask) {
-      api(`/api/work-tasks/${completeTask.dataset.completeTask}/complete`, { method: 'PUT', body: '{}' })
-        .then(() => Promise.all([loadWorkTasks(), loadOffice()])).catch(error => toast(error.message, 'error'));
-      return;
-    }
-    const handleTransferButton = event.target.closest('[data-handle-transfer]');
-    if (handleTransferButton) {
-      const approved = Number(handleTransferButton.dataset.approved);
-      api(`/api/employee-transfers/${handleTransferButton.dataset.handleTransfer}/handle`, {
-        method: 'PUT',
-        body: JSON.stringify({ approved })
-      }).then(() => Promise.all([loadWorkTasks(), loadEmployees(), loadOffice()]))
-        .catch(error => toast(error.message, 'error'));
-      return;
-    }
-    const openOffboard = event.target.closest('[data-open-offboard]');
-    if (openOffboard) {
-      const employeeId = Number(openOffboard.dataset.openOffboard);
-      selectEmployee(employeeId)
-        .then(() => openResignModal(employeeId))
-        .catch(error => toast(error.message, 'error'));
-      return;
-    }
-
     const manageClientCard = event.target.closest('[data-manage-client]');
     if (manageClientCard) {
       openClientManagement(Number(manageClientCard.dataset.manageClient)).catch(error => toast(error.message, 'error'));
+      return;
+    }
+    const projectRoster = event.target.closest('[data-project-roster]');
+    if (projectRoster) {
+      openProjectRoster(Number(projectRoster.dataset.projectRoster));
+      return;
+    }
+    const talentOnboard = event.target.closest('[data-talent-onboard]');
+    if (talentOnboard) {
+      openTalentOnboarding(Number(talentOnboard.dataset.talentOnboard)).catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollWorkspaceTab = event.target.closest('[data-payroll-workspace-tab]');
+    if (payrollWorkspaceTab) {
+      switchPayrollWorkspace(payrollWorkspaceTab.dataset.payrollWorkspaceTab);
+      return;
+    }
+
+    const payrollRecordFilter = event.target.closest('[data-payroll-record-filter]');
+    if (payrollRecordFilter) {
+      const filter = payrollRecordFilter.dataset.payrollRecordFilter || 'all';
+      if (filter === 'disputes') {
+        switchPayrollWorkspace('disputes');
+        return;
+      }
+      state.payrollRecordFilter = ['pending', 'failed', 'unsigned', 'unread'].includes(filter) ? filter : 'all';
+      const statusSelect = $('#payrollRecordStatusFilter');
+      if (statusSelect) statusSelect.value = ['pending', 'failed', 'unsigned'].includes(filter) ? filter : 'all';
+      renderPayrollRecords();
+      switchPayrollWorkspace('records');
       return;
     }
 
     const publishPayrollButton = event.target.closest('[data-publish-payroll]');
     if (publishPayrollButton) {
       const batchId = Number(publishPayrollButton.dataset.publishPayroll);
-      if (!window.confirm('确认发布该工资批次？发布后工资条将进入待签收状态。')) return;
+      const confirmed = await confirmDialog({
+        title: '发布工资条',
+        message: '发布后，该批次工资条将进入待签收状态并对对应员工可见。',
+        confirmText: '确认发布'
+      });
+      if (!confirmed) return;
       api(`/api/payroll/batches/${batchId}/publish`, { method: 'PUT', body: '{}' })
         .then(() => { toast('工资条已发布', 'success'); return Promise.all([loadPayroll(), loadOffice()]); })
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const withdrawPayrollButton = event.target.closest('[data-withdraw-payroll]');
+    if (withdrawPayrollButton) {
+      withdrawPayrollBatch(Number(withdrawPayrollButton.dataset.withdrawPayroll))
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollBatchDetailButton = event.target.closest('[data-payroll-batch-detail]');
+    if (payrollBatchDetailButton) {
+      openPayrollBatchDetail(Number(payrollBatchDetailButton.dataset.payrollBatchDetail))
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollDetailFilterButton = event.target.closest('[data-payroll-detail-filter]');
+    if (payrollDetailFilterButton) {
+      state.payrollDetailFilter = payrollDetailFilterButton.dataset.payrollDetailFilter || 'all';
+      renderPayrollBatchEmployeeRows();
+      return;
+    }
+
+    const payrollDetailExportButton = event.target.closest('[data-payroll-detail-export]');
+    if (payrollDetailExportButton) {
+      exportPayrollBatchDetail(payrollDetailExportButton.dataset.payrollDetailExport)
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollDetailPageButton = event.target.closest('[data-payroll-detail-page]');
+    if (payrollDetailPageButton && !payrollDetailPageButton.disabled) {
+      const batchId = Number(state.payrollBatchDetail?.batch?.id || 0);
+      if (batchId) openPayrollBatchDetail(batchId, Number(payrollDetailPageButton.dataset.payrollDetailPage))
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollSmsAction = event.target.closest('[data-payroll-sms-action]');
+    if (payrollSmsAction) {
+      handlePayrollSmsAction(payrollSmsAction.dataset.payrollSmsAction)
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollSignatureButton = event.target.closest('[data-view-payroll-signature]');
+    if (payrollSignatureButton) {
+      openPayrollSignature(
+        Number(payrollSignatureButton.dataset.viewPayrollSignature),
+        payrollSignatureButton.dataset.signedName,
+        payrollSignatureButton.dataset.signedAt
+      ).catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const payrollDisputeButton = event.target.closest('[data-handle-payroll-dispute]');
+    if (payrollDisputeButton) {
+      openPayrollDispute(Number(payrollDisputeButton.dataset.handlePayrollDispute));
+      return;
+    }
+
+    const payrollDisputeAction = event.target.closest('[data-payroll-dispute-action]');
+    if (payrollDisputeAction) {
+      handlePayrollDisputeAction(payrollDisputeAction.dataset.payrollDisputeAction)
         .catch(error => toast(error.message, 'error'));
       return;
     }
@@ -2444,7 +3547,12 @@ function bindEvents() {
     const submitPayrollButton = event.target.closest('[data-submit-payroll]');
     if (submitPayrollButton) {
       const batchId = Number(submitPayrollButton.dataset.submitPayroll);
-      if (!window.confirm('确认提交复核？提交后需由具备工资复核权限的账号审核。')) return;
+      const confirmed = await confirmDialog({
+        title: '提交工资复核',
+        message: '提交后需由具备工资复核权限的账号审核，审核前不能发布。',
+        confirmText: '确认提交'
+      });
+      if (!confirmed) return;
       api(`/api/payroll/batches/${batchId}/submit`, { method: 'PUT', body: '{}' })
         .then(() => { toast('工资批次已提交复核', 'success'); return loadPayroll(); })
         .catch(error => toast(error.message, 'error'));
@@ -2460,18 +3568,6 @@ function bindEvents() {
       api(`/api/payroll/batches/${batchId}/review`, { method: 'PUT', body: JSON.stringify({ approved, remark }) })
         .then(() => { toast(approved ? '复核通过，已进入待发放' : '已退回工资批次', 'success'); return loadPayroll(); })
         .catch(error => toast(error.message, 'error'));
-      return;
-    }
-
-    const todoButton = event.target.closest('.todo-item[data-view]');
-    if (todoButton) {
-      const todoId = todoButton.dataset.todoId || '';
-      if (todoId === 'contract' || todoId === 'insurance') {
-        switchView('risk');
-        window.setTimeout(() => applyRiskPreset(todoId), 0);
-      } else {
-        switchView(todoButton.dataset.view);
-      }
       return;
     }
 
@@ -2504,8 +3600,30 @@ function bindEvents() {
       const userId = Number(toggleUserBtn.dataset.toggleUser);
       const status = Number(toggleUserBtn.dataset.status);
       api(`/api/system/users/${userId}/status`, { method: 'PUT', body: JSON.stringify({ status }) })
-        .then(() => { toast(status === 1 ? '账号已启用' : '账号已停用', 'success'); loadPermissions().catch(() => {}); })
+        .then(() => {
+          toast(status === 1 ? '账号已启用' : '账号已停用', 'success');
+          return refreshAfterSuccess(loadPermissions(), '账号状态列表');
+        })
         .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const deleteUserBtn = event.target.closest('[data-delete-user]');
+    if (deleteUserBtn) {
+      const confirmed = await confirmDialog({
+        title: '删除系统账号',
+        message: `确定删除${deleteUserBtn.dataset.userLabel || '该账号'}吗？删除后将立即退出登录并清除角色和项目权限，历史操作记录仍会保留。`,
+        confirmText: '确认删除',
+        danger: true
+      });
+      if (!confirmed) return;
+      try {
+        await api(`/api/system/users/${Number(deleteUserBtn.dataset.deleteUser)}`, { method: 'DELETE' });
+        toast('账号已删除', 'success');
+        await refreshAfterSuccess(loadPermissions(), '系统账号列表');
+      } catch (error) {
+        toast(error.message || '账号删除失败', 'error');
+      }
       return;
     }
 
@@ -2524,35 +3642,23 @@ function bindEvents() {
     }
 
     const { action, id, status } = actionButton.dataset;
-    if (action === 'detail') selectEmployee(id).catch(error => toast(error.message));
+    if (action === 'reveal-id-card') {
+      toggleRosterIdCard(actionButton).catch(error => toast(error.message, 'error'));
+      return;
+    }
+    if (action === 'detail') openEmployeeModal(Number(id), { readOnly: true }).catch(error => toast(error.message));
     if (action === 'edit') openEmployeeModal(Number(id)).catch(error => toast(error.message));
+    if (action === 'employee-bind-code') {
+      withSubmitLock(actionButton, () => openEmployeeBindCode(Number(id)), '生成中…')
+        .catch(error => toast(error.message || '绑定码生成失败', 'error'));
+    }
+    if (action === 'reactivate') reactivateExistingEmployee(Number(id)).catch(error => toast(error.message));
     if (action === 'transfer') openTransferModal(id);
     if (action === 'resign') openResignModal(id);
-    if (action === 'contract') openContractModal(id);
-    if (action === 'compliance') openComplianceModal(id);
-    if (action === 'social') openSocialModal(id, actionButton.dataset.insuranceAction);
     if (action === 'certificate') openCertificateModal(id);
-    if (action === 'handle-risk') handleRisk(id, status).catch(error => toast(error.message));
-    if (action === 'create-risk-case') openRiskCaseModal(id, 'create').catch(error => toast(error.message));
-    if (action === 'edit-risk-case' || action === 'view-risk-case') {
-      openRiskCaseModal(id, 'edit').catch(error => toast(error.message));
-    }
     if (action === 'approve-advance') approveAdvance(id).catch(error => toast(error.message));
     if (action === 'pay-advance') payAdvance(id).catch(error => toast(error.message));
     if (action === 'assign-onsite') openProjectOnsiteModal(Number(actionButton.dataset.project)).catch(error => toast(error.message, 'error'));
-    if (action === 'goto-risk') {
-      const project = state.projects.find(item => Number(item.id) === Number(actionButton.dataset.project));
-      state.selectedRiskProjectId = Number(project?.id || 0) || null;
-      $('#riskKeywordInput').value = project?.projectName || '';
-      switchView('risk');
-    }
-  });
-
-  document.addEventListener('keydown', event => {
-    const card = event.target.closest?.('[data-risk-detail]');
-    if (!card || (event.key !== 'Enter' && event.key !== ' ')) return;
-    event.preventDefault();
-    card.click();
   });
 
   /* ==================== 移动端员工管理事件 ==================== */
@@ -2572,9 +3678,30 @@ function bindEvents() {
   const mobileEmpForm = $('#mobileEmployeeForm');
   if (mobileEmpForm) mobileEmpForm.addEventListener('submit', e => submitMobileEmployee(e).catch(err => toast(err.message, 'error')));
   $('#formCustomerSelect')?.addEventListener('change', event => updateEmployeeProjectOptions(event.currentTarget.form));
+  $('#customerSelect')?.addEventListener('change', () => updateRosterProjectOptions());
   $('#mFormCustomerSelect')?.addEventListener('change', event => updateEmployeeProjectOptions(event.currentTarget.form));
   $('#employeeForm')?.elements.employeeStatus?.addEventListener('change', event => syncEmployeeFormRequirements(event.currentTarget.form));
   $('#mobileEmployeeForm')?.elements.employeeStatus?.addEventListener('change', event => syncEmployeeFormRequirements(event.currentTarget.form));
+  $('#employeeForm')?.addEventListener('input', resetWebTalentSelection);
+  $('#employeeForm')?.addEventListener('input', event => syncEmployeeEntryPresentation(event.currentTarget));
+  $('#mobileEmployeeForm')?.addEventListener('input', resetWebTalentSelection);
+  document.querySelectorAll('#employeeEntryModeSwitch [data-entry-mode]').forEach(button => {
+    button.addEventListener('click', () => {
+      const form = $('#employeeForm');
+      form.elements.employeeStatus.value = button.dataset.entryMode;
+      syncEmployeeFormRequirements(form, button.dataset.entryMode);
+    });
+  });
+  $('#onboardingBatchButton')?.addEventListener('click', () => {
+    $('#employeeModal').close();
+    $('#batchEmployeeForm').reset();
+    $('#batchEmployeeResult').classList.add('hidden');
+    $('#batchEmployeeModal').showModal();
+  });
+  $('#onboardingTalentButton')?.addEventListener('click', () => {
+    $('#employeeModal').close();
+    switchView('talents');
+  });
 
   const mobileSearch = $('#mobileEmpSearch');
   if (mobileSearch) {
@@ -2586,19 +3713,20 @@ function bindEvents() {
 }
 
 async function init() {
+  setSystemStatus('loading');
   initializeRosterTableTools();
   bindEvents();
   initBackToTop();
   localStorage.removeItem('hrRosterToken');
   localStorage.removeItem('hrRosterUser');
   try {
-    state.user = await api('/api/auth/me');
-  } catch (_error) {
+    state.user = await api('/api/auth/me', { context: '恢复登录状态' });
+  } catch (error) {
     logout(false, false);
+    setLoginError(consumeAuthMessage() || error.message || '登录状态读取失败，请重新登录');
     return;
   }
-  showApp();
-  await bootAuthedApp();
+  await activateAuthenticatedSession(state.user);
 }
 
 /* ==================== 回到顶部 ==================== */
@@ -2624,6 +3752,7 @@ async function loadMobileEmployees(keyword = '') {
     const data = await apiAllPages('/api/employees', query);
     renderMobileEmpCards(data.list);
   } catch (err) {
+    if (isSessionSupersededError(err)) return;
     listEl.innerHTML = `<div class="mobile-emp-empty">加载失败：${err.message}</div>`;
   }
 }
@@ -2635,7 +3764,7 @@ function renderMobileEmpCards(list) {
     listEl.innerHTML = '<div class="mobile-emp-empty">暂无员工数据</div>';
     return;
   }
-  const statusMap = { 1: { text: '待入职', cls: 'pending' }, 2: { text: '在职', cls: 'active' }, 3: { text: '离职', cls: 'resigned' }, 4: { text: '黑名单', cls: 'resigned' }, 5: { text: '未入职', cls: 'pending' }, 6: { text: '面试', cls: 'pending' } };
+  const statusMap = { 1: { text: '待到岗', cls: 'pending' }, 2: { text: '在职', cls: 'active' }, 3: { text: '离职', cls: 'resigned' }, 4: { text: '黑名单', cls: 'resigned' }, 5: { text: '未入职', cls: 'pending' }, 6: { text: '面试', cls: 'pending' } };
   const empTypeMap = { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' };
   const canEditEmployee = (state.user?.permissions || []).includes('employee:update');
   listEl.innerHTML = list.map(emp => {
@@ -2670,6 +3799,7 @@ async function openMobileEmployeeModal(id = null) {
   delete form.dataset.allowLegacyUnassigned;
   delete form.dataset.legacyCustomerId;
   delete form.dataset.employeeStatus;
+  delete form.dataset.talentCheckKey;
   $('#mobileEmployeeModalTitle').textContent = id ? '编辑员工' : '新增员工';
   $('#mobileEmployeeStatusField')?.classList.toggle('hidden', Boolean(id));
   if (!id && form.elements.employeeStatus) form.elements.employeeStatus.value = '6';
@@ -2761,6 +3891,15 @@ async function handleOcrScan(file) {
 
     statusEl.className = 'ocr-status success';
     statusEl.textContent = `识别成功：${result.name}（${result.gender === 1 ? '男' : '女'}）${result.nation}族，身份证号和地址已自动回填`;
+    if (result.idCardNo) {
+      const precheck = await api('/api/employees/precheck', {
+        method: 'POST',
+        body: JSON.stringify({ name: result.name || '', idCardNo: result.idCardNo })
+      });
+      if (precheck.checks?.duplicate?.passed === false) {
+        await openExistingEmployeeRecord(precheck.checks.duplicate, { mobile: true });
+      }
+    }
     statusEl.classList.remove('hidden');
   } catch (err) {
     statusEl.className = 'ocr-status error';
@@ -2811,6 +3950,7 @@ async function submitMobileEmployee(event) {
   }
   try {
     const id = state.editingMobileEmployeeId;
+    if (!id && !(await checkWebTalentCandidates(form, body))) return;
     await api(id ? `/api/employees/${id}` : '/api/employees', {
       method: id ? 'PUT' : 'POST',
       body: JSON.stringify(body)
@@ -2829,20 +3969,38 @@ async function submitMobileEmployee(event) {
 }
 
 async function bootAuthedApp() {
-  await loadBootstrap();
+  setSystemStatus('loading');
+  try {
+    await loadBootstrap();
+  } catch (error) {
+    setSystemStatus('error');
+    throw error;
+  }
   clearCache();
   const results = await Promise.allSettled([refreshAll(), loadOffice()]);
   const failures = results.filter(result => result.status === 'rejected');
-  if (failures.length === results.length) throw failures[0].reason;
+  if (failures.length === results.length) {
+    setSystemStatus('error');
+    throw failures[0].reason;
+  }
   if (failures.length) {
+    setSystemStatus('warning');
     const message = failures.map(result => result.reason?.message || '未知错误').join('；');
     toast(`部分数据加载失败：${message}`, 'error');
+  } else {
+    setSystemStatus('online');
   }
-  if (state.employees[0]) await selectEmployee(state.employees[0].id).catch(error => toast(`员工详情加载失败：${error.message}`, 'error'));
+  if (state.employees[0]) {
+    await selectEmployee(state.employees[0].id).catch(error => {
+      setSystemStatus('warning');
+      toast(`员工详情加载失败：${error.message}`, 'error');
+    });
+  }
   switchView('office');
 }
 
 init().catch(error => {
+  setSystemStatus('error');
   console.error('Init error:', error);
   toast(error.message || '系统初始化失败，请刷新页面', 'error');
 });

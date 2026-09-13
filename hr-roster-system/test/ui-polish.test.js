@@ -17,7 +17,8 @@ assert.ok(index.includes('<link rel="stylesheet" href="/ui-polish.css" />'), '�
 assert.ok(index.includes('<link rel="stylesheet" href="/layout-refine.css" />'), '首页未加载响应式布局优化样式');
 assert.ok(index.includes('<script src="/interaction-polish.js" defer></script>'), '首页未加载交互增强脚本');
 assert.ok(index.includes('id="currentViewTitle"'), '顶部栏缺少动态页面标题');
-assert.ok(index.includes('class="system-status"'), '顶部栏缺少系统在线状态');
+assert.match(index, /class="system-status auth"[^>]*id="systemStatus"[^>]*>需要登录<\/span>/,
+  '顶部栏缺少可按真实接口结果更新的系统状态');
 assert.ok(index.includes('id="officeGreeting"'), '办公中心缺少动态问候挂载点');
 assert.ok(!index.includes('下午好，企业管理员'), '办公中心仍硬编码企业管理员问候');
 assert.ok(router.includes("new CustomEvent('app:viewchange'"), '页面切换未发送视图变化事件');

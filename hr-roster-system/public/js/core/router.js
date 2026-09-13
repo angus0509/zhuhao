@@ -1,6 +1,5 @@
 // 视图注册与切换。业务函数在入口脚本加载完成后才会执行。
 const viewLoaders = {
-  risk: () => loadRiskCenter(),
   dashboard: () => loadDashboard(),
   audit: () => loadAuditLogs(),
   projects: () => loadProjects(),
@@ -10,7 +9,6 @@ const viewLoaders = {
   payroll: () => loadPayroll(),
   blacklist: () => loadBlacklist(),
   permissions: () => loadPermissions(),
-  tasks: () => loadWorkTasks(),
   recruitmentSources: () => loadRecruitmentSources()
 };
 
@@ -18,7 +16,6 @@ const viewElements = {
   office: '#officeView',
   roster: '#rosterView',
   dashboard: '#dashboardView',
-  risk: '#riskView',
   audit: '#auditView',
   projects: '#projectsView',
   talents: '#talentsView',
@@ -26,35 +23,39 @@ const viewElements = {
   payroll: '#payrollView',
   blacklist: '#blacklistView',
   permissions: '#permissionsView',
-  tasks: '#tasksView',
   recruitmentSources: '#recruitmentSourcesView'
 };
 
 function switchView(view) {
   const legacyViewMap = {
-    riskCases: 'risk',
-    insurance: 'risk',
+    riskCases: 'office',
+    insurance: 'office',
     factory: 'roster',
     factoryStaff: 'roster'
   };
   view = legacyViewMap[view] || view;
+  const navigationModel = typeof getVisibleNavigationModel === 'function'
+    ? getVisibleNavigationModel(view)
+    : [];
+  const allowedViews = navigationModel.flatMap(group => group.items.map(item => item.view));
   if (!viewElements[view]) {
-    const firstVisible = $('.nav-item:not([style*="display: none"]):not([style*="display:none"])');
-    view = firstVisible?.dataset.view || 'office';
-  }
-  const navItem = $(`.nav-item[data-view="${view}"]`);
-  if (navItem && navItem.style.display === 'none') {
-    const firstVisible = $('.nav-item:not([style*="display: none"]):not([style*="display:none"])');
-    if (firstVisible) view = firstVisible.dataset.view;
+    view = typeof getNavigationFallbackView === 'function'
+      ? getNavigationFallbackView(navigationModel)
+      : 'office';
+  } else if (allowedViews.length && !allowedViews.includes(view)) {
+    view = typeof getNavigationFallbackView === 'function'
+      ? getNavigationFallbackView(navigationModel)
+      : 'office';
   }
   state.activeView = view;
-  $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+  if (typeof renderPrimaryNavigation === 'function') renderPrimaryNavigation(view);
   $('#metricStrip').classList.toggle('hidden', view === 'dashboard' || view === 'office');
   Object.entries(viewElements).forEach(([name, selector]) => {
     const el = $(selector);
     if (el) el.classList.toggle('hidden', name !== view);
   });
-  $$('.mobile-tabbar button').forEach(item => item.classList.toggle('active', item.dataset.view === view));
+  if (typeof updateMobileNavigationActive === 'function') updateMobileNavigationActive(view);
+  else $$('.mobile-tabbar button').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   if (typeof applyTopbarActionVisibility === 'function') applyTopbarActionVisibility(view);
   const loader = viewLoaders[view];
   if (loader) loader().catch(error => toast(error.message, 'error'));

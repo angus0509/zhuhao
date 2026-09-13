@@ -54,7 +54,8 @@ const backupScript = read('scripts/backup-mysql.sh');
 assertIncludes(backupScript, 'attachments-$TIMESTAMP.tar.gz', '每日备份未覆盖合规附件');
 
 const html = read('public/index.html');
-if ((html.match(/data-attachment-input/g) || []).length < 3) throw new Error('合同、证件和整改三类业务附件入口不完整');
+if ((html.match(/data-attachment-input/g) || []).length !== 1) throw new Error('网页端只应保留证件附件入口');
+if (/contractForm|riskCaseForm/.test(html)) throw new Error('网页端仍保留已取消的合同或整改附件表单');
 const frontend = read('public/app.js');
 assertIncludes(frontend, "fetch('/api/attachments'", '前端未接入附件上传接口');
 assertIncludes(frontend, 'data-download-attachment', '员工详情未提供附件下载入口');

@@ -11,16 +11,19 @@ function fail(res, error) {
   const message = status >= 500 && error?.expose !== true
     ? '服务器内部错误，请稍后重试'
     : (error?.message || '服务器错误');
-  return res.status(status).json({
+  const payload = {
     code: status,
     message,
     data: null
-  });
+  };
+  if (error?.businessCode) payload.businessCode = error.businessCode;
+  return res.status(status).json(payload);
 }
 
-function createError(message, statusCode = 400) {
+function createError(message, statusCode = 400, businessCode = '') {
   const error = new Error(message);
   error.statusCode = statusCode;
+  if (businessCode) error.businessCode = businessCode;
   return error;
 }
 

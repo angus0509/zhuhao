@@ -58,6 +58,9 @@ async function requireAuth(req, _res, next) {
 function requirePermission(permissionCode) {
   return (req, _res, next) => {
     if (!req.user) return next(createError('未登录或登录已过期', 401));
+    if (req.user.accountType === 'EMPLOYEE') {
+      return next(createError('员工账号不能访问管理功能', 403));
+    }
     if (!req.user.permissions.includes(permissionCode)) {
       return next(createError('无操作权限', 403));
     }
@@ -69,6 +72,9 @@ function requireAnyPermission(permissionCodes) {
   const required = Array.isArray(permissionCodes) ? permissionCodes : [];
   return (req, _res, next) => {
     if (!req.user) return next(createError('未登录或登录已过期', 401));
+    if (req.user.accountType === 'EMPLOYEE') {
+      return next(createError('员工账号不能访问管理功能', 403));
+    }
     if (!required.some(code => req.user.permissions.includes(code))) {
       return next(createError('无操作权限', 403));
     }
@@ -80,6 +86,9 @@ function requireAllPermissions(permissionCodes) {
   const required = Array.isArray(permissionCodes) ? permissionCodes : [];
   return (req, _res, next) => {
     if (!req.user) return next(createError('未登录或登录已过期', 401));
+    if (req.user.accountType === 'EMPLOYEE') {
+      return next(createError('员工账号不能访问管理功能', 403));
+    }
     if (!required.every(code => req.user.permissions.includes(code))) {
       return next(createError('缺少办理合同或雇主险的权限', 403));
     }
@@ -87,11 +96,37 @@ function requireAllPermissions(permissionCodes) {
   };
 }
 
+function requireEmployeeAccount(req, _res, next) {
+  if (!req.user) return next(createError('未登录或登录已过期', 401));
+  if (req.user.accountType !== 'EMPLOYEE' || !Number(req.user.employeeId)) {
+    return next(createError('仅员工本人可以访问', 403));
+  }
+  next();
+}
+
+function requireManagerAccount(req, _res, next) {
+  if (!req.user) return next(createError('未登录或登录已过期', 401));
+  if (req.user.accountType !== 'MANAGER') {
+    return next(createError('员工账号不能访问管理功能', 403));
+  }
+  next();
+}
+
+function requireCompanyAdmin(req, _res, next) {
+  if (!req.user) return next(createError('未登录或登录已过期', 401));
+  const isCompanyAdmin = (req.user.roles || []).some(role => role.roleCode === 'company_admin');
+  if (!isCompanyAdmin) return next(createError('只有企业管理员可以执行此操作', 403));
+  next();
+}
+
 module.exports = {
   requireAuth,
   requirePermission,
   requireAnyPermission,
   requireAllPermissions,
+  requireCompanyAdmin,
+  requireManagerAccount,
+  requireEmployeeAccount,
   readCookie,
   assertCookieRequestOrigin
 };

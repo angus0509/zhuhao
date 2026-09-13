@@ -1,0 +1,319 @@
+/* 优企云 Web 最终设计系统：科技工业、高密度、统一字体与组件节奏。 */
+:root {
+  --ui-font-body: "Source Han Sans CN", "Noto Sans CJK SC", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --ui-font-display: "HarmonyOS Sans SC", "Source Han Sans CN", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+  --ui-font-number: "DIN Alternate", "HarmonyOS Sans SC", "Source Han Sans CN", sans-serif;
+
+  --ui-text-xs: 11px;
+  --ui-text-sm: 12px;
+  --ui-text-md: 14px;
+  --ui-text-lg: 16px;
+  --ui-title-section: 18px;
+  --ui-title-module: 22px;
+  --ui-title-page: clamp(26px, 2.1vw, 32px);
+
+  --ui-weight-regular: 400;
+  --ui-weight-medium: 500;
+  --ui-weight-semibold: 600;
+  --ui-weight-bold: 700;
+
+  --ui-line-compact: 1.28;
+  --ui-line-body: 1.58;
+  --ui-control-height: 40px;
+  --ui-control-height-sm: 34px;
+  --ui-radius-control: 8px;
+  --ui-radius-panel: 14px;
+  --ui-radius-card: 11px;
+
+  --ui-ink-strong: #102f49;
+  --ui-ink: #27465d;
+  --ui-ink-soft: #62798b;
+  --ui-line: #d8e4eb;
+  --ui-line-strong: #c7d7e1;
+  --ui-surface: #ffffff;
+  --ui-surface-soft: #f5f8fa;
+  --ui-surface-muted: #edf3f6;
+  --ui-accent: #0b8495;
+  --ui-accent-strong: #086b7d;
+  --ui-accent-soft: #e8f6f7;
+  --ui-danger: #b3443b;
+  --ui-warning: #a66b18;
+  --ui-success: #287457;
+  --ui-shadow-panel: 0 12px 30px rgba(17, 50, 75, .075);
+  --ui-shadow-float: 0 28px 80px rgba(4, 23, 39, .28);
+}
+
+html, body, button, input, select, textarea {
+  font-family: var(--ui-font-body) !important;
+  font-variant-numeric: tabular-nums;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  color: var(--ui-ink);
+  font-size: var(--ui-text-md);
+  line-height: var(--ui-line-body);
+}
+
+button, input, select, textarea { font-size: var(--ui-text-md); }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+
+/* 标题系统 */
+.topbar h1,
+.office-welcome h2,
+.module-hero h2,
+.dashboard-masthead h2 {
+  margin-top: 0;
+  color: var(--ui-ink-strong) !important;
+  font-family: var(--ui-font-display) !important;
+  font-size: var(--ui-title-page) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  line-height: 1.16 !important;
+  letter-spacing: -.025em !important;
+}
+
+.panel-head h2,
+.panel-head h3,
+.section-title h3,
+.rail-head h3,
+.pulse-heading-main h3,
+.payroll-record-toolbar h3,
+.permission-tree-head h3 {
+  color: var(--ui-ink-strong) !important;
+  font-family: var(--ui-font-display) !important;
+  font-size: var(--ui-title-section) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  line-height: var(--ui-line-compact) !important;
+  letter-spacing: -.012em !important;
+}
+
+.modal-head h2,
+.onboarding-head h2,
+.role-card h3,
+.entity-card h4,
+.chart-head h3 {
+  color: var(--ui-ink-strong) !important;
+  font-family: var(--ui-font-display) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  line-height: var(--ui-line-compact) !important;
+  letter-spacing: -.01em !important;
+}
+.modal-head h2, .onboarding-head h2 { font-size: var(--ui-title-module) !important; }
+.role-card h3, .entity-card h4, .chart-head h3 { font-size: var(--ui-text-lg) !important; }
+
+.eyebrow,
+.section-title span,
+.rail-head span,
+.page-kicker,
+.pulse-code {
+  color: var(--ui-accent) !important;
+  font-family: var(--ui-font-display) !important;
+  font-size: var(--ui-text-xs) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  line-height: 1.2;
+  letter-spacing: .11em !important;
+}
+
+p, small, .muted, .form-tip, .field-tip { line-height: var(--ui-line-body); }
+.muted, .form-tip, .field-tip, .panel-head p, .entity-card p { color: var(--ui-ink-soft) !important; }
+
+/* 数字强调：只强调数据，不混用正文造型字体 */
+.metric-cell strong,
+.office-statline strong,
+.dashboard-kpi strong,
+.mini-kpi strong,
+.customer-roster-card > strong,
+.payroll-overview-tasks strong,
+.payroll-record-metrics strong,
+.role-number,
+.pulse-mark,
+.pulse-card > strong,
+.pulse-card b,
+.pulse-card .pulse-stat strong,
+.pulse-hero strong,
+.pulse-row b {
+  font-family: var(--ui-font-number) !important;
+  font-weight: 700 !important;
+  letter-spacing: -.02em !important;
+}
+
+/* 表单控件 */
+input, select, textarea {
+  min-height: var(--ui-control-height);
+  padding: 9px 11px;
+  color: var(--ui-ink-strong);
+  border: 1px solid var(--ui-line-strong) !important;
+  border-radius: var(--ui-radius-control) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: inset 0 1px 2px rgba(13, 45, 67, .025);
+  font-weight: var(--ui-weight-regular);
+  line-height: 1.35;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+textarea { min-height: 88px; resize: vertical; }
+input::placeholder, textarea::placeholder { color: #97a8b5; font-weight: var(--ui-weight-regular); }
+input:hover, select:hover, textarea:hover { border-color: #aabfcd !important; }
+input:focus, select:focus, textarea:focus {
+  outline: none !important;
+  border-color: var(--ui-accent) !important;
+  box-shadow: 0 0 0 3px rgba(11, 132, 149, .12) !important;
+}
+label > span, .field > text { color: var(--ui-ink); font-size: var(--ui-text-sm); font-weight: var(--ui-weight-semibold); }
+
+/* 按钮系统 */
+.primary-button,
+.secondary-button,
+.danger-button,
+.table-button,
+.export-link,
+.quick-btn {
+  min-height: var(--ui-control-height-sm) !important;
+  padding: 7px 13px !important;
+  border-radius: var(--ui-radius-control) !important;
+  font-family: var(--ui-font-body) !important;
+  font-size: var(--ui-text-sm) !important;
+  font-weight: var(--ui-weight-semibold) !important;
+  line-height: 1.25 !important;
+  letter-spacing: 0 !important;
+  box-shadow: none;
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+.primary-button {
+  color: #fff !important;
+  border-color: var(--ui-accent) !important;
+  background: linear-gradient(135deg, var(--ui-accent-strong), #119cad) !important;
+  box-shadow: 0 7px 16px rgba(11, 132, 149, .16) !important;
+}
+.secondary-button, .table-button, .export-link, .quick-btn {
+  color: var(--ui-ink) !important;
+  border-color: var(--ui-line-strong) !important;
+  background: var(--ui-surface) !important;
+}
+.danger-button { color: #fff !important; border-color: var(--ui-danger) !important; background: var(--ui-danger) !important; }
+.primary-button:hover, .secondary-button:hover, .danger-button:hover, .table-button:hover, .export-link:hover, .quick-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 17px rgba(17, 50, 75, .11) !important;
+}
+button:disabled, .primary-button:disabled, .secondary-button:disabled { opacity: .52; transform: none; box-shadow: none !important; cursor: not-allowed; }
+
+/* 面板和卡片 */
+.business-panel,
+.detail-panel,
+.rail-panel,
+.chart-panel,
+.entity-card,
+.role-card,
+.office-section,
+.payroll-workbench-panel,
+.payroll-record-month,
+.permission-card {
+  color: var(--ui-ink);
+  border-color: var(--ui-line) !important;
+  border-radius: var(--ui-radius-panel) !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow-panel) !important;
+}
+.panel-head, .section-title, .rail-head, .modal-head { border-color: var(--ui-line) !important; }
+.panel-head p, .section-title > strong, .rail-head p { font-size: var(--ui-text-sm) !important; font-weight: var(--ui-weight-regular); }
+
+/* 表格 */
+.table-wrap { border-color: var(--ui-line) !important; border-radius: var(--ui-radius-card) !important; }
+.data-table { color: var(--ui-ink); font-size: var(--ui-text-sm) !important; line-height: 1.45; }
+.data-table th {
+  height: 42px;
+  padding: 9px 11px !important;
+  color: #50697b !important;
+  border-color: var(--ui-line) !important;
+  background: var(--ui-surface-muted) !important;
+  font-size: var(--ui-text-xs) !important;
+  font-weight: var(--ui-weight-bold) !important;
+  letter-spacing: .035em !important;
+  white-space: nowrap;
+}
+.data-table td {
+  min-height: 46px;
+  padding: 10px 11px !important;
+  color: var(--ui-ink) !important;
+  border-color: #e5ecef !important;
+  font-size: var(--ui-text-sm) !important;
+  font-weight: var(--ui-weight-regular);
+  vertical-align: middle;
+}
+.data-table td strong { color: var(--ui-ink-strong); font-weight: var(--ui-weight-semibold); }
+.data-table td small { color: var(--ui-ink-soft); font-size: var(--ui-text-xs); }
+.data-table tbody tr:hover, .data-table tbody tr.selected { background: var(--ui-accent-soft) !important; }
+
+/* 标签、状态和分段控件 */
+.badge,
+.status-pill,
+.field-optional,
+.entity-meta span,
+.segmented-control button,
+.payroll-workspace-tabs button {
+  font-family: var(--ui-font-body) !important;
+  font-size: var(--ui-text-xs) !important;
+  font-weight: var(--ui-weight-semibold) !important;
+  letter-spacing: 0 !important;
+}
+.badge, .status-pill { padding: 4px 8px; border-radius: 999px !important; }
+.segmented-control, .payroll-workspace-tabs { border-radius: 10px !important; background: var(--ui-surface-muted) !important; }
+.segmented-control button.active, .payroll-workspace-tabs button.active { color: #fff !important; background: var(--ui-accent-strong) !important; }
+
+/* 弹窗 */
+.modal::backdrop, dialog::backdrop { background: rgba(4, 20, 34, .68) !important; backdrop-filter: blur(6px); }
+.modal-panel {
+  color: var(--ui-ink);
+  border: 1px solid var(--ui-line-strong) !important;
+  border-radius: 16px !important;
+  background: var(--ui-surface) !important;
+  box-shadow: var(--ui-shadow-float) !important;
+}
+.modal-head { padding-bottom: 13px; }
+.modal-actions {
+  padding-top: 13px;
+  border-top: 1px solid var(--ui-line) !important;
+  background: var(--ui-surface) !important;
+}
+.icon-button { color: var(--ui-ink-soft) !important; font-family: var(--ui-font-body) !important; }
+
+/* 导航 */
+.brand-block strong, .nav-item strong, .mobile-tabbar strong { font-family: var(--ui-font-display) !important; font-weight: var(--ui-weight-semibold) !important; }
+.nav-item strong { font-size: 12px !important; }
+.nav-item span { font-family: var(--ui-font-body) !important; font-size: 11px !important; }
+.user-pill, .system-status { font-size: var(--ui-text-xs) !important; font-weight: var(--ui-weight-semibold) !important; }
+
+/* 统一信息密度 */
+.entity-card p, .role-card p, .office-action small, .notice-list small { font-size: var(--ui-text-sm) !important; }
+.entity-meta, .assignment-summary, .payroll-record-progress { font-size: var(--ui-text-sm) !important; }
+.empty-state h3 { color: var(--ui-ink-strong); font-family: var(--ui-font-display); font-size: var(--ui-title-section); }
+.empty-state p { color: var(--ui-ink-soft); font-size: var(--ui-text-sm); }
+
+@media (max-width: 760px) {
+  :root {
+    --ui-text-xs: 11px;
+    --ui-text-sm: 12px;
+    --ui-text-md: 14px;
+    --ui-title-section: 17px;
+    --ui-title-module: 20px;
+    --ui-title-page: 25px;
+    --ui-control-height: 44px;
+    --ui-control-height-sm: 38px;
+  }
+
+  body { font-size: var(--ui-text-md) !important; }
+  .topbar h1, .office-welcome h2, .module-hero h2, .dashboard-masthead h2 { font-size: var(--ui-title-page) !important; }
+  .primary-button, .secondary-button, .danger-button, .table-button, .export-link, .quick-btn { min-height: 40px !important; font-size: 12px !important; }
+  input, select, textarea { min-height: var(--ui-control-height); font-size: 16px !important; }
+  .data-table { font-size: 12px !important; }
+  .data-table th { height: 40px; padding: 8px 9px !important; }
+  .data-table td { padding: 9px !important; }
+  .modal-panel { border-radius: 14px 14px 0 0 !important; }
+  .mobile-tabbar button strong { font-size: 11px !important; }
+  .mobile-tabbar button span { font-family: var(--ui-font-display) !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .primary-button, .secondary-button, .danger-button, .table-button, .export-link, .quick-btn,
+  input, select, textarea { transition: none !important; }
+}

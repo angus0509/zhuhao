@@ -1,9 +1,15 @@
 const db = require('./db');
 const riskService = require('./services/risk.service');
+const smsDeliveryService = require('./services/sms-delivery.service');
+const officialNotificationService = require('./services/official-notification.service').createOfficialNotificationService();
 
 const DAILY_SCAN_HOUR = 2;
+const SMS_DELIVERY_INTERVAL_MS = 60 * 1000;
 let scanRunning = false;
+let smsDeliveryRunning = false;
 let schedulerTimer = null;
+let smsDeliveryTimer = null;
+let officialNotificationRunning = false;
 
 function millisecondsUntilNextRun(now = new Date()) {
   const next = new Date(now);
@@ -72,6 +78,48 @@ async function scanAllCompanies() {
   }
 }
 
+function safeErrorIdentity(error) {
+  const sanitize = value => String(value || '')
+    .replace(/[^A-Za-z0-9_-]/g, '')
+    .slice(0, 80);
+  return {
+    name: sanitize(error?.name) || 'Error',
+    code: sanitize(error?.code || error?.businessCode) || 'SMS_DELIVERY_FAILED'
+  };
+}
+
+async function runSmsDelivery() {
+  if (smsDeliveryRunning) return { skipped: true, reason: 'previous_sms_delivery_running' };
+  smsDeliveryRunning = true;
+  try {
+    const result = await smsDeliveryService.processPendingJobs({ limit: 100 });
+    const summary = {
+      claimed: Number(result?.claimed || 0),
+      sent: Number(result?.sent || 0),
+      failed: Number(result?.failed || 0),
+      skipped: Number(result?.skipped || 0)
+    };
+    console.log('[Scheduler] 短信队列处理完成', summary);
+    return summary;
+  } catch (error) {
+    const identity = safeErrorIdentity(error);
+    console.error('[Scheduler] 短信队列处理异常', identity);
+    return { failed: true, code: identity.code };
+  } finally {
+    smsDeliveryRunning = false;
+  }
+}
+
+async function runOfficialNotification() {
+  if (officialNotificationRunning) return { skipped: true, reason: 'previous_official_notification_running' };
+  officialNotificationRunning = true;
+  try {
+    return await officialNotificationService.processPendingJobs({ limit: 50 });
+  } finally {
+    officialNotificationRunning = false;
+  }
+}
+
 function scheduleNextRun() {
   const delay = millisecondsUntilNextRun();
   schedulerTimer = setTimeout(async () => {
@@ -91,19 +139,28 @@ function scheduleNextRun() {
 function startScheduler() {
   if (schedulerTimer) return false;
   const delay = scheduleNextRun();
+  smsDeliveryTimer = setInterval(() => {
+    runSmsDelivery();
+    runOfficialNotification();
+  }, SMS_DELIVERY_INTERVAL_MS);
   console.log(`[Scheduler] 已启用，每日${String(DAILY_SCAN_HOUR).padStart(2, '0')}:00执行，距下次扫描${Math.ceil(delay / 60000)}分钟`);
   return true;
 }
 
 function stopScheduler() {
   if (schedulerTimer) clearTimeout(schedulerTimer);
+  if (smsDeliveryTimer) clearInterval(smsDeliveryTimer);
   schedulerTimer = null;
+  smsDeliveryTimer = null;
 }
 
 module.exports = {
   DAILY_SCAN_HOUR,
+  SMS_DELIVERY_INTERVAL_MS,
   millisecondsUntilNextRun,
   scanAllCompanies,
+  runSmsDelivery,
+  runOfficialNotification,
   startScheduler,
   stopScheduler
 };

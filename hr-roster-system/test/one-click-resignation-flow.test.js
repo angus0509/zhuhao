@@ -27,8 +27,8 @@ assert.match(
 );
 assert.match(
   completionFunction,
-  /UPDATE sys_user SET status=0,token_version=token_version\+1/,
-  '一键离职必须立即停用员工账号并使 Token 失效'
+  /UPDATE sys_user SET status=CASE WHEN account_type='EMPLOYEE' THEN 1 ELSE 0 END,[\s\S]*token_version=token_version\+1/,
+  '一键离职必须保留受限员工端工资条账号、停用管理账号，并使旧 Token 失效'
 );
 const resignFunction = service.match(/async function resignEmployee[\s\S]*?\n}\n\nasync function updateResignationProgress/)?.[0] || '';
 assert.doesNotMatch(resignFunction, /createWorkTask\(/, '新的一键离职不得创建 OFFBOARD 或减保待办');

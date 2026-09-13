@@ -16,3 +16,5 @@ assert.equal(normalizeFeeMode(''), '');
 assert.throws(() => normalizeFeeMode('超'.repeat(81)), /最多填写80个字符/);
 
 console.log('employment-type-tests-ok');
+// employee.service 初始化 MySQL 连接池；单测结束主动释放，避免发布验收进程悬挂。
+require('../src/db').pool.end().catch(() => {});

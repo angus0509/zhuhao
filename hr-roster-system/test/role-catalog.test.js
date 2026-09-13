@@ -20,6 +20,16 @@ assert(
   '批量录入必须使用独立权限'
 );
 
+const systemRoutes = fs.readFileSync(path.resolve(__dirname, '../src/routes/system.routes.js'), 'utf8');
+assert(
+  systemRoutes.includes("onsite-assignees', requirePermission('factory:assign'), controller.updateProjectOnsiteAssignees"),
+  '派遣驻厂 PUT 应使用 factory:assign 权限'
+);
+assert(
+  !systemRoutes.includes("onsite-assignees', requirePermission('system:role'), requireCompanyAdmin"),
+  '派遣驻厂不应再要求 system:role + requireCompanyAdmin'
+);
+
 const page = fs.readFileSync(path.resolve(__dirname, '../public/index.html'), 'utf8');
 for (const permissionCode of ['employee:create', 'employee:batch', 'customer:manage', 'project:manage']) {
   assert(
@@ -50,6 +60,7 @@ if (fs.existsSync(seedPath)) {
   const hrManagerBlock = seed.slice(hrManagerStart, hrManagerEnd);
   assert(hrManagerBlock.includes("'social:manage'"), 'HR主管缺少雇主险办理权限');
   assert(hrManagerBlock.includes("'audit:view'"), 'HR主管缺少 audit:view');
+  assert(hrManagerBlock.includes("'factory:assign'"), 'HR主管缺少派遣驻厂权限');
 
   // 驻厂人员需要现场调岗、离职和保险办理，但不能包含操作日志、预支审批和工资管理权限
   const onsiteStart = seed.indexOf("SELECT 3, id FROM sys_permission");
@@ -61,6 +72,7 @@ if (fs.existsSync(seedPath)) {
   assert(!onsiteBlock.includes("'audit:view'"), '驻厂专员不应有 audit:view');
   assert(!onsiteBlock.includes("'advance:approve'"), '驻厂专员不应有 advance:approve');
   assert(!onsiteBlock.includes("'payroll:manage'"), '驻厂专员不应有 payroll:manage');
+  assert(!onsiteBlock.includes("'factory:assign'"), '驻厂专员不应有 factory:assign');
 
   // 薪资专员只能访问薪资和预支相关功能
   const payrollStart = seed.indexOf("SELECT 4, id FROM sys_permission");

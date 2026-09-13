@@ -46,7 +46,10 @@ chmod 700 "$BACKUP_DIR"
 STAGE_DIR="$(mktemp -d /opt/moluo-release.XXXXXX)"
 cleanup() {
   rm -rf "$STAGE_DIR"
-  unset MYSQL_ROOT_PASSWORD DB_PASSWORD JWT_SECRET DATA_ENCRYPT_KEY DATA_ENCRYPT_IV || true
+  unset MYSQL_ROOT_PASSWORD DB_PASSWORD JWT_SECRET DATA_ENCRYPT_KEY DATA_ENCRYPT_IV \
+    WECHAT_MINIPROGRAM_APPID WECHAT_MINIPROGRAM_SECRET EMPLOYEE_BIND_HMAC_SECRET \
+    WECHAT_MINIPROGRAM_URL_SCHEME \
+    SMS_CODE_HMAC_SECRET || true
 }
 trap cleanup EXIT
 
@@ -90,9 +93,26 @@ set +a
 : "${JWT_SECRET:?生产环境缺少JWT_SECRET}"
 : "${DATA_ENCRYPT_KEY:?生产环境缺少DATA_ENCRYPT_KEY}"
 : "${DATA_ENCRYPT_IV:?生产环境缺少DATA_ENCRYPT_IV}"
+: "${WECHAT_MINIPROGRAM_APPID:?生产环境缺少WECHAT_MINIPROGRAM_APPID}"
+: "${WECHAT_MINIPROGRAM_SECRET:?生产环境缺少WECHAT_MINIPROGRAM_SECRET}"
+: "${WECHAT_MINIPROGRAM_URL_SCHEME:?生产环境缺少WECHAT_MINIPROGRAM_URL_SCHEME}"
+: "${EMPLOYEE_BIND_HMAC_SECRET:?生产环境缺少EMPLOYEE_BIND_HMAC_SECRET}"
 test "${#JWT_SECRET}" -ge 32 || { echo "JWT_SECRET长度不能少于32字符" >&2; exit 1; }
 test "${#DATA_ENCRYPT_KEY}" -eq 32 || { echo "DATA_ENCRYPT_KEY必须为32字符" >&2; exit 1; }
 test "${#DATA_ENCRYPT_IV}" -eq 16 || { echo "DATA_ENCRYPT_IV必须为16字符" >&2; exit 1; }
+test "${#WECHAT_MINIPROGRAM_SECRET}" -eq 32 || { echo "WECHAT_MINIPROGRAM_SECRET必须为32字符" >&2; exit 1; }
+test "${#EMPLOYEE_BIND_HMAC_SECRET}" -ge 32 || { echo "EMPLOYEE_BIND_HMAC_SECRET长度不能少于32字符" >&2; exit 1; }
+
+if [ "${TENCENT_SMS_ENABLED:-false}" = "true" ]; then
+  : "${TENCENT_SMS_PAYSLIP_URL_LINK:?短信启用时缺少小程序URL Link}"
+  : "${TENCENT_SMS_SDK_APP_ID:?短信启用时缺少TENCENT_SMS_SDK_APP_ID}"
+  : "${TENCENT_SMS_SIGN_NAME:?短信启用时缺少TENCENT_SMS_SIGN_NAME}"
+  : "${TENCENT_SMS_TEMPLATE_LOGIN_CODE:?短信启用时缺少登录验证码模板}"
+  : "${TENCENT_SMS_TEMPLATE_PAYSLIP_PUBLISHED:?短信启用时缺少工资发布模板}"
+  : "${TENCENT_SMS_TEMPLATE_PAYSLIP_REMINDER:?短信启用时缺少工资催签模板}"
+  : "${SMS_CODE_HMAC_SECRET:?短信启用时缺少SMS_CODE_HMAC_SECRET}"
+  test "${#SMS_CODE_HMAC_SECRET}" -ge 32 || { echo "SMS_CODE_HMAC_SECRET长度不能少于32字符" >&2; exit 1; }
+fi
 
 DB_BACKUP="$BACKUP_DIR/hr_roster-$(date +%Y%m%d-%H%M%S).sql.gz"
 docker exec -i -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD" "$MYSQL_CONTAINER" \
@@ -115,6 +135,7 @@ run_migration() {
 run_migration "$STAGE_DIR/sql/migrate-employee-audit-columns-20260801.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-employee-customer-assignment-20260802.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-menu-permissions-20260801.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onsite-management-permissions-20260801.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-system-notices-20260804.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-risk-scan-log-20260804.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attachments-20260804.mysql.sql"
@@ -122,6 +143,12 @@ run_migration "$STAGE_DIR/sql/migrate-onsite-employee-edit-permission-20260806.m
 run_migration "$STAGE_DIR/sql/migrate-recruitment-channel-20260806.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-payslip-receipt-audit-20260806.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-token-version-20260806.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-employee-wechat-login-20260814.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-tencent-sms-20260814.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-payslip-signature-dispute-20260814.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-manager-remember-login-20260817.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-system-user-soft-delete-20260825.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-remove-project-preparation-20260817.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-remove-insurance-menu-20260807.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-onsite-contract-permission-20260811.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-employee-address-interview-20260811.mysql.sql"
@@ -142,6 +169,18 @@ run_migration "$STAGE_DIR/sql/migrate-unified-risk-center-20260810.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-onboarding-compliance-risk-20260810.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-onsite-fast-processing-20260813.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-optional-employee-phone-20260813.mysql.sql"
+
+# 历史合规迁移会回填 ONBOARDING，最终再统一修正在职生命周期。
+run_migration "$STAGE_DIR/sql/migrate-active-employee-lifecycle-20260817.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-flexible-payslip-items-20260818.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-payroll-import-template-20260819.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-payslip-view-policy-20260820.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-wechat-official-notification-20260827.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onsite-sensitive-blacklist-permission-20260829.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-onsite-sensitive-employee-view-20260831.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-disable-contract-insurance-risk-20260831.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-hr-manager-onsite-assign-20260908.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -185,6 +224,24 @@ test "$PAYSLIP_RECEIPT_LOG_READY" = "1" || { echo "工资条签收证据表迁�
 TOKEN_VERSION_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='sys_user' AND COLUMN_NAME='token_version'")"
 test "$TOKEN_VERSION_READY" = "1" || { echo "账号Token版本字段迁移不完整" >&2; exit 1; }
 
+MANAGER_LOGIN_DEVICE_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='manager_login_device'")"
+test "$MANAGER_LOGIN_DEVICE_READY" = "1" || { echo "管理端记住登录设备凭证表迁移不完整" >&2; exit 1; }
+
+SYSTEM_USER_SOFT_DELETE_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='sys_user' AND COLUMN_NAME='deleted_at'")"
+test "$SYSTEM_USER_SOFT_DELETE_READY" = "1" || { echo "系统账号软删除字段迁移不完整" >&2; exit 1; }
+
+STALE_ACTIVE_LIFECYCLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM hr_employee WHERE employee_status=2 AND lifecycle_status='ONBOARDING' AND deleted_at IS NULL")"
+test "$STALE_ACTIVE_LIFECYCLE_COUNT" = "0" || { echo "仍有 $STALE_ACTIVE_LIFECYCLE_COUNT 名在职员工生命周期未修正" >&2; exit 1; }
+
+PAYROLL_PROFILE_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_import_profile'")"
+test "$PAYROLL_PROFILE_READY" = "1" || { echo "项目工资字段映射表迁移不完整" >&2; exit 1; }
+
+PAYROLL_TEMPLATE_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_import_template'")"
+test "$PAYROLL_TEMPLATE_READY" = "1" || { echo "项目工资表模板表迁移不完整" >&2; exit 1; }
+
+PAYROLL_ITEMS_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_detail' AND COLUMN_NAME='item_snapshot'")"
+test "$PAYROLL_ITEMS_READY" = "1" || { echo "工资项目快照字段迁移不完整" >&2; exit 1; }
+
 TALENT_FLOW_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='talent_candidate' AND COLUMN_NAME IN ('employee_id','customer_id','project_id','position_id','recruitment_channel_id','talent_source_type','employee_status_snapshot','available_status','resigned_at','resignation_reason','flowed_at')")"
 test "$TALENT_FLOW_COLUMN_COUNT" = "11" || { echo "人才库员工流转字段迁移不完整: $TALENT_FLOW_COLUMN_COUNT/11" >&2; exit 1; }
 
@@ -206,6 +263,9 @@ test "$ONSITE_EDIT_BROKEN" = "0" || { echo "驻厂人员员工编辑权限迁移
 ONSITE_CONTRACT_BROKEN="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.role_code='onsite_staff' AND r.status=1 AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code='contract:manage')")"
 test "$ONSITE_CONTRACT_BROKEN" = "0" || { echo "驻厂人员合同登记权限迁移不完整" >&2; exit 1; }
 
+ONSITE_PROJECT_MANAGE_BROKEN="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.role_code='onsite_staff' AND r.status=1 AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code='project:manage')")"
+test "$ONSITE_PROJECT_MANAGE_BROKEN" = "0" || { echo "驻厂人员项目管理权限迁移不完整" >&2; exit 1; }
+
 BROKEN_ROLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.status=1 AND r.role_code IN ('company_admin','hr_manager','onsite_staff','payroll_staff') AND ((r.role_code='company_admin' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view','permission:menu'))<10) OR (r.role_code='hr_manager' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view'))<9) OR (r.role_code='onsite_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','blacklist:menu'))<2) OR (r.role_code='payroll_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','advance:menu','payroll:menu'))<3))")"
 test "$BROKEN_ROLE_COUNT" = "0" || { echo "有 $BROKEN_ROLE_COUNT 个角色权限迁移不完整" >&2; exit 1; }
 
@@ -219,8 +279,8 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 
 HEALTH_OK=false
 for attempt in $(seq 1 12); do
-  HEALTH_RESPONSE="$(curl -fsS http://127.0.0.1:3120/api/health 2>/dev/null || true)"
-  if echo "$HEALTH_RESPONSE" | grep -Eq '"code"[[:space:]]*:[[:space:]]*0'; then
+  HEALTH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:3120/api/health 2>/dev/null || true)"
+  if [ "$HEALTH_STATUS" = "200" ]; then
     HEALTH_OK=true
     break
   fi

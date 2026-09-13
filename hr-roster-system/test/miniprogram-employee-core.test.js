@@ -13,10 +13,8 @@ if (fs.existsSync(miniAppPath)) {
   for (const page of [
     'pages/employees/add/index',
     'pages/employees/onboard/index',
-    'pages/employees/contract/index',
     'pages/employees/transfer/index',
     'pages/employees/transfer-handle/index',
-    'pages/employees/insurance/index',
     'pages/employees/resign/index',
     'pages/tasks/index'
   ]) {
@@ -35,22 +33,21 @@ if (fs.existsSync(miniAppPath)) {
 
   const taskJs = read('wechat-miniprogram/miniprogram/pages/tasks/index.js');
   const taskWxml = read('wechat-miniprogram/miniprogram/pages/tasks/index.wxml');
-  assertIncludes(taskJs, "request({ url: '/risk-alerts' })", '风险处理页未加载具体风险提醒');
-  assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '合规待办页未加载待处理事项');
-  assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '合规待办页未加载处理中事项');
-  assertIncludes(taskJs, '/pages/employees/compliance/index?id=', '合同和雇主险待办无法直达合并办理');
-  assertIncludes(taskJs, "hasPermission(session.user, 'contract:manage')", '合同待办直接办理缺少权限校验');
-  assertIncludes(taskJs, "hasPermission(session.user, 'social:manage')", '雇主险待办直接办理缺少权限校验');
-  assertIncludes(taskJs, 'avatarText:', '风险事项未在 JS 中生成微信兼容的头像文字');
+  if (taskJs.includes("request({ url: '/risk-alerts' })")) throw new Error('驻厂待办仍请求已下线的风险提醒');
+  assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '驻厂待办页未加载待处理事项');
+  assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '驻厂待办页未加载处理中事项');
+  if (/CONTRACT|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs)) throw new Error('驻厂待办仍暴露合同、雇主险或入职合规流程');
+  assertIncludes(taskJs, 'avatarText:', '驻厂事项未在 JS 中生成微信兼容的头像文字');
   if (taskWxml.includes('.slice(')) throw new Error('风险处理页 WXML 不应直接调用 JavaScript 方法');
   assertIncludes(taskWxml, 'bindtap="handleItem"', '具体风险事项缺少直接处理按钮');
 
   const addJs = read('wechat-miniprogram/miniprogram/pages/employees/add/index.js');
-  assertIncludes(addJs, 'employeeStatus: 1', '新增员工必须固定进入待到岗');
+  assertIncludes(addJs, "entryMode: 'interview'", '新增员工必须默认选择面试');
+  assertIncludes(addJs, "employeeStatus: this.data.entryMode === 'interview' ? 6 : 1", '直接入职必须进入待到岗');
   assertIncludes(addJs, 'workTypeIndex: 0', '新增员工工资类型应与网页端一致默认计时');
   assertIncludes(addJs, 'function sortPositionsForEmployeeForm', '新增员工岗位缺少普工优先排序逻辑');
   assertIncludes(addJs, "item.positionCode === 'OP' || item.positionName === '普工'", '新增员工未默认定位普工岗位');
-  if (/EMPLOYEE_STATUS_VALUES|employeeStatusIndex/.test(addJs)) throw new Error('新增员工仍允许选择生命周期状态');
+  if (/EMPLOYEE_STATUS_VALUES|employeeStatusIndex/.test(addJs)) throw new Error('新增员工仍暴露完整生命周期状态');
   if (addJs.includes("if (!f.channelSource.trim())")) throw new Error('招聘渠道仍被强制必填');
   assertIncludes(addJs, 'channelSource: f.channelSource.trim()', '新增员工未提交自由文本招聘渠道');
   assertIncludes(addJs, 'editingEmployeeId', '小程序新增员工页未支持编辑模式');

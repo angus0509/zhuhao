@@ -5,6 +5,7 @@ const assert = require('assert');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'public', 'index.html'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'public', 'app.js'), 'utf8');
+const navigation = fs.readFileSync(path.join(root, 'public', 'js', 'core', 'navigation-groups.js'), 'utf8');
 const miniHomePath = path.join(root, 'wechat-miniprogram', 'miniprogram', 'pages', 'home', 'index.wxml');
 
 // 仅移除前端工作台和入口，历史数据及后端接口继续保留。
@@ -19,7 +20,7 @@ for (const marker of [
   assert(!app.includes(marker), `前端脚本仍包含客户交付台标记: ${marker}`);
 }
 
-assert(html.includes('data-view="projects"'), '客户项目入口必须保留');
+assert(navigation.includes("{ view: 'projects', label: '客户项目'"), '客户项目入口必须保留');
 assert(app.includes("if (action === 'projects') return switchView('projects');"), '客户项目快捷入口必须保留');
 
 // 生产 Web 发布包会排除小程序目录，本地完整项目中才执行小程序页面断言。

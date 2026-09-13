@@ -20,6 +20,16 @@ assert.match(css, /@media \(min-width: 761px\) and \(max-width: 1180px\)[\s\S]*\
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.office-welcome\s*\{[^}]*min-height:\s*112px\s*!important[^}]*grid-template-columns:/s, '手机 Web 欢迎区仍有过多装饰留白');
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.office-action\s*\{[^}]*min-height:\s*82px\s*!important/s, '手机 Web 功能卡仍过高');
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.office-statline\s*\{[^}]*repeat\(3,/s, '手机 Web 统计区仍使用三行布局');
+assert.match(
+  css,
+  /@media \(max-width: 760px\)[\s\S]*\.module-view\s*>\s*\*\s*\{[^}]*min-width:\s*0[^}]*width:\s*100%[^}]*max-width:\s*100%/s,
+  '手机 Web 模块子项仍会被宽表格的最小宽度撑大'
+);
+assert.match(
+  css,
+  /@media \(max-width: 760px\)[\s\S]*\.module-view\s+\.table-wrap\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*overflow-x:\s*auto/s,
+  '手机 Web 宽表格未限制在自身滚动容器内'
+);
 assert.ok(html.includes('class="modal employee-batch-modal" id="batchEmployeeModal"'), '批量员工上传未启用专属紧凑布局');
 assert.ok(html.includes('class="employee-batch-workspace"'), '批量员工上传缺少双栏工作区');
 assert.ok(html.includes('class="employee-batch-upload"'), '批量员工上传缺少文件区');

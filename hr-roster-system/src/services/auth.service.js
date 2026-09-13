@@ -13,6 +13,20 @@ function effectiveDataScope(roles) {
   return 5;
 }
 
+// 员工新增、批量录入和编辑都需要先读取员工档案。
+// 历史账号可能只配置了写权限，统一补齐 employee:view，但不改变 dataScope，
+// 仍由员工/部门/项目范围继续限制实际可见数据。
+function normalizePermissions(permissionCodes = []) {
+  const permissions = new Set((Array.isArray(permissionCodes) ? permissionCodes : [])
+    .map(code => String(code || '').trim())
+    .filter(Boolean));
+  if (['employee:create', 'employee:batch', 'employee:update', 'employee:sensitive:view']
+    .some(code => permissions.has(code))) {
+    permissions.add('employee:view');
+  }
+  return [...permissions].sort();
+}
+
 async function getScopeDeptIds(user, roles, dataScope) {
   if (![2, 3].includes(Number(dataScope))) return [];
   const roleIds = roles.filter(role => Number(role.data_scope) === Number(dataScope)).map(role => Number(role.id));
@@ -102,7 +116,7 @@ async function getUserAccess(user) {
       roleCode: role.role_code,
       dataScope: role.data_scope
     })),
-    permissions: permissions.map(item => item.permission_code),
+    permissions: normalizePermissions(permissions.map(item => item.permission_code)),
     dataScope,
     scopeDeptIds
   };
@@ -117,6 +131,7 @@ async function login({ companyId, username, password }) {
     FROM sys_user
     WHERE username = :username
       AND status = 1
+      AND COALESCE(account_type,'MANAGER') = 'MANAGER'
       AND (company_id = :companyId OR company_id IS NULL)
     ORDER BY company_id DESC
     LIMIT 1
@@ -128,24 +143,36 @@ async function login({ companyId, username, password }) {
     throw createError('账号或密码错误', 401);
   }
 
+  return createSessionForUser(user, companyId);
+}
+
+async function createSessionForUser(user, fallbackCompanyId) {
   const access = await getUserAccess(user);
+  const companyId = Number(user.company_id || user.companyId || fallbackCompanyId);
+  const userId = Number(user.id || user.userId);
+  const username = user.username;
+  const employeeId = user.employee_id || user.employeeId || null;
+  const accountType = user.account_type || user.accountType || 'MANAGER';
+  const tokenVersion = Number(user.token_version ?? user.userTokenVersion ?? user.tokenVersion ?? 0);
   const token = signToken({
-    userId: user.id,
-    companyId: user.company_id || companyId,
-    username: user.username,
-    employeeId: user.employee_id || null,
-    tokenVersion: Number(user.token_version || 0)
+    userId,
+    companyId,
+    username,
+    employeeId,
+    accountType,
+    tokenVersion
   });
 
   return {
     token,
     user: {
-      id: user.id,
-      companyId: user.company_id || companyId,
-      username: user.username,
-      realName: user.real_name || user.username,
+      id: userId,
+      companyId,
+      username,
+      realName: user.real_name || user.realName || username,
       phone: user.phone || '',
-      employeeId: user.employee_id || null,
+      employeeId,
+      accountType,
       roles: access.roles,
       permissions: access.permissions,
       dataScope: access.dataScope,
@@ -155,9 +182,26 @@ async function login({ companyId, username, password }) {
 }
 
 async function getUserById(userId) {
-  const user = await db.first('SELECT * FROM sys_user WHERE id = :userId AND status = 1 LIMIT 1', { userId });
+  const user = await db.first(
+    `SELECT u.*,e.employee_status,e.deleted_at employee_deleted_at
+     FROM sys_user u
+     LEFT JOIN hr_employee e ON e.id=u.employee_id AND e.company_id=u.company_id
+     WHERE u.id=:userId AND u.status=1
+       AND (
+         COALESCE(u.account_type,'MANAGER')='MANAGER'
+         OR (u.account_type='EMPLOYEE' AND e.employee_status IN (2,3) AND e.deleted_at IS NULL)
+       )
+     LIMIT 1`,
+    { userId }
+  );
   if (!user) return null;
-  const access = await getUserAccess(user);
+  const accountType = user.account_type || 'MANAGER';
+  // 即使数据库中残留旧角色关系，员工账号也固定为本人范围且不继承管理权限。
+  if (accountType === 'EMPLOYEE'
+    && (![2, 3].includes(Number(user.employee_status)) || user.employee_deleted_at)) return null;
+  const access = accountType === 'EMPLOYEE'
+    ? { roles: [], permissions: [], dataScope: 4, scopeDeptIds: [] }
+    : await getUserAccess(user);
   return {
     id: user.id,
     companyId: user.company_id,
@@ -165,6 +209,7 @@ async function getUserById(userId) {
     realName: user.real_name || user.username,
     phone: user.phone || '',
     employeeId: user.employee_id || null,
+    accountType: user.account_type || 'MANAGER',
     tokenVersion: Number(user.token_version || 0),
     roles: access.roles,
     permissions: access.permissions,
@@ -193,6 +238,9 @@ async function changePassword(companyId, userId, body) {
 
 module.exports = {
   login,
+  createSessionForUser,
   getUserById,
-  changePassword
+  changePassword,
+  normalizePermissions,
+  effectiveDataScope
 };

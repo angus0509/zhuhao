@@ -115,10 +115,18 @@ REQUIRED=(
   "sql/migrate-risk-scan-log-20260804.mysql.sql"
   "sql/migrate-attachments-20260804.mysql.sql"
   "sql/migrate-onsite-lifecycle-v1-20260805.mysql.sql"
+  "sql/migrate-onsite-management-permissions-20260801.mysql.sql"
   "sql/migrate-onsite-employee-edit-permission-20260806.mysql.sql"
   "sql/migrate-recruitment-channel-20260806.mysql.sql"
   "sql/migrate-payslip-receipt-audit-20260806.mysql.sql"
   "sql/migrate-token-version-20260806.mysql.sql"
+  "sql/migrate-employee-wechat-login-20260814.mysql.sql"
+  "sql/migrate-tencent-sms-20260814.mysql.sql"
+  "sql/migrate-payslip-signature-dispute-20260814.mysql.sql"
+  "sql/migrate-manager-remember-login-20260817.mysql.sql"
+  "sql/migrate-system-user-soft-delete-20260825.mysql.sql"
+  "sql/migrate-remove-project-preparation-20260817.mysql.sql"
+  "sql/migrate-active-employee-lifecycle-20260817.mysql.sql"
   "sql/migrate-remove-insurance-menu-20260807.mysql.sql"
   "sql/migrate-talent-employee-flow-20260810.mysql.sql"
   "sql/migrate-unified-risk-center-20260810.mysql.sql"
@@ -128,6 +136,11 @@ REQUIRED=(
   "sql/migrate-simplified-resignation-20260811.mysql.sql"
   "sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
   "sql/migrate-onsite-fast-processing-20260813.mysql.sql"
+  "sql/migrate-optional-employee-phone-20260813.mysql.sql"
+  "sql/migrate-flexible-payslip-items-20260818.mysql.sql"
+  "sql/migrate-payslip-view-policy-20260820.mysql.sql"
+  "sql/migrate-wechat-official-notification-20260827.mysql.sql"
+  "sql/migrate-hr-manager-onsite-assign-20260908.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -135,7 +148,7 @@ for f in "${REQUIRED[@]}"; do
     VERIFY_PASS=false
   fi
 done
-FORBIDDEN=(".env" ".env.production" ".env.local" "node_modules" ".runtime" "data" "uploads")
+FORBIDDEN=(".env" ".env.production" ".env.local" "node_modules" ".runtime" "data" "uploads" "release-candidate.json")
 for f in "${FORBIDDEN[@]}"; do
   if [ -e "$WORKDIR/$f" ]; then
     echo "  失败: 禁止项 — $f" >&2
@@ -161,7 +174,17 @@ echo "[5/9] npm ci + 项目检查..."
 cd "$WORKDIR"
 npm ci --omit=dev --ignore-scripts --silent 2>&1 | tail -1
 # Web/API 发布包按设计不包含微信小程序源码；小程序契约在源码仓库完整检查中执行。
-npm run check:web
+# Web/API 发布包按设计不包含微信小程序源码，因此不能调用依赖
+# wechat-miniprogram/ 的仓库级 check:web。这里执行发布包自洽的语法、路由和工资导入契约。
+find public src test -name '*.js' ! -name '._*' -print0 | xargs -0 -n1 node --check
+node test/web-payroll-flexible-import.test.js
+node test/web-payroll-column-mapping.test.js
+node test/payroll-dynamic-import-parser.test.js
+node test/payroll-dynamic-persistence.test.js
+node test/payroll-import-preview.test.js
+node test/payslip-dynamic-items-security.test.js
+node -e "require('./src/app'); console.log('express-route-load-ok')"
+node test/manager-remember-login.test.js
 echo "  通过"
 
 # ====================================================================
@@ -244,8 +267,19 @@ M16="sql/migrate-employee-address-interview-20260811.mysql.sql"
 M17="sql/migrate-simplified-resignation-20260811.mysql.sql"
 M18="sql/migrate-simplified-onsite-flow-20260813.mysql.sql"
 M19="sql/migrate-onsite-fast-processing-20260813.mysql.sql"
+M20="sql/migrate-optional-employee-phone-20260813.mysql.sql"
+M21="sql/migrate-employee-wechat-login-20260814.mysql.sql"
+M22="sql/migrate-payslip-signature-dispute-20260814.mysql.sql"
+M23="sql/migrate-tencent-sms-20260814.mysql.sql"
+M24="sql/migrate-onsite-management-permissions-20260801.mysql.sql"
+M25="sql/migrate-manager-remember-login-20260817.mysql.sql"
+M26="sql/migrate-remove-project-preparation-20260817.mysql.sql"
+M27="sql/migrate-active-employee-lifecycle-20260817.mysql.sql"
+M28="sql/migrate-flexible-payslip-items-20260818.mysql.sql"
+M29="sql/migrate-system-user-soft-delete-20260825.mysql.sql"
+M30="sql/migrate-hr-manager-onsite-assign-20260908.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19" "$M20" "$M21" "$M22" "$M23" "$M24" "$M25" "$M26" "$M27" "$M28" "$M29" "$M30"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 
@@ -258,6 +292,63 @@ for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$
   # DELETE FROM / TRUNCATE 直接失败
   if echo "$content" | grep -qiE '\bDELETE\b.*\bFROM\b|\bTRUNCATE\b'; then
     echo "  失败: $(basename "$mp") 包含 DELETE/TRUNCATE" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M25：管理端设备凭证只保存摘要，支持过期、轮换和撤销。
+C25="$(cat "$WORKDIR/$M25")"
+for required in "CREATE TABLE IF NOT EXISTS manager_login_device" "token_hash CHAR(64) NOT NULL" "token_version INT NOT NULL" "expire_at DATETIME NOT NULL" "revoked_at DATETIME" "UNIQUE KEY uk_manager_device_token_hash"; do
+  if ! echo "$C25" | grep -q "$required"; then
+    echo "  失败: $M25 缺少安全记住登录迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+if echo "$C25" | grep -qiE 'password|refresh_token'; then
+  echo "  失败: $M25 禁止保存密码或设备凭证明文" >&2
+  VERIFY_PASS=false
+fi
+
+# M24：驻厂人员必须具备新增员工、客户和项目管理权限，且迁移可重复执行。
+C24="$(cat "$WORKDIR/$M24")"
+for required in "role_code='onsite_staff'" "permission_code IN" "'customer:manage'" "'project:manage'" "INSERT IGNORE INTO sys_role_permission"; do
+  if ! echo "$C24" | grep -q "$required"; then
+    echo "  失败: $M24 缺少驻厂管理权限迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M23：短信验证码只保存HMAC，发送队列必须企业级幂等。
+C23="$(cat "$WORKDIR/$M23")"
+for required in "CREATE TABLE IF NOT EXISTS employee_sms_verification" "phone_hash CHAR(64)" "code_hash CHAR(64)" "CREATE TABLE IF NOT EXISTS sms_delivery_job" "UNIQUE KEY uk_company_dedupe" "KEY idx_pending"; do
+  if ! echo "$C23" | grep -q "$required"; then
+    echo "  失败: $M23 缺少腾讯云短信安全迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M22：工资条签名和异议必须保留历史，仅对有效记录建立唯一约束。
+C22="$(cat "$WORKDIR/$M22")"
+for required in "CREATE TABLE IF NOT EXISTS salary_signature" "active_salary_detail_id BIGINT GENERATED ALWAYS AS" "UNIQUE KEY uk_salary_signature_active" "CREATE TABLE IF NOT EXISTS salary_dispute" "open_salary_detail_id BIGINT GENERATED ALWAYS AS" "UNIQUE KEY uk_open_dispute"; do
+  if ! echo "$C22" | grep -q "$required"; then
+    echo "  失败: $M22 缺少工资条签名或异议迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+# M21：员工微信登录迁移必须幂等增加账号类型，并保留绑定和登录审计历史。
+C21="$(cat "$WORKDIR/$M21")"
+for required in "information_schema.COLUMNS" "information_schema.STATISTICS" "CREATE TABLE IF NOT EXISTS employee_wechat_binding" "active_employee_id BIGINT GENERATED ALWAYS AS" "CREATE TABLE IF NOT EXISTS employee_bind_code" "failed_attempts TINYINT NOT NULL DEFAULT 0" "CREATE TABLE IF NOT EXISTS employee_login_audit" "ticket_nonce_hash CHAR(64)"; do
+  if ! echo "$C21" | grep -q "$required"; then
+    echo "  失败: $M21 缺少员工微信登录迁移项 — $required" >&2
+    VERIFY_PASS=false
+  fi
+done
+
+C20="$(cat "$WORKDIR/$M20")"
+for required in 'ALTER TABLE hr_employee MODIFY COLUMN phone VARCHAR(20) NULL' 'ALTER TABLE talent_candidate MODIFY COLUMN phone VARCHAR(20) NULL'; do
+  if ! echo "$C20" | grep -q "$required"; then
+    echo "  失败: $M20 缺少手机号可选迁移项 — $required" >&2
     VERIFY_PASS=false
   fi
 done
