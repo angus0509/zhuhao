@@ -119,7 +119,7 @@ async function listDaily(companyId, user, params = {}) {
 
 async function listMonthly(companyId, user, params = {}) {
   const { start, end } = monthRange(params.month);
-  const queryParams = { companyId, start, end };
+  const queryParams = { companyId, start, end, month: params.month };
   const scope = employeeScope(user, queryParams, 'e', 'j');
   return database.query(`SELECT d.employee_id AS employeeId, e.name,
       SUM(d.approved_normal_minutes) AS approvedNormalMinutes, SUM(d.approved_overtime_minutes) AS approvedOvertimeMinutes,
@@ -127,7 +127,7 @@ async function listMonthly(companyId, user, params = {}) {
       SUM(d.result_status='MISSING_PUNCH') AS missingPunchDays, SUM(d.result_status='ABSENT') AS absentDays
     FROM attendance_daily_results d JOIN hr_employee e ON e.id=d.employee_id AND e.company_id=d.company_id
     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
-    WHERE d.company_id=:companyId AND DATE_ADD(d.shift_date, INTERVAL 1 DAY) BETWEEN :start AND :end ${scope}
+    WHERE d.company_id=:companyId AND DATE_FORMAT(d.shift_date, '%Y-%m')=:month ${scope}
     GROUP BY d.employee_id, e.name ORDER BY e.name`, queryParams);
 }
 
