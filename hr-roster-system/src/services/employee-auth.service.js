@@ -73,7 +73,6 @@ function createEmployeeAuthService(dependencies = {}) {
   const bindingSecret = dependencies.hmacSecret ?? env.employeeBinding.hmacSecret;
   const ticketTtlSeconds = Number(dependencies.ticketTtlSeconds || env.employeeBinding.ticketTtlSeconds || 300);
   const codeTtlSeconds = Number(dependencies.codeTtlSeconds || env.employeeBinding.codeTtlSeconds || 600);
-  const maxAttempts = Number(dependencies.maxAttempts || env.employeeBinding.maxAttempts || 5);
   const now = dependencies.now || (() => new Date());
   const randomBytes = dependencies.randomBytes || crypto.randomBytes;
   const randomInt = dependencies.randomInt || crypto.randomInt;
@@ -481,24 +480,21 @@ function createEmployeeAuthService(dependencies = {}) {
          FOR UPDATE`,
         { companyId, name }
       );
+      // 绑定码是 HR 一对一下发的一次性凭证，直接通过绑定码摘要定位员工，
+      // 不再强制校验身份证后六位，避免身份证未登记或登记错误导致无法登录。
       let candidate = null;
       for (const row of rows) {
         const employee = normalizeEmployeeRow(row);
-        try {
-          assertIdCardLast6(employee, body.idCardLast6);
+        const expectedHash = bindCodeHash(companyId, employee.id, row.code_salt, plainCode);
+        if (safeEqual(expectedHash, row.code_hash)) {
           candidate = { row, employee };
           break;
-        } catch (error) {
-          if (!/身份信息校验失败/.test(error.message)) throw error;
         }
       }
-      if (!candidate) return { error: createError('姓名或身份信息校验失败') };
+      if (!candidate) return { error: createError('姓名或绑定码错误，请与HR核对后重试') };
       const { row, employee } = candidate;
       const codeId = Number(row.code_id ?? row.id);
       if (row.used_at) return { error: createError('绑定码已使用或无效', 409) };
-      if (Number(row.failed_attempts) >= maxAttempts) {
-        return { error: createError('绑定码尝试次数过多，请联系管理员重新生成', 423) };
-      }
       const expiresAtMs = new Date(row.expire_at).getTime();
       if (!Number.isFinite(expiresAtMs) || expiresAtMs <= now().getTime()) {
         await audit(connection, {
@@ -506,28 +502,6 @@ function createEmployeeAuthService(dependencies = {}) {
           phone: employee.phone, meta: requestMeta
         });
         return { error: createError('绑定码已过期，请联系管理员重新生成', 410) };
-      }
-      const expectedHash = bindCodeHash(companyId, employee.id, row.code_salt, plainCode);
-      if (!safeEqual(expectedHash, row.code_hash)) {
-        const nextAttempts = Number(row.failed_attempts) + 1;
-        await connection.execute(
-          `UPDATE employee_bind_code SET failed_attempts=failed_attempts+1
-           WHERE id=:codeId AND company_id=:companyId AND used_at IS NULL`,
-          { codeId, companyId }
-        );
-        await audit(connection, {
-          companyId,
-          employeeId: employee.id,
-          actionType: 'CODE_BIND',
-          resultCode: nextAttempts >= maxAttempts ? 'LOCKED' : 'FAILED',
-          phone: employee.phone,
-          meta: requestMeta
-        });
-        return {
-          error: createError(nextAttempts >= maxAttempts
-            ? '绑定码尝试次数过多，请联系管理员重新生成'
-            : '绑定码错误', nextAttempts >= maxAttempts ? 423 : 400)
-        };
       }
 
       const user = await ensureEmployeeAccountAndBinding(connection, companyId, employee, {

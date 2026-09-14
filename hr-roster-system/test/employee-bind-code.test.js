@@ -163,7 +163,6 @@ async function testGenerationAndSingleUseBinding() {
   const result = await service.bindByCode(1, {
     loginCode: 'wx-login-secret',
     name: '张三',
-    idCardLast6: '01123X',
     bindCode: '483921'
   }, { ipAddress: '127.0.0.1', deviceInfo: 'test-device' });
 
@@ -176,35 +175,46 @@ async function testGenerationAndSingleUseBinding() {
 
   await assert.rejects(
     () => service.bindByCode(1, {
-      loginCode: 'login', name: '张三', idCardLast6: '01123X', bindCode: '483921'
+      loginCode: 'login', name: '张三', bindCode: '483921'
     }, {}),
     /已使用|无效/
   );
 }
 
-async function testExpiredAndFifthFailureAreRejected() {
+async function testBindCodeWorksWithoutIdCard() {
+  const harness = createHarness();
+  harness.state.employee.id_card_no = null;
+  const service = loadService(harness);
+  await createCode(service, harness);
+  const result = await service.bindByCode(1, {
+    loginCode: 'wx-login-secret',
+    name: '张三',
+    bindCode: '483921'
+  }, { ipAddress: '127.0.0.1' });
+  assert.equal(result.user.employeeId, 88, '未登记身份证的员工应能通过绑定码登录');
+}
+
+async function testExpiredAndWrongCodeAreRejected() {
   const expiredHarness = createHarness();
   const expiredService = loadService(expiredHarness, { now: '2026-08-14T08:11:00.000Z' });
   const creator = loadService(expiredHarness);
   await createCode(creator, expiredHarness);
   await assert.rejects(
     () => expiredService.bindByCode(1, {
-      loginCode: 'login', name: '张三', idCardLast6: '01123X', bindCode: '483921'
+      loginCode: 'login', name: '张三', bindCode: '483921'
     }, {}),
     /已过期/
   );
 
-  const lockedHarness = createHarness();
-  const lockedService = loadService(lockedHarness);
-  await createCode(lockedService, lockedHarness);
-  lockedHarness.state.code.failed_attempts = 4;
+  const wrongHarness = createHarness();
+  const wrongService = loadService(wrongHarness);
+  await createCode(wrongService, wrongHarness);
   await assert.rejects(
-    () => lockedService.bindByCode(1, {
-      loginCode: 'login', name: '张三', idCardLast6: '01123X', bindCode: '000000'
+    () => wrongService.bindByCode(1, {
+      loginCode: 'login', name: '张三', bindCode: '000000'
     }, {}),
-    /尝试次数过多/
+    /姓名或绑定码错误/
   );
-  assert.equal(lockedHarness.state.code.failed_attempts, 5, '第五次失败必须持久化锁定');
 }
 
 async function testMalformedExpiryFailsClosed() {
@@ -222,7 +232,8 @@ async function testMalformedExpiryFailsClosed() {
 
 async function main() {
   await testGenerationAndSingleUseBinding();
-  await testExpiredAndFifthFailureAreRejected();
+  await testBindCodeWorksWithoutIdCard();
+  await testExpiredAndWrongCodeAreRejected();
   await testMalformedExpiryFailsClosed();
   await require('./web-employee-bind-code.test').run();
   console.log('employee-bind-code-tests-ok');
