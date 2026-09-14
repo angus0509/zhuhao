@@ -4,6 +4,7 @@ const { requireAuth, requireEmployeeAccount, requirePermission } = require('../m
 
 const router = express.Router();
 router.get('/employee/attendance/month', requireAuth, requireEmployeeAccount, controller.employeeMonth);
+router.get('/employee/attendance/today', requireAuth, requireEmployeeAccount, controller.employeeToday);
 router.post('/employee/attendance/punch', requireAuth, requireEmployeeAccount, controller.punch);
 router.post('/employee/attendance/corrections', requireAuth, requireEmployeeAccount, controller.createCorrection);
 router.put('/attendance/corrections/:id/review', requireAuth, requirePermission('attendance:review'), controller.reviewCorrection);

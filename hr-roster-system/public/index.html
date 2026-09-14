@@ -368,6 +368,11 @@
           <div class="table-wrap business-panel"><table class="data-table"><thead><tr><th>预支时间</th><th>员工</th><th>客户单位/项目</th><th>预支金额</th><th>用途</th><th>登记人</th><th>未结余额</th><th>状态</th><th>操作</th></tr></thead><tbody id="advanceTableBody"></tbody></table></div>
         </section>
 
+        <section class="module-view hidden" id="attendanceView">
+          <div class="module-hero"><div><p class="eyebrow">ATTENDANCE & HOURS</p><h2>考勤工时</h2><p>查看每日打卡、异常状态和月度核准工时。</p></div></div>
+          <div class="business-panel" style="margin-top:16px"><div class="panel-head"><div><h3>今日考勤</h3><p id="attendanceDailySummary">正在加载</p></div><button class="secondary-button" id="attendanceDailyRefresh" type="button">刷新</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>上班</th><th>下班</th><th>实际工时</th><th>正常工时</th><th>加班候选</th><th>状态</th></tr></thead><tbody id="attendanceDailyBody"></tbody></table></div></div>
+          <div class="business-panel" style="margin-top:16px"><div class="panel-head"><div><h3>月度汇总</h3><p>核准工时可供薪酬模块读取</p></div><label>月份 <input id="attendanceMonth" type="month"></label></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>正常工时</th><th>核准加班</th><th>迟到分钟</th><th>早退分钟</th><th>缺卡天数</th><th>旷工天数</th></tr></thead><tbody id="attendanceMonthlyBody"></tbody></table></div></div>
+        </section>
         <section class="module-view hidden" id="payrollView">
           <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYSLIP DELIVERY</p><h2>工资条发放管理</h2><p>从表格导入、数据校验到员工签收，按流程集中处理。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">导入工资条表格</button></div>
           <div class="payroll-flow-strip" aria-label="工资条发放流程">
@@ -1126,6 +1131,7 @@
     <script src="/js/core/navigation-groups.js" defer></script>
     <script src="/js/core/onboarding-workbench.js" defer></script>
     <script src="/js/views/dashboard.js" defer></script>
+    <script src="/js/views/attendance.js" defer></script>
     <script src="/js/views/roster-table.js" defer></script>
     <script src="/js/views/roster.js" defer></script>
     <script src="/js/core/router.js" defer></script>

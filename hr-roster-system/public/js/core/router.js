@@ -7,6 +7,7 @@ const viewLoaders = {
   advances: () => loadAdvances(),
   office: () => loadOffice(),
   payroll: () => loadPayroll(),
+  attendance: () => loadAttendance(),
   blacklist: () => loadBlacklist(),
   permissions: () => loadPermissions(),
   recruitmentSources: () => loadRecruitmentSources()
@@ -21,6 +22,7 @@ const viewElements = {
   talents: '#talentsView',
   advances: '#advancesView',
   payroll: '#payrollView',
+  attendance: '#attendanceView',
   blacklist: '#blacklistView',
   permissions: '#permissionsView',
   recruitmentSources: '#recruitmentSourcesView'

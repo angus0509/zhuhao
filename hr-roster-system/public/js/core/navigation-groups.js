@@ -37,6 +37,12 @@
       ]
     },
     {
+      id: 'attendance',
+      label: '考勤管理',
+      shortLabel: '考勤',
+      items: [{ view: 'attendance', label: '考勤工时', permissions: ['attendance:view'] }]
+    },
+    {
       id: 'compliance',
       label: '安全管理',
       shortLabel: '安全',

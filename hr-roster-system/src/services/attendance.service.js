@@ -96,6 +96,14 @@ async function getEmployeeMonth(companyId, employeeId, month) {
   }, { workedMinutes: 0, approvedNormalMinutes: 0, approvedOvertimeMinutes: 0 });
   return { month, list: rows, summary };
 }
+async function getEmployeeToday(companyId, employeeId) {
+  const date = shanghaiDate();
+  const rows = await database.query(`SELECT shift_date AS shiftDate, first_in_at AS firstInAt, last_out_at AS lastOutAt,
+    worked_minutes AS workedMinutes, approved_normal_minutes AS approvedNormalMinutes, overtime_candidate_minutes AS overtimeCandidateMinutes,
+    result_status AS resultStatus, review_status AS reviewStatus FROM attendance_daily_results
+    WHERE company_id=:companyId AND employee_id=:employeeId AND shift_date=:date LIMIT 1`, { companyId, employeeId, date });
+  return rows[0] || { shiftDate: date, resultStatus: 'NOT_CALCULATED', workedMinutes: 0 };
+}
 
 async function listDaily(companyId, user, params = {}) {
   const queryParams = { companyId, date: params.date || new Date().toISOString().slice(0, 10) };
@@ -123,4 +131,4 @@ async function listMonthly(companyId, user, params = {}) {
     GROUP BY d.employee_id, e.name ORDER BY e.name`, queryParams);
 }
 
-module.exports = { getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection };
+module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection };

@@ -2,6 +2,7 @@ const service = require('../services/attendance.service');
 const { success, asyncHandler } = require('../utils/response');
 
 exports.employeeMonth = asyncHandler(async (req, res) => success(res, await service.getEmployeeMonth(req.companyId, req.user.employeeId, req.query.month)));
+exports.employeeToday = asyncHandler(async (req, res) => success(res, await service.getEmployeeToday(req.companyId, req.user.employeeId)));
 exports.punch = asyncHandler(async (req, res) => success(res, await service.punchEmployee(req.companyId, req.user.employeeId, req.body), '打卡成功'));
 exports.createCorrection = asyncHandler(async (req, res) => success(res, await service.createCorrection(req.companyId, req.user.employeeId, req.body), '申请已提交'));
 exports.reviewCorrection = asyncHandler(async (req, res) => success(res, await service.reviewCorrection(req.companyId, req.user, Number(req.params.id), req.body), '审核结果已保存'));
