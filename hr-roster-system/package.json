@@ -12,6 +12,7 @@
     "test:project-onsite": "node test/project-onsite-assignment.test.js",
     "test:permission-config": "node test/permission-config-complete.test.js",
     "test:page-logic": "node test/page-logic-integrity.test.js",
+    "test:attendance": "node test/attendance-calculator.test.js && node test/attendance-write-contract.test.js && node test/attendance-management-contract.test.js",
     "test:web-employee-bind-code": "node test/web-employee-bind-code.test.js",
     "test:web-payroll-view-policy-layout": "node test/web-payroll-view-policy-layout.test.js",
     "test:employee-sensitive-edit": "node test/employee-sensitive-edit-regression.test.js",
