@@ -182,6 +182,20 @@ async function testPhoneMatchRejectsMissingDuplicateAndInactiveEmployees() {
   );
 }
 
+async function testTalentRehireSamePhonePrefersActiveEmployee() {
+  const harness = createHarness({
+    phoneMatches: [
+      { id: 88, name: '孙敏', phone: '13800000000', employee_status: 2 },
+      { id: 200, name: '孙敏', phone: '13800000000', employee_status: 3 }
+    ]
+  });
+  const service = loadService(harness);
+  const started = await service.startWechatLogin(1, { loginCode: 'login', phoneCode: 'phone' }, {});
+  assert.equal(started.needIdentityVerify, true, '离职回流同名同手机号应正常进入身份校验');
+  assert.ok(started.bindTicket);
+  assert.equal(harness.state.loginAudits[0].employeeId, 88, '离职回流应优先取在职档案');
+}
+
 async function testWrongSuffixReplayAndForeignBindingAreRejected() {
   const wrongHarness = createHarness();
   const wrongService = loadService(wrongHarness);
@@ -266,6 +280,7 @@ async function testDepartedEmployeeCanUseRestrictedWechatLogin() {
 async function main() {
   await testPhoneMatchIssuesSafeTicketAndBindsAtomically();
   await testPhoneMatchRejectsMissingDuplicateAndInactiveEmployees();
+  await testTalentRehireSamePhonePrefersActiveEmployee();
   await testWrongSuffixReplayAndForeignBindingAreRejected();
   await testPhoneChangedAfterTicketIssueRequiresRestart();
   await testExistingOpenidLogsInWithoutRebinding();

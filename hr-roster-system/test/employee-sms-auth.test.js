@@ -185,6 +185,19 @@ async function main() {
     '已离职员工应能通过短信登录查看和签收本人工资条');
   assert.deepEqual(departedSession.user.permissions, []);
 
+  const rehireHarness = createHarness({ employees: [
+    { id: 90, company_id: 1, name: '孙敏', phone: '18676619260', employee_status: 2, deleted_at: null },
+    { id: 91, company_id: 1, name: '孙敏', phone: '18676619260', employee_status: 3, deleted_at: null }
+  ] });
+  const rehireService = createService(rehireHarness);
+  await rehireService.requestLoginCode(1, { phone: '18676619260' }, { ipAddress: '127.0.0.4' });
+  const rehireSession = await rehireService.loginByCode(
+    1,
+    { phone: '18676619260', code: '654321' },
+    { ipAddress: '127.0.0.4' }
+  );
+  assert.equal(rehireSession.user.employeeId, 90, '离职回流同名同手机号应优先取在职档案');
+
   console.log('employee-sms-auth-tests-ok');
 }
 

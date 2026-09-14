@@ -226,13 +226,16 @@ function createEmployeeAuthService(dependencies = {}) {
        FROM hr_employee e
        WHERE e.company_id=:companyId AND e.phone=:phone
          AND e.employee_status IN (2,3) AND e.deleted_at IS NULL
-       ORDER BY e.id LIMIT 2`,
+       ORDER BY (e.employee_status=2) DESC, e.id LIMIT 2`,
       { companyId, phone: phoneNumber }
     );
     if (!matches.length) throw createError('未找到可绑定的在职或已离职员工，请联系驻厂人员');
-    if (matches.length !== 1) throw createError('员工档案存在重复手机号，请联系HR处理');
+    // 人才库离职回流重新入职会产生同名同手机号的在职+离职两条档案，优先取在职的那条。
+    const active = matches.filter(item => Number(item.employee_status) === 2);
+    const candidates = active.length ? active : matches;
+    if (candidates.length !== 1) throw createError('员工档案存在重复手机号，请联系HR处理');
 
-    const employee = normalizeEmployeeRow(matches[0]);
+    const employee = normalizeEmployeeRow(candidates[0]);
     const nonce = randomBytes(24).toString('hex');
     const nonceHash = sha256(nonce);
     const issuedAt = Math.floor(now().getTime() / 1000);

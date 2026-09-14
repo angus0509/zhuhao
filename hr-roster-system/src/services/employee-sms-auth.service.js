@@ -104,10 +104,13 @@ function createEmployeeSmsAuthService(dependencies = {}) {
        FROM hr_employee
        WHERE company_id=:companyId AND phone=:phone
          AND employee_status IN (2,3) AND deleted_at IS NULL
-       ORDER BY id LIMIT 2`,
+       ORDER BY (employee_status=2) DESC, id LIMIT 2`,
       { companyId, phone }
     );
-    const employee = matches.length === 1 ? matches[0] : null;
+    // 人才库离职回流重新入职会产生同名同手机号的在职+离职两条档案，优先取在职的那条。
+    const active = matches.filter(item => Number(item.employee_status) === 2);
+    const candidates = active.length ? active : matches;
+    const employee = candidates.length === 1 ? candidates[0] : null;
     const plainCode = String(randomInt(0, 1_000_000)).padStart(6, '0');
     const expiresAt = formatMysqlDate(new Date(requestedAt.getTime() + ttlSeconds * 1000));
     const insert = await database.query(
