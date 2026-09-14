@@ -63,7 +63,7 @@ const adminNavigation = buildNavigationModel({
   permissions: [],
   isCompanyAdmin: true
 });
-assert.equal(adminNavigation.length, 6, '企业管理员应看到六个一级菜单');
+assert.equal(adminNavigation.length, 7, '企业管理员应看到七个一级菜单');
 assert.deepEqual(adminNavigation.find(group => group.id === 'delivery').items.map(item => item.view), ['projects'], '企业管理员的客户与驻厂分组只保留客户项目');
 assert.equal(adminNavigation.find(group => group.id === 'system').active, true, '操作日志应归入系统设置');
 assert.equal(getNavigationFallbackView(adminNavigation), 'office', '默认入口必须为工作台');
