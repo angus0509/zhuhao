@@ -8,3 +8,6 @@ exports.createCorrection = asyncHandler(async (req, res) => success(res, await s
 exports.reviewCorrection = asyncHandler(async (req, res) => success(res, await service.reviewCorrection(req.companyId, req.user, Number(req.params.id), req.body), '审核结果已保存'));
 exports.daily = asyncHandler(async (req, res) => success(res, { list: await service.listDaily(req.companyId, req.user, req.query) }));
 exports.monthly = asyncHandler(async (req, res) => success(res, { list: await service.listMonthly(req.companyId, req.user, req.query) }));
+exports.createShiftRule = asyncHandler(async (req, res) => success(res, await service.createShiftRule(req.companyId, req.operatorId, req.body), '班次已保存'));
+exports.upsertSchedule = asyncHandler(async (req, res) => success(res, await service.upsertSchedule(req.companyId, req.operatorId, req.body), '排班已保存'));
+exports.payrollSummary = asyncHandler(async (req, res) => success(res, await service.attendanceSummaryForPayroll(req.companyId, req.user, req.query)));

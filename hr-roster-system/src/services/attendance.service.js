@@ -131,4 +131,24 @@ async function listMonthly(companyId, user, params = {}) {
     GROUP BY d.employee_id, e.name ORDER BY e.name`, queryParams);
 }
 
-module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection };
+async function createShiftRule(companyId, operatorId, body = {}) {
+  if (!body.ruleName || !/^\d{2}:\d{2}/.test(String(body.workStartTime || '')) || !/^\d{2}:\d{2}/.test(String(body.workEndTime || ''))) throw createError('班次信息不完整', 400, 'INVALID_SHIFT_RULE');
+  const result = await database.query(`INSERT INTO attendance_shift_rules (company_id,rule_name,work_start_time,work_end_time,rest_start_time,rest_end_time,standard_minutes,late_grace_minutes,early_grace_minutes,overtime_min_minutes,created_by)
+    VALUES (:companyId,:ruleName,:workStartTime,:workEndTime,:restStartTime,:restEndTime,:standardMinutes,:lateGraceMinutes,:earlyGraceMinutes,:overtimeMinMinutes,:operatorId)`, { companyId, operatorId, ruleName: String(body.ruleName).slice(0, 100), workStartTime: body.workStartTime, workEndTime: body.workEndTime, restStartTime: body.restStartTime || null, restEndTime: body.restEndTime || null, standardMinutes: Number(body.standardMinutes || 480), lateGraceMinutes: Number(body.lateGraceMinutes || 0), earlyGraceMinutes: Number(body.earlyGraceMinutes || 0), overtimeMinMinutes: Number(body.overtimeMinMinutes || 30) });
+  return { id: result.insertId, ruleName: body.ruleName };
+}
+
+async function upsertSchedule(companyId, operatorId, body = {}) {
+  if (!Number(body.employeeId) || !Number(body.shiftRuleId) || !/^\d{4}-\d{2}-\d{2}$/.test(String(body.shiftDate || ''))) throw createError('排班信息不完整', 400, 'INVALID_SCHEDULE');
+  await database.query(`INSERT INTO attendance_schedules (company_id,employee_id,shift_date,shift_rule_id,schedule_status,created_by)
+    VALUES (:companyId,:employeeId,:shiftDate,:shiftRuleId,:scheduleStatus,:operatorId)
+    ON DUPLICATE KEY UPDATE shift_rule_id=VALUES(shift_rule_id), schedule_status=VALUES(schedule_status), updated_at=CURRENT_TIMESTAMP`, { companyId, operatorId, employeeId: Number(body.employeeId), shiftDate: body.shiftDate, shiftRuleId: Number(body.shiftRuleId), scheduleStatus: body.scheduleStatus === 'REST' ? 'REST' : 'WORK' });
+  return { employeeId: Number(body.employeeId), shiftDate: body.shiftDate, shiftRuleId: Number(body.shiftRuleId), scheduleStatus: body.scheduleStatus === 'REST' ? 'REST' : 'WORK' };
+}
+
+async function attendanceSummaryForPayroll(companyId, user, params = {}) {
+  const rows = await listMonthly(companyId, user, params);
+  return { month: params.month, list: rows.map(row => ({ employeeId: row.employeeId, name: row.name, normalMinutes: Number(row.approvedNormalMinutes || 0), overtimeMinutes: Number(row.approvedOvertimeMinutes || 0) })) };
+}
+
+module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection, createShiftRule, upsertSchedule, attendanceSummaryForPayroll };
