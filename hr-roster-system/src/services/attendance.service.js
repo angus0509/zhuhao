@@ -1,6 +1,81 @@
 const database = require('../db');
 const { createError } = require('../utils/response');
 const { employeeScope } = require('../utils/data-scope');
+const { calculateDailyAttendance } = require('./attendance-calculator.service');
+async function query(client, sql, params) { const [rows] = await client.execute(sql, params); return rows; }
+
+function shanghaiDate(value = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+}
+
+async function loadSchedule(client, companyId, employeeId, shiftDate) {
+  return query(client, `SELECT s.id, s.shift_date AS shiftDate, s.schedule_status AS scheduleStatus,
+      r.work_start_time AS workStartTime, r.work_end_time AS workEndTime, r.rest_start_time AS restStartTime,
+      r.rest_end_time AS restEndTime, r.standard_minutes AS standardMinutes, r.late_grace_minutes AS lateGraceMinutes,
+      r.early_grace_minutes AS earlyGraceMinutes, r.overtime_min_minutes AS overtimeMinMinutes
+    FROM attendance_schedules s JOIN attendance_shift_rules r ON r.id=s.shift_rule_id AND r.company_id=s.company_id
+    WHERE s.company_id=:companyId AND s.employee_id=:employeeId AND s.shift_date=:shiftDate`, { companyId, employeeId, shiftDate }).then(rows => rows[0] || null);
+}
+
+async function recalculateDaily(client, companyId, employeeId, shiftDate, schedule) {
+  const punches = await query(client, `SELECT punch_type AS punchType, punch_time AS punchTime FROM attendance_punches
+    WHERE company_id=:companyId AND employee_id=:employeeId AND shift_date=:shiftDate ORDER BY punch_time`, { companyId, employeeId, shiftDate });
+  const result = calculateDailyAttendance({ schedule, punches });
+  await query(client, `INSERT INTO attendance_daily_results
+    (company_id, employee_id, shift_date, schedule_id, first_in_at, last_out_at, worked_minutes, approved_normal_minutes,
+     overtime_candidate_minutes, approved_overtime_minutes, late_minutes, early_leave_minutes, result_status, review_status, calculation_version, calculated_at)
+    VALUES (:companyId,:employeeId,:shiftDate,:scheduleId,:firstInAt,:lastOutAt,:workedMinutes,:approvedNormalMinutes,
+      :overtimeCandidateMinutes,0,:lateMinutes,:earlyLeaveMinutes,:resultStatus,'NONE','v1',CURRENT_TIMESTAMP)
+    ON DUPLICATE KEY UPDATE schedule_id=VALUES(schedule_id), first_in_at=VALUES(first_in_at), last_out_at=VALUES(last_out_at),
+      worked_minutes=VALUES(worked_minutes), approved_normal_minutes=VALUES(approved_normal_minutes), overtime_candidate_minutes=VALUES(overtime_candidate_minutes),
+      late_minutes=VALUES(late_minutes), early_leave_minutes=VALUES(early_leave_minutes), result_status=VALUES(result_status), calculated_at=CURRENT_TIMESTAMP`,
+  { companyId, employeeId, shiftDate, scheduleId: schedule?.id || null, ...result });
+  return result;
+}
+
+async function punchEmployee(companyId, employeeId, body = {}) {
+  if (!['IN', 'OUT'].includes(body.punchType)) throw createError('打卡类型无效', 400, 'INVALID_PUNCH_TYPE');
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(String(body.clientRequestId || ''))) throw createError('缺少有效的请求编号', 400, 'INVALID_REQUEST_ID');
+  return database.transaction(async client => {
+    const employee = await query(client, 'SELECT id FROM hr_employee WHERE id=:employeeId AND company_id=:companyId AND employee_status IN (1,2) LIMIT 1', { companyId, employeeId });
+    if (!employee[0]) throw createError('员工不存在或已离职', 403, 'EMPLOYEE_INACTIVE');
+    const shiftDate = shanghaiDate();
+    const schedule = await loadSchedule(client, companyId, employeeId, shiftDate);
+    if (!schedule) throw createError('今日暂无排班，请联系 HR', 400, 'NO_SCHEDULE');
+    const existing = await query(client, 'SELECT id, punch_type AS punchType, punch_time AS punchTime FROM attendance_punches WHERE company_id=:companyId AND employee_id=:employeeId AND client_request_id=:clientRequestId LIMIT 1', { companyId, employeeId, clientRequestId: body.clientRequestId });
+    if (existing[0]) return { punchId: existing[0].id, punchType: existing[0].punchType, punchTime: existing[0].punchTime, shiftDate, duplicate: true };
+    const inserted = await query(client, `INSERT INTO attendance_punches (company_id,employee_id,shift_date,punch_type,punch_time,source,client_request_id)
+      VALUES (:companyId,:employeeId,:shiftDate,:punchType,CURRENT_TIMESTAMP(3),:source,:clientRequestId)`, { companyId, employeeId, shiftDate, punchType: body.punchType, source: body.source === 'WEB' ? 'WEB' : 'WECHAT', clientRequestId: body.clientRequestId });
+    const result = await recalculateDaily(client, companyId, employeeId, shiftDate, schedule);
+    return { punchId: inserted.insertId, punchType: body.punchType, shiftDate, dailyStatus: result.resultStatus };
+  });
+}
+
+async function createCorrection(companyId, employeeId, body = {}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(body.shiftDate || '')) || !body.reason || !['MISSING_IN', 'MISSING_OUT', 'TIME_CORRECTION', 'OVERTIME'].includes(body.requestType)) throw createError('补卡申请信息不完整', 400, 'INVALID_CORRECTION');
+  const result = await database.query(`INSERT INTO attendance_correction_requests (company_id,employee_id,shift_date,request_type,requested_time,reason,submitted_by_employee_id)
+    VALUES (:companyId,:employeeId,:shiftDate,:requestType,:requestedTime,:reason,:employeeId)`, { companyId, employeeId, shiftDate: body.shiftDate, requestType: body.requestType, requestedTime: body.requestedTime || null, reason: String(body.reason).slice(0, 500) });
+  return { id: result.insertId, status: 'PENDING' };
+}
+
+async function reviewCorrection(companyId, user, id, body = {}) {
+  if (!['APPROVE', 'REJECT'].includes(body.action)) throw createError('审核动作无效', 400, 'INVALID_REVIEW_ACTION');
+  return database.transaction(async client => {
+    const rows = await query(client, 'SELECT * FROM attendance_correction_requests WHERE id=:id AND company_id=:companyId AND status=\'PENDING\' FOR UPDATE', { id, companyId });
+    if (!rows[0]) throw createError('补卡申请不存在或已处理', 404, 'CORRECTION_NOT_FOUND');
+    const request = rows[0];
+    const status = body.action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+    await query(client, 'UPDATE attendance_correction_requests SET status=:status, reviewed_by=:reviewedBy, review_comment=:comment, reviewed_at=CURRENT_TIMESTAMP WHERE id=:id AND company_id=:companyId', { status, reviewedBy: user.id, comment: String(body.reviewComment || '').slice(0, 500), id, companyId });
+    if (status === 'APPROVED' && request.requested_time) {
+      const type = request.request_type === 'MISSING_OUT' ? 'OUT' : 'IN';
+      await query(client, `INSERT IGNORE INTO attendance_punches (company_id,employee_id,shift_date,punch_type,punch_time,source,client_request_id)
+        VALUES (:companyId,:employeeId,:shiftDate,:punchType,:requestedTime,'MANUAL_APPROVED',:requestId)`, { companyId, employeeId: request.employee_id, shiftDate: request.shift_date, punchType: type, requestedTime: request.requested_time, requestId: `correction-${id}` });
+      const schedule = await loadSchedule(client, companyId, request.employee_id, request.shift_date);
+      if (schedule) await recalculateDaily(client, companyId, request.employee_id, request.shift_date, schedule);
+    }
+    return { id, status };
+  });
+}
 
 function monthRange(month) {
   if (!/^\d{4}-\d{2}$/.test(String(month || ''))) throw createError('月份格式应为 YYYY-MM', 400, 'INVALID_MONTH');
@@ -48,4 +123,4 @@ async function listMonthly(companyId, user, params = {}) {
     GROUP BY d.employee_id, e.name ORDER BY e.name`, queryParams);
 }
 
-module.exports = { getEmployeeMonth, listDaily, listMonthly, monthRange };
+module.exports = { getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection };
