@@ -52,7 +52,9 @@ function createHarness(options = {}) {
 
 async function main() {
   assert.equal(typeof uploadMiddleware.singlePayslipSignature, 'function');
-  const signatureRoute = payslipRouter.stack.find(layer => layer.route?.path === '/me/payslips/:id/signature');
+  const signatureRoute = payslipRouter.stack.find(layer =>
+    layer.route?.path === '/me/payslips/:id/signature' && layer.route.methods.post
+  );
   assert.ok(signatureRoute, '员工工资条必须注册签名上传接口');
   assert.equal(signatureRoute.route.methods.post, true);
   assert.equal(

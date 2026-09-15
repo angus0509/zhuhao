@@ -181,6 +181,9 @@ run_migration "$STAGE_DIR/sql/migrate-onsite-sensitive-blacklist-permission-2026
 run_migration "$STAGE_DIR/sql/migrate-onsite-sensitive-employee-view-20260831.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-disable-contract-insurance-risk-20260831.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-hr-manager-onsite-assign-20260908.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-attendance-timekeeping-20260909.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-attendance-geofence-20260915.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -265,6 +268,30 @@ test "$ONSITE_CONTRACT_BROKEN" = "0" || { echo "驻厂人员合同登记权限�
 
 ONSITE_PROJECT_MANAGE_BROKEN="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.role_code='onsite_staff' AND r.status=1 AND NOT EXISTS (SELECT 1 FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code='project:manage')")"
 test "$ONSITE_PROJECT_MANAGE_BROKEN" = "0" || { echo "驻厂人员项目管理权限迁移不完整" >&2; exit 1; }
+
+ATTENDANCE_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_shift_rules','attendance_schedules','attendance_punches','attendance_daily_results','attendance_correction_requests')")"
+test "$ATTENDANCE_TABLE_COUNT" = "5" || { echo "考勤核心表迁移不完整: $ATTENDANCE_TABLE_COUNT/5" >&2; exit 1; }
+
+ATTENDANCE_GEOFENCE_READY="$(mysql_scalar "SELECT (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_geofences') + (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_correction_requests' AND COLUMN_NAME='punch_id')")"
+test "$ATTENDANCE_GEOFENCE_READY" = "2" || { echo "电子围栏迁移不完整: $ATTENDANCE_GEOFENCE_READY/2" >&2; exit 1; }
+
+PROJECT_ATTENDANCE_READY="$(mysql_scalar "SELECT (SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_project_rules','attendance_project_calendar','attendance_project_geofence')) + (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_geofences' AND COLUMN_NAME='customer_id') + (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_schedules','attendance_punches','attendance_daily_results') AND COLUMN_NAME='project_id')")"
+test "$PROJECT_ATTENDANCE_READY" = "7" || { echo "项目考勤迁移不完整: $PROJECT_ATTENDANCE_READY/7" >&2; exit 1; }
+
+PROJECT_ATTENDANCE_RULE_COLUMN="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_schedules' AND COLUMN_NAME='project_rule_id'")"
+test "$PROJECT_ATTENDANCE_RULE_COLUMN" = "1" || { echo "项目考勤规则快照列迁移不完整" >&2; exit 1; }
+
+PROJECT_ATTENDANCE_NULLABLE="$(mysql_scalar "SELECT (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_geofences' AND COLUMN_NAME='project_id' AND IS_NULLABLE='YES') + (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='attendance_schedules' AND COLUMN_NAME='shift_rule_id' AND IS_NULLABLE='YES')")"
+test "$PROJECT_ATTENDANCE_NULLABLE" = "2" || { echo "项目考勤兼容列可空性迁移不完整: $PROJECT_ATTENDANCE_NULLABLE/2" >&2; exit 1; }
+
+PROJECT_ATTENDANCE_INDEX_COUNT="$(mysql_scalar "SELECT COUNT(DISTINCT CONCAT(TABLE_NAME, ':', INDEX_NAME)) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='hr_roster' AND ((TABLE_NAME='attendance_geofences' AND INDEX_NAME='uk_attendance_geofence_customer_name') OR (TABLE_NAME='attendance_schedules' AND INDEX_NAME='idx_attendance_schedule_project_date') OR (TABLE_NAME='attendance_punches' AND INDEX_NAME='idx_attendance_punch_project_date') OR (TABLE_NAME='attendance_daily_results' AND INDEX_NAME='idx_attendance_daily_project_date'))")"
+test "$PROJECT_ATTENDANCE_INDEX_COUNT" = "4" || { echo "项目考勤关键索引迁移不完整: $PROJECT_ATTENDANCE_INDEX_COUNT/4" >&2; exit 1; }
+
+PROJECT_ATTENDANCE_RULE_CONSTRAINT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='hr_roster' AND TABLE_NAME='attendance_schedules' AND CONSTRAINT_NAME='chk_attendance_schedule_rule_source' AND CONSTRAINT_TYPE='CHECK'")"
+test "$PROJECT_ATTENDANCE_RULE_CONSTRAINT" = "1" || { echo "项目考勤规则来源约束迁移不完整" >&2; exit 1; }
+
+UNASSIGNED_ATTENDANCE_GEOFENCE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM attendance_geofences WHERE customer_id IS NULL")"
+echo "未归属客户的历史围栏数量: $UNASSIGNED_ATTENDANCE_GEOFENCE_COUNT"
 
 BROKEN_ROLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM sys_role r WHERE r.status=1 AND r.role_code IN ('company_admin','hr_manager','onsite_staff','payroll_staff') AND ((r.role_code='company_admin' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view','permission:menu'))<10) OR (r.role_code='hr_manager' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','dashboard:menu','blacklist:menu','talent:menu','advance:menu','payroll:menu','risk:menu','audit:menu','audit:view'))<9) OR (r.role_code='onsite_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','blacklist:menu'))<2) OR (r.role_code='payroll_staff' AND (SELECT COUNT(*) FROM sys_role_permission rp JOIN sys_permission p ON p.id=rp.permission_id AND p.status=1 WHERE rp.role_id=r.id AND p.permission_code IN ('office:menu','advance:menu','payroll:menu'))<3))")"
 test "$BROKEN_ROLE_COUNT" = "0" || { echo "有 $BROKEN_ROLE_COUNT 个角色权限迁移不完整" >&2; exit 1; }

@@ -87,4 +87,25 @@ assert.match(payslipViewPolicyMigration, /view_once/);
 assert.match(payslipViewPolicyMigration, /view_expires_minutes/);
 assert.doesNotMatch(payslipViewPolicyMigration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i, '查看策略迁移不得删除历史数据');
 
+for (const attendanceMigrationPath of [
+  'sql/migrate-attendance-timekeeping-20260909.mysql.sql',
+  'sql/migrate-attendance-geofence-20260915.mysql.sql',
+  'sql/migrate-web-project-attendance-20260915.mysql.sql'
+]) {
+  const attendanceMigration = read(attendanceMigrationPath);
+  assert.ok(verify.includes(`"${attendanceMigrationPath}"`), `发布包必须包含 ${attendanceMigrationPath}`);
+  assert.match(verify, new RegExp(`M\\d+=\"${attendanceMigrationPath.replaceAll('.', '\\.') }\"`),
+    `${attendanceMigrationPath} 必须进入统一安全审计清单`);
+  assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${attendanceMigrationPath}"`),
+    `部署脚本必须执行 ${attendanceMigrationPath}`);
+  assert.doesNotMatch(attendanceMigration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i,
+    `${attendanceMigrationPath} 不得删除历史数据`);
+}
+assert.match(deploy, /ATTENDANCE_TABLE_COUNT=.*attendance_shift_rules.*attendance_schedules.*attendance_punches.*attendance_daily_results.*attendance_correction_requests/s,
+  '部署后必须核验考勤核心表');
+assert.match(deploy, /ATTENDANCE_GEOFENCE_READY=.*attendance_geofences.*punch_id/s,
+  '部署后必须核验电子围栏表和异常打卡关联字段');
+assert.match(deploy, /PROJECT_ATTENDANCE_READY=.*attendance_project_rules.*attendance_project_calendar.*attendance_project_geofence.*customer_id.*attendance_schedules.*attendance_punches.*attendance_daily_results/s,
+  '部署后必须核验项目考勤表、客户围栏和历史项目快照');
+
 console.log('release-migration-consistency-tests-ok');

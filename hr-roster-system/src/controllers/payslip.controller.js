@@ -1,5 +1,6 @@
 const service = require('../services/payslip.service');
 const signatureService = require('../services/payslip-signature.service');
+const signaturePreviewService = require('../services/payroll-signature-preview.service');
 const { success, asyncHandler } = require('../utils/response');
 
 function requestMeta(req) {
@@ -32,6 +33,18 @@ exports.uploadSignatureMine = asyncHandler(async (req, res) => {
     { ipAddress: req.ip, deviceInfo: req.header('user-agent') || '' }
   );
   success(res, data, '手写签名已保存');
+});
+
+exports.previewSignatureMine = asyncHandler(async (req, res) => {
+  const signature = await signaturePreviewService.resolveEmployeeSignature(
+    req.companyId,
+    Number(req.params.id),
+    req.user
+  );
+  res.setHeader('Content-Type', signature.mimeType);
+  res.setHeader('Content-Disposition', 'inline; filename="payslip-signature.png"');
+  res.setHeader('Cache-Control', 'private, no-store');
+  return res.sendFile(signature.file);
 });
 
 exports.disputeMine = asyncHandler(async (req, res) => {

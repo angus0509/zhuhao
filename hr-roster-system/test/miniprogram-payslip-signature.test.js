@@ -37,6 +37,20 @@ function instantiatePage(config) {
   return instance;
 }
 
+function drawValidSignature(page) {
+  const strokes = [
+    [[20, 30], [55, 65], [90, 25], [120, 70]],
+    [[45, 18], [45, 95], [80, 120]],
+    [[145, 25], [185, 70], [225, 30], [245, 105]],
+    [[150, 95], [195, 55], [240, 115]]
+  ];
+  for (const stroke of strokes) {
+    page.onTouchStart({ touches: [{ x: stroke[0][0], y: stroke[0][1] }] });
+    for (const [x, y] of stroke.slice(1)) page.onTouchMove({ touches: [{ x, y }] });
+    page.onTouchEnd();
+  }
+}
+
 async function flushPromises() {
   await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
@@ -45,6 +59,7 @@ async function flushPromises() {
 async function main() {
   const requests = [];
   const uploads = [];
+  const downloads = [];
   const toasts = [];
   const navigations = [];
   const canvasCalls = [];
@@ -116,6 +131,10 @@ async function main() {
         })
       });
     },
+    downloadFile(options) {
+      downloads.push(options);
+      options.success({ statusCode: 200, tempFilePath: '/tmp/saved-signature.png' });
+    },
     createCanvasContext() {
       return canvasContext;
     },
@@ -147,6 +166,16 @@ async function main() {
   assert.equal(uploads.length, 0, '空白签名不能上传');
   assert.match(toasts.at(-1), /签名/);
 
+  const activeSignaturePage = instantiatePage(signConfig);
+  detailPayload.activeSignature = { id: 801, signedName: '张三', signedAt: '2026-08-14T10:00:00.000Z' };
+  activeSignaturePage.onLoad({ id: '31' });
+  await flushPromises();
+  assert.equal(downloads.length, 1, '二次进入签字页必须下载原始手写签名');
+  assert.equal(downloads[0].url.endsWith('/me/payslips/31/signature'), true);
+  assert.equal(downloads[0].header.authorization, `Bearer ${employeeSession.token}`);
+  assert.equal(activeSignaturePage.data.signaturePreviewPath, '/tmp/saved-signature.png');
+  detailPayload.activeSignature = null;
+
   blank.onTouchStart({ touches: [{ x: 20, y: 30 }] });
   blank.onTouchMove({ touches: [{ x: 80, y: 90 }] });
   blank.onTouchEnd();
@@ -164,11 +193,22 @@ async function main() {
   await unconfirmed.submitSignature();
   assert.match(toasts.at(-1), /核对/);
 
+  const casual = instantiatePage(signConfig);
+  casual.onLoad({ id: '31' });
+  await flushPromises();
+  casual.onTouchStart({ touches: [{ x: 10, y: 10 }] });
+  casual.onTouchMove({ touches: [{ x: 220, y: 12 }] });
+  casual.onTouchEnd();
+  casual.toggleConfirmed();
+  const uploadsBeforeCasual = uploads.length;
+  await casual.submitSignature();
+  assert.equal(uploads.length, uploadsBeforeCasual, '单线随意划写不得上传');
+  assert.match(toasts.at(-1), /规范手写|重新签字/);
+
   const success = instantiatePage(signConfig);
   success.onLoad({ id: '31' });
   await flushPromises();
-  success.onTouchStart({ touches: [{ x: 10, y: 10 }] });
-  success.onTouchMove({ touches: [{ x: 50, y: 60 }] });
+  drawValidSignature(success);
   success.toggleConfirmed();
   await Promise.all([success.submitSignature(), success.submitSignature()]);
   await flushPromises();
@@ -186,8 +226,7 @@ async function main() {
   const uploadFailure = instantiatePage(signConfig);
   uploadFailure.onLoad({ id: '31' });
   await flushPromises();
-  uploadFailure.onTouchStart({ touches: [{ x: 10, y: 10 }] });
-  uploadFailure.onTouchMove({ touches: [{ x: 40, y: 40 }] });
+  drawValidSignature(uploadFailure);
   uploadFailure.toggleConfirmed();
   const beforeFailedReceipt = requests.filter(item => item.url.endsWith('/receipt')).length;
   await uploadFailure.submitSignature();
@@ -200,8 +239,7 @@ async function main() {
   const domainFailure = instantiatePage(signConfig);
   domainFailure.onLoad({ id: '31' });
   await flushPromises();
-  domainFailure.onTouchStart({ touches: [{ x: 10, y: 10 }] });
-  domainFailure.onTouchMove({ touches: [{ x: 40, y: 40 }] });
+  drawValidSignature(domainFailure);
   domainFailure.toggleConfirmed();
   await domainFailure.submitSignature();
   await flushPromises();
@@ -211,8 +249,7 @@ async function main() {
   const fileMissingFailure = instantiatePage(signConfig);
   fileMissingFailure.onLoad({ id: '31' });
   await flushPromises();
-  fileMissingFailure.onTouchStart({ touches: [{ x: 10, y: 10 }] });
-  fileMissingFailure.onTouchMove({ touches: [{ x: 40, y: 40 }] });
+  drawValidSignature(fileMissingFailure);
   fileMissingFailure.toggleConfirmed();
   await fileMissingFailure.submitSignature();
   await flushPromises();
@@ -223,8 +260,7 @@ async function main() {
   const receiptFailure = instantiatePage(signConfig);
   receiptFailure.onLoad({ id: '31' });
   await flushPromises();
-  receiptFailure.onTouchStart({ touches: [{ x: 10, y: 10 }] });
-  receiptFailure.onTouchMove({ touches: [{ x: 40, y: 40 }] });
+  drawValidSignature(receiptFailure);
   receiptFailure.toggleConfirmed();
   await receiptFailure.submitSignature();
   await flushPromises();
@@ -259,6 +295,10 @@ async function main() {
   const signWxml = fs.readFileSync(path.join(miniRoot, 'pages/my-payslips/sign/index.wxml'), 'utf8');
   const signWxss = fs.readFileSync(path.join(miniRoot, 'pages/my-payslips/sign/index.wxss'), 'utf8');
   assert.match(signWxml, /canvas-id="signatureCanvas"/);
+  assert.match(signWxml, /signaturePreviewPath/, '已保存状态必须展示原始手写签名图片');
+  assert.doesNotMatch(signWxml, /已保存的手写签名[\s\S]{0,120}\{\{signedName\}\}/,
+    '已保存状态不能用系统字体姓名冒充手写签名');
+  assert.match(signWxml, /规范手写.*signedName/, '签字区必须按档案姓名提示规范签写');
   assert.match(signWxml, /本人已核对工资条内容/);
   assert.match(signWxml, /清除重签/);
   assert.match(signJs, /wx\.canvasToTempFilePath/);

@@ -49,6 +49,18 @@ async function main() {
   assert.equal(auditWrites[0].params.operatorId, 9);
   assert.equal(auditWrites[0].params.payslipId, 901);
 
+  queries.length = 0;
+  const employeeResult = await previewService.resolveEmployeeSignature(1, 901, {
+    id: 18,
+    companyId: 1,
+    employeeId: 88,
+    accountType: 'EMPLOYEE'
+  });
+  assert.equal(employeeResult.file, '/safe/uploads/company-1/payslip-signatures/signature.png');
+  assert.deepEqual(queries[0].params, { companyId: 1, payslipId: 901, employeeId: 88 });
+  assert.match(queries[0].sql, /d\.employee_id=:employeeId/,
+    '员工本人预览必须按当前会话 employeeId 隔离');
+
   const traversalService = createPayrollSignaturePreviewService({
     db: { async first() { return { storagePath: '../private.key', mimeType: 'image/png' }; } },
     fs: { async access() {} },
@@ -65,6 +77,12 @@ async function main() {
     /get\('\/payroll\/payslips\/:id\/signature'[\s\S]*requirePermission\('payroll:view'\)/,
     '签名预览接口必须校验工资查看权限'
   );
+  const employeeRoutes = fs.readFileSync('src/routes/payslip.routes.js', 'utf8');
+  const employeeController = fs.readFileSync('src/controllers/payslip.controller.js', 'utf8');
+  assert.match(employeeRoutes, /get\('\/me\/payslips\/:id\/signature'/,
+    '员工工资条必须提供本人签名图片读取接口');
+  assert.match(employeeController, /resolveEmployeeSignature/,
+    '员工签名图片接口必须通过本人权限服务解析文件');
 
   console.log('payroll-signature-preview-tests-ok');
 }

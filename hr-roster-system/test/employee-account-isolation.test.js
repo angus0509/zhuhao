@@ -67,7 +67,8 @@ async function main() {
   const payslipRouteLayers = payslipLayers.filter(layer => layer.route);
   assert.ok(authLayerIndex >= 0, '员工本人工资条路由必须先验证登录状态');
   assert.ok(employeeGuardIndex > authLayerIndex, '员工本人工资条路由必须在登录后校验员工账号类型');
-  assert.equal(payslipRouteLayers.length, 5, '员工本人工资条应包含列表、详情、签名、签收和异议五条接口');
+  assert.equal(payslipRouteLayers.length, 6,
+    '员工本人工资条应包含列表、详情、签名上传、签名预览、签收和异议六条接口');
   assert.ok(payslipRouteLayers.every((_layer, index) => employeeGuardIndex < payslipLayers.indexOf(payslipRouteLayers[index])),
     '所有员工本人工资条接口都必须位于员工账号守卫之后');
 

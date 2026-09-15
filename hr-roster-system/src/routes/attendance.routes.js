@@ -3,6 +3,11 @@ const controller = require('../controllers/attendance.controller');
 const { requireAuth, requireEmployeeAccount, requirePermission } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
+router.get('/attendance/projects', requireAuth, requirePermission('attendance:view'), controller.projects);
+router.get('/attendance/projects/:projectId/settings', requireAuth, requirePermission('attendance:view'), controller.projectSettings);
+router.put('/attendance/projects/:projectId/settings', requireAuth, requirePermission('attendance:manage'), controller.saveProjectSettings);
+router.get('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:view'), controller.projectExceptions);
+router.put('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:manage'), controller.saveProjectException);
 router.get('/employee/attendance/month', requireAuth, requireEmployeeAccount, controller.employeeMonth);
 router.get('/employee/attendance/today', requireAuth, requireEmployeeAccount, controller.employeeToday);
 router.post('/employee/attendance/punch', requireAuth, requireEmployeeAccount, controller.punch);

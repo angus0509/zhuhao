@@ -98,6 +98,9 @@ async function main() {
     switchTab(options) {
       navigation.push(options.url);
     },
+    navigateTo(options) {
+      navigation.push(options.url);
+    },
     setNavigationBarTitle(options) {
       navigationTitles.push(options.title);
     },
@@ -144,12 +147,16 @@ async function main() {
   assert.equal(home.data.profile.latestPayslip.salaryMonth, '2026-08');
   home.goPayslip();
   assert.equal(navigation.at(-1), '/pages/payroll/index', '查看工资条应进入共享工资根页');
+  home.goAttendance();
+  assert.equal(navigation.at(-1), '/pages/attendance/index', '员工首页考勤入口应进入考勤打卡页');
 
   const homeWxml = fs.readFileSync(
     path.join(miniRoot, 'components/employee-home-panel/index.wxml'),
     'utf8'
   );
   assert.match(homeWxml, /查看工资条/);
+  assert.match(homeWxml, /考勤打卡/, '员工首页必须展示考勤打卡文字');
+  assert.match(homeWxml, /bindtap="goAttendance"/, '员工首页考勤入口必须绑定跳转事件');
   assert.doesNotMatch(homeWxml, /netAmount|grossAmount|payableAmount/, '员工首页不得渲染工资金额');
 
   const profileWxml = fs.readFileSync(

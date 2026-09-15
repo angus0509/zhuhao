@@ -24,6 +24,15 @@ SET @table_name = 'attendance_punches';
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME=@table_name AND COLUMN_NAME='geofence_id')=0,
   'ALTER TABLE attendance_punches ADD COLUMN geofence_id BIGINT DEFAULT NULL AFTER source', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @table_name = 'attendance_correction_requests';
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME=@table_name AND COLUMN_NAME='punch_id')=0,
+  'ALTER TABLE attendance_correction_requests ADD COLUMN punch_id BIGINT DEFAULT NULL AFTER request_type', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME=@table_name AND INDEX_NAME='uk_attendance_correction_punch')=0,
+  'ALTER TABLE attendance_correction_requests ADD UNIQUE KEY uk_attendance_correction_punch (company_id, punch_id, request_type)', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @table_name = 'attendance_punches';
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME=@table_name AND COLUMN_NAME='latitude')=0,
   'ALTER TABLE attendance_punches ADD COLUMN latitude DECIMAL(10,7) DEFAULT NULL AFTER geofence_id', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

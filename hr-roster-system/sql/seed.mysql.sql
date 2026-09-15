@@ -120,7 +120,12 @@ VALUES
 (32, '工资批次复核', 'payroll:review', 2, 0, NULL, '/api/payroll/batches/:id/review', 72, 1),
 (53, '批量录入员工', 'employee:batch', 2, 1, NULL, '/api/employees/batch', 12, 1),
 (54, '保险查看（已停用）', 'insurance:view', 2, 0, NULL, '/api/insurance/overview', 46, 0),
-(55, '操作日志查看', 'audit:view', 2, 0, NULL, '/api/audit-logs', 86, 1)
+(55, '操作日志查看', 'audit:view', 2, 0, NULL, '/api/audit-logs', 86, 1),
+(57, '考勤管理', 'attendance:menu', 1, 0, '/hr/attendance', NULL, 25, 1),
+(58, '查看考勤', 'attendance:view', 2, 57, NULL, '/api/attendance', 26, 1),
+(59, '管理考勤', 'attendance:manage', 2, 57, NULL, '/api/attendance', 27, 1),
+(60, '审核考勤异常', 'attendance:review', 2, 57, NULL, '/api/attendance/corrections', 28, 1),
+(61, '导出考勤', 'attendance:export', 2, 57, NULL, '/api/attendance/export.xlsx', 29, 1)
 ON DUPLICATE KEY UPDATE permission_name = VALUES(permission_name), status = VALUES(status);
 
 INSERT INTO sys_role
@@ -143,6 +148,7 @@ WHERE permission_code IN (
   'employee:sensitive:view', 'risk:menu', 'risk:view', 'risk:scan', 'risk:handle',
   'customer:view', 'project:view', 'factory:view', 'factory:assign', 'blacklist:view',
   'advance:view', 'advance:approve', 'payroll:view', 'payroll:review',
+  'attendance:menu', 'attendance:view', 'attendance:manage', 'attendance:review', 'attendance:export',
   'audit:view'
 );
 
@@ -154,12 +160,13 @@ WHERE permission_code IN (
   'employee:sensitive:view',
   'customer:view', 'customer:manage', 'project:view', 'project:manage',
   'factory:view', 'factory:manage', 'blacklist:view',
-  'advance:view', 'advance:create'
+  'advance:view', 'advance:create',
+  'attendance:menu', 'attendance:view', 'attendance:manage', 'attendance:review'
 );
 
 INSERT IGNORE INTO sys_role_permission (role_id, permission_id)
 SELECT 4, id FROM sys_permission
-WHERE permission_code IN ('employee:view', 'project:view', 'advance:view', 'advance:approve', 'advance:pay', 'payroll:view', 'payroll:manage');
+WHERE permission_code IN ('employee:view', 'project:view', 'advance:view', 'advance:approve', 'advance:pay', 'payroll:view', 'payroll:manage', 'attendance:menu', 'attendance:view');
 
 -- 部门范围角色默认覆盖示例公司的现有部门；企业管理员可在后台缩小授权范围。
 INSERT IGNORE INTO sys_role_dept (role_id, dept_id)
