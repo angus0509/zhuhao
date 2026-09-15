@@ -2,6 +2,7 @@ const database = require('../db');
 const { createError } = require('../utils/response');
 const { employeeScope } = require('../utils/data-scope');
 const { calculateDailyAttendance } = require('./attendance-calculator.service');
+const { evaluateGeofence } = require('./attendance-geofence.service');
 async function query(client, sql, params) { const [rows] = await client.execute(sql, params); return rows; }
 
 function shanghaiDate(value = new Date()) {
@@ -33,6 +34,17 @@ async function recalculateDaily(client, companyId, employeeId, shiftDate, schedu
   return result;
 }
 
+async function evaluateEmployeeLocation(client, companyId, employeeId, location) {
+  const fences = await query(client, `SELECT g.id, g.latitude, g.longitude, g.radius_meters AS radiusMeters,
+      g.max_accuracy_meters AS maxAccuracyMeters
+    FROM hr_employee_job j JOIN attendance_geofences g ON g.company_id=j.company_id AND g.project_id=j.project_id AND g.status=1
+    WHERE j.company_id=:companyId AND j.employee_id=:employeeId AND j.job_status=1 ORDER BY g.id LIMIT 1`, { companyId, employeeId });
+  const geofence = fences[0];
+  if (!geofence) return { geofenceId: null, status: 'NO_FENCE', distanceMeters: null, radiusSnapshot: null, reason: '' };
+  const evaluation = evaluateGeofence(location || { failed: true, reason: '未提供定位' }, geofence);
+  return { geofenceId: geofence.id, status: evaluation.status, distanceMeters: evaluation.distanceMeters, radiusSnapshot: Number(geofence.radiusMeters), reason: evaluation.reason };
+}
+
 async function punchEmployee(companyId, employeeId, body = {}) {
   if (!['IN', 'OUT'].includes(body.punchType)) throw createError('打卡类型无效', 400, 'INVALID_PUNCH_TYPE');
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(String(body.clientRequestId || ''))) throw createError('缺少有效的请求编号', 400, 'INVALID_REQUEST_ID');
@@ -44,10 +56,16 @@ async function punchEmployee(companyId, employeeId, body = {}) {
     if (!schedule) throw createError('今日暂无排班，请联系 HR', 400, 'NO_SCHEDULE');
     const existing = await query(client, 'SELECT id, punch_type AS punchType, punch_time AS punchTime FROM attendance_punches WHERE company_id=:companyId AND employee_id=:employeeId AND client_request_id=:clientRequestId LIMIT 1', { companyId, employeeId, clientRequestId: body.clientRequestId });
     if (existing[0]) return { punchId: existing[0].id, punchType: existing[0].punchType, punchTime: existing[0].punchTime, shiftDate, duplicate: true };
-    const inserted = await query(client, `INSERT INTO attendance_punches (company_id,employee_id,shift_date,punch_type,punch_time,source,client_request_id)
-      VALUES (:companyId,:employeeId,:shiftDate,:punchType,CURRENT_TIMESTAMP(3),:source,:clientRequestId)`, { companyId, employeeId, shiftDate, punchType: body.punchType, source: body.source === 'WEB' ? 'WEB' : 'WECHAT', clientRequestId: body.clientRequestId });
+    const fence = await evaluateEmployeeLocation(client, companyId, employeeId, body.location);
+    const location = body.location && !body.location.failed ? body.location : {};
+    const inserted = await query(client, `INSERT INTO attendance_punches (company_id,employee_id,shift_date,punch_type,punch_time,source,geofence_id,latitude,longitude,location_accuracy,distance_meters,geofence_radius_snapshot,geofence_status,location_reason,client_request_id)
+      VALUES (:companyId,:employeeId,:shiftDate,:punchType,CURRENT_TIMESTAMP(3),:source,:geofenceId,:latitude,:longitude,:accuracy,:distanceMeters,:radiusSnapshot,:geofenceStatus,:locationReason,:clientRequestId)`, { companyId, employeeId, shiftDate, punchType: body.punchType, source: body.source === 'WEB' ? 'WEB' : 'WECHAT', clientRequestId: body.clientRequestId, geofenceId: fence.geofenceId, latitude: Number.isFinite(Number(location.latitude)) ? Number(location.latitude) : null, longitude: Number.isFinite(Number(location.longitude)) ? Number(location.longitude) : null, accuracy: Number.isFinite(Number(location.accuracy)) ? Number(location.accuracy) : null, distanceMeters: fence.distanceMeters, radiusSnapshot: fence.radiusSnapshot, geofenceStatus: fence.status, locationReason: fence.reason || null });
+    if (['OUTSIDE', 'LOW_ACCURACY', 'LOCATION_FAILED'].includes(fence.status)) {
+      await query(client, `INSERT INTO attendance_correction_requests (company_id,employee_id,shift_date,request_type,reason,status,submitted_by_employee_id)
+        VALUES (:companyId,:employeeId,:shiftDate,'GEOFENCE_EXCEPTION',:reason,'PENDING',:employeeId)`, { companyId, employeeId, shiftDate, reason: `电子围栏异常：${fence.status}${fence.reason ? `，${fence.reason}` : ''}` });
+    }
     const result = await recalculateDaily(client, companyId, employeeId, shiftDate, schedule);
-    return { punchId: inserted.insertId, punchType: body.punchType, shiftDate, dailyStatus: result.resultStatus };
+    return { punchId: inserted.insertId, punchType: body.punchType, shiftDate, dailyStatus: result.resultStatus, geofenceStatus: fence.status, distanceMeters: fence.distanceMeters };
   });
 }
 
@@ -98,10 +116,12 @@ async function getEmployeeMonth(companyId, employeeId, month) {
 }
 async function getEmployeeToday(companyId, employeeId) {
   const date = shanghaiDate();
-  const rows = await database.query(`SELECT shift_date AS shiftDate, first_in_at AS firstInAt, last_out_at AS lastOutAt,
+  const rows = await database.query(`SELECT d.shift_date AS shiftDate, d.first_in_at AS firstInAt, d.last_out_at AS lastOutAt,
     worked_minutes AS workedMinutes, approved_normal_minutes AS approvedNormalMinutes, overtime_candidate_minutes AS overtimeCandidateMinutes,
-    result_status AS resultStatus, review_status AS reviewStatus FROM attendance_daily_results
-    WHERE company_id=:companyId AND employee_id=:employeeId AND shift_date=:date LIMIT 1`, { companyId, employeeId, date });
+    result_status AS resultStatus, review_status AS reviewStatus,
+    (SELECT p.geofence_status FROM attendance_punches p WHERE p.company_id=d.company_id AND p.employee_id=d.employee_id AND p.shift_date=d.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS geofenceStatus,
+    (SELECT p.distance_meters FROM attendance_punches p WHERE p.company_id=d.company_id AND p.employee_id=d.employee_id AND p.shift_date=d.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS distanceMeters
+    FROM attendance_daily_results d WHERE d.company_id=:companyId AND d.employee_id=:employeeId AND d.shift_date=:date LIMIT 1`, { companyId, employeeId, date });
   return rows[0] || { shiftDate: date, resultStatus: 'NOT_CALCULATED', workedMinutes: 0 };
 }
 
@@ -111,7 +131,9 @@ async function listDaily(companyId, user, params = {}) {
   return database.query(`SELECT d.id, d.employee_id AS employeeId, e.name, d.shift_date AS shiftDate,
       d.first_in_at AS firstInAt, d.last_out_at AS lastOutAt, d.worked_minutes AS workedMinutes,
       d.approved_normal_minutes AS approvedNormalMinutes, d.approved_overtime_minutes AS approvedOvertimeMinutes,
-      d.late_minutes AS lateMinutes, d.early_leave_minutes AS earlyLeaveMinutes, d.result_status AS resultStatus, d.review_status AS reviewStatus
+      d.late_minutes AS lateMinutes, d.early_leave_minutes AS earlyLeaveMinutes, d.result_status AS resultStatus, d.review_status AS reviewStatus,
+      (SELECT p.geofence_status FROM attendance_punches p WHERE p.company_id=d.company_id AND p.employee_id=d.employee_id AND p.shift_date=d.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS geofenceStatus,
+      (SELECT p.distance_meters FROM attendance_punches p WHERE p.company_id=d.company_id AND p.employee_id=d.employee_id AND p.shift_date=d.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS distanceMeters
     FROM attendance_daily_results d JOIN hr_employee e ON e.id=d.employee_id AND e.company_id=d.company_id
     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
     WHERE d.company_id=:companyId AND d.shift_date=:date ${scope} ORDER BY e.name`, queryParams);
