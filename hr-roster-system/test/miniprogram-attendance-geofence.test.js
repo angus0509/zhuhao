@@ -1,0 +1,13 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const source = fs.readFileSync('wechat-miniprogram/miniprogram/pages/attendance/index.js', 'utf8');
+const appConfig = JSON.parse(fs.readFileSync('wechat-miniprogram/miniprogram/app.json', 'utf8'));
+assert.match(source, /wx\.getLocation/);
+assert.match(source, /type: 'gcj02'/);
+assert.match(source, /isHighAccuracy: true/);
+assert.match(source, /failed: true/);
+assert.match(source, /位置待审核/);
+assert.doesNotMatch(source, /startLocationUpdate|onLocationChange/);
+assert.match(appConfig.permission['scope.userLocation'].desc, /主动打卡/);
+assert.ok(appConfig.requiredPrivateInfos.includes('getLocation'));
+console.log('miniprogram-attendance-geofence.test.js: contract passed');
