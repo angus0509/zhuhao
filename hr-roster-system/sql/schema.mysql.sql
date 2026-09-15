@@ -888,3 +888,183 @@ CREATE TABLE sys_user_project (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_user_project (user_id, project_id)
 ) COMMENT='账号授权项目范围';
+
+CREATE TABLE attendance_project_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  rule_name VARCHAR(100) NOT NULL,
+  work_start_time TIME NOT NULL,
+  work_end_time TIME NOT NULL,
+  rest_start_time TIME DEFAULT NULL,
+  rest_end_time TIME DEFAULT NULL,
+  standard_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 480,
+  late_grace_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  early_grace_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  overtime_min_minutes SMALLINT UNSIGNED NOT NULL DEFAULT 30,
+  work_weekdays VARCHAR(20) NOT NULL,
+  effective_from DATE NOT NULL,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_project_rule_effective (company_id, project_id, effective_from),
+  KEY idx_attendance_project_rule_lookup (company_id, project_id, status, effective_from)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目考勤规则版本';
+
+CREATE TABLE attendance_project_calendar (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  calendar_date DATE NOT NULL,
+  day_type VARCHAR(20) NOT NULL,
+  remark VARCHAR(255) DEFAULT NULL,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_project_calendar_date (company_id, project_id, calendar_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目考勤特殊日期';
+
+CREATE TABLE attendance_project_geofence (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  geofence_id BIGINT NOT NULL,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_project_geofence (company_id, project_id, geofence_id),
+  KEY idx_attendance_project_geofence_lookup (company_id, project_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目与客户围栏关联';
+
+CREATE TABLE attendance_geofences (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  customer_id BIGINT NOT NULL,
+  project_id BIGINT DEFAULT NULL COMMENT '兼容历史项目围栏来源',
+  fence_name VARCHAR(100) NOT NULL,
+  latitude DECIMAL(10,7) NOT NULL,
+  longitude DECIMAL(10,7) NOT NULL,
+  radius_meters INT UNSIGNED NOT NULL DEFAULT 300,
+  max_accuracy_meters INT UNSIGNED NOT NULL DEFAULT 100,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_geofence_customer_name (company_id, customer_id, fence_name),
+  KEY idx_attendance_geofence_customer (company_id, customer_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='客户考勤电子围栏';
+
+CREATE TABLE attendance_shift_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  rule_name VARCHAR(100) NOT NULL,
+  work_start_time TIME NOT NULL,
+  work_end_time TIME NOT NULL,
+  rest_start_time TIME DEFAULT NULL,
+  rest_end_time TIME DEFAULT NULL,
+  standard_minutes INT UNSIGNED NOT NULL,
+  late_grace_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  early_grace_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  overtime_min_minutes INT UNSIGNED NOT NULL DEFAULT 30,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_rule_name (company_id, rule_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工手工班次规则';
+
+CREATE TABLE attendance_schedules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT DEFAULT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  shift_rule_id BIGINT DEFAULT NULL,
+  project_rule_id BIGINT DEFAULT NULL,
+  schedule_status VARCHAR(20) NOT NULL DEFAULT 'WORK',
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_schedule (company_id, employee_id, shift_date),
+  KEY idx_attendance_schedule_date (company_id, shift_date),
+  KEY idx_attendance_schedule_project_date (company_id, project_id, shift_date),
+  CONSTRAINT chk_attendance_schedule_rule_source CHECK ((shift_rule_id IS NOT NULL) <> (project_rule_id IS NOT NULL))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工考勤排班';
+
+CREATE TABLE attendance_punches (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT DEFAULT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  punch_type VARCHAR(10) NOT NULL,
+  punch_time DATETIME(3) NOT NULL,
+  source VARCHAR(20) NOT NULL,
+  geofence_id BIGINT DEFAULT NULL,
+  latitude DECIMAL(10,7) DEFAULT NULL,
+  longitude DECIMAL(10,7) DEFAULT NULL,
+  location_accuracy DECIMAL(10,2) DEFAULT NULL,
+  distance_meters INT UNSIGNED DEFAULT NULL,
+  geofence_radius_snapshot INT UNSIGNED DEFAULT NULL,
+  geofence_status VARCHAR(30) NOT NULL DEFAULT 'NO_FENCE',
+  location_reason VARCHAR(255) DEFAULT NULL,
+  client_request_id VARCHAR(64) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_attendance_punch_request (company_id, employee_id, client_request_id),
+  KEY idx_attendance_punch_time (company_id, employee_id, punch_time),
+  KEY idx_attendance_punch_project_date (company_id, project_id, shift_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤打卡记录';
+
+CREATE TABLE attendance_daily_results (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT DEFAULT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  schedule_id BIGINT DEFAULT NULL,
+  first_in_at DATETIME(3) DEFAULT NULL,
+  last_out_at DATETIME(3) DEFAULT NULL,
+  worked_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  approved_normal_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  overtime_candidate_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  approved_overtime_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  late_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  early_leave_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  result_status VARCHAR(30) NOT NULL,
+  review_status VARCHAR(20) NOT NULL DEFAULT 'NONE',
+  calculation_version VARCHAR(30) NOT NULL,
+  calculated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reviewed_by BIGINT DEFAULT NULL,
+  reviewed_at DATETIME DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_daily (company_id, employee_id, shift_date),
+  KEY idx_attendance_daily_status (company_id, shift_date, result_status),
+  KEY idx_attendance_daily_project_date (company_id, project_id, shift_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤每日结果';
+
+CREATE TABLE attendance_correction_requests (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  request_type VARCHAR(20) NOT NULL,
+  punch_id BIGINT DEFAULT NULL,
+  requested_time DATETIME(3) DEFAULT NULL,
+  reason VARCHAR(500) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  submitted_by_employee_id BIGINT NOT NULL,
+  reviewed_by BIGINT DEFAULT NULL,
+  review_comment VARCHAR(500) DEFAULT NULL,
+  reviewed_at DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_correction_punch (company_id, punch_id, request_type),
+  KEY idx_attendance_correction_status (company_id, status, shift_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤异常申请与审核';

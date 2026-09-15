@@ -38,9 +38,9 @@
 
 **Interfaces:**
 - Consumes: `labor_customer.id`、`labor_project.customer_id`、现有 `attendance_geofences.project_id`。
-- Produces: `attendance_project_rules`、`attendance_project_calendar`、`attendance_project_geofence`，以及三个历史表的 `project_id` 快照列。
+- Produces: `attendance_project_rules`、`attendance_project_calendar`、`attendance_project_geofence`，三个历史表的 `project_id` 快照列，以及排班表的 `project_rule_id`。
 
-- [ ] **Step 1: 写失败的结构契约测试**
+- [x] **Step 1: 写失败的结构契约测试**
 
 ```js
 const fs = require('node:fs');
@@ -57,13 +57,13 @@ for (const table of ['attendance_schedules', 'attendance_punches', 'attendance_d
 assert.doesNotMatch(sql, /\b(?:DELETE|DROP|TRUNCATE)\b/i);
 ```
 
-- [ ] **Step 2: 运行测试确认正确失败**
+- [x] **Step 2: 运行测试确认正确失败**
 
 Run: `node test/web-project-attendance-schema.test.js`
 
 Expected: FAIL，原因是迁移文件或新表尚不存在。
 
-- [ ] **Step 3: 创建幂等迁移**
+- [x] **Step 3: 创建幂等迁移**
 
 迁移必须包含以下实体和索引：
 
@@ -93,23 +93,23 @@ CREATE TABLE IF NOT EXISTS attendance_project_rules (
 );
 ```
 
-同时创建 `attendance_project_calendar`、`attendance_project_geofence`，为 `attendance_geofences` 幂等增加 `customer_id` / `updated_by`，为 `attendance_schedules`、`attendance_punches`、`attendance_daily_results` 幂等增加 `project_id` 和 `(company_id, project_id, shift_date)` 索引。用 `attendance_geofences.project_id -> labor_project.customer_id` 回填客户和项目围栏关系；无法可靠确定的历史快照保持空值。
+同时创建 `attendance_project_calendar`、`attendance_project_geofence`，为 `attendance_geofences` 幂等增加 `customer_id` / `updated_by` 并将旧 `project_id` 改为可空，为 `attendance_schedules`、`attendance_punches`、`attendance_daily_results` 幂等增加 `project_id` 和 `(company_id, project_id, shift_date)` 索引。`attendance_schedules` 另增 `project_rule_id BIGINT DEFAULT NULL`，并将旧 `shift_rule_id` 改为可空；人工单日排班使用 `shift_rule_id`，自动项目排班使用 `project_rule_id`。用 `attendance_geofences.project_id -> labor_project.customer_id` 回填客户和缺失的项目围栏关系；重复迁移不得修改已有关系状态。无法可靠确定的历史快照保持空值。
 
-- [ ] **Step 4: 同步全量结构和发布清单**
+- [x] **Step 4: 同步全量结构和发布清单**
 
-在 `sql/schema.mysql.sql` 表达最终结构；将新迁移按现有顺序加入部署和发布包验证脚本。`package.json` 新增：
+在 `sql/schema.mysql.sql` 表达包括 `attendance_shift_rules`、`attendance_correction_requests` 在内的完整最终结构；将新迁移按现有顺序加入部署和发布包验证脚本。部署后必须核验客户围栏唯一索引，发现同客户同名历史围栏导致索引未建立时阻止发布。`package.json` 新增：
 
 ```json
 "test:web-project-attendance": "node test/web-project-attendance-schema.test.js && node test/web-project-attendance-service.test.js && node test/web-project-attendance-api.test.js && node test/web-project-attendance-ui.test.js && node test/web-project-attendance-isolation.test.js"
 ```
 
-- [ ] **Step 5: 验证迁移和脚本**
+- [x] **Step 5: 验证迁移和脚本**
 
 Run: `node test/web-project-attendance-schema.test.js && node test/release-migration-consistency.test.js && bash -n scripts/deploy-production.sh && bash -n scripts/verify-release-package.sh && npm run lint && git diff --check`
 
 Expected: 全部退出码 0。
 
-- [ ] **Step 6: 提交数据库任务**
+- [x] **Step 6: 提交数据库任务**
 
 ```bash
 git add sql/migrate-web-project-attendance-20260915.mysql.sql sql/schema.mysql.sql scripts/deploy-production.sh scripts/verify-release-package.sh package.json test/web-project-attendance-schema.test.js test/release-migration-consistency.test.js
@@ -274,14 +274,14 @@ Expected: FAIL，原因是日报和月报尚未要求项目 ID，也未返回项
 
 ```sql
 INSERT INTO attendance_schedules
-  (company_id,employee_id,project_id,shift_date,shift_rule_id,schedule_status,created_by)
+  (company_id,employee_id,project_id,shift_date,project_rule_id,shift_rule_id,schedule_status,created_by)
 VALUES
-  (:companyId,:employeeId,:projectId,:shiftDate,:shiftRuleId,:scheduleStatus,:operatorId)
+  (:companyId,:employeeId,:projectId,:shiftDate,:projectRuleId,NULL,:scheduleStatus,:operatorId)
 ON DUPLICATE KEY UPDATE
   project_id=COALESCE(project_id,VALUES(project_id)), updated_at=CURRENT_TIMESTAMP
 ```
 
-已有员工单日排班不覆盖其 `shift_rule_id` 和 `schedule_status`。
+已有员工单日排班不覆盖其 `shift_rule_id` 和 `schedule_status`。`loadSchedule` 在 `shift_rule_id` 非空时读取 `attendance_shift_rules`，否则按 `project_rule_id` 读取 `attendance_project_rules`；两种来源统一映射为计算器现有 `schedule` 输入。
 
 - [ ] **Step 4: 实现项目日报/月报**
 
@@ -426,7 +426,7 @@ git commit -m "test: verify web project attendance flow"
 
 ## Self-Review Checklist
 
-- [ ] 数据库任务覆盖客户围栏、项目多围栏、规则版本、特殊日期和三个项目快照列。
+- [ ] 数据库任务覆盖客户围栏、项目多围栏、规则版本、特殊日期、三个项目快照列和排班 `project_rule_id` 双来源兼容。
 - [ ] 服务任务覆盖星期规则、特殊日期、员工单日排班优先级和调项目历史归属。
 - [ ] 接口任务对所有项目读写执行服务端范围校验，日报、月报和异常必须带 `projectId`。
 - [ ] 网页任务覆盖客户项目级联、按天、按月、项目设置、特殊日期和客户围栏库。

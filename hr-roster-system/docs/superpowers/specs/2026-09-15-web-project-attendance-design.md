@@ -153,10 +153,12 @@
 ### 4.5 历史快照补列
 
 - `attendance_schedules.project_id BIGINT DEFAULT NULL`
+- `attendance_schedules.project_rule_id BIGINT DEFAULT NULL`
+- `attendance_schedules.shift_rule_id` 调整为可空：人工单日排班使用 `shift_rule_id`，项目自动排班使用 `project_rule_id`，两者必须且只能有一个有效值。
 - `attendance_punches.project_id BIGINT DEFAULT NULL`
 - `attendance_daily_results.project_id BIGINT DEFAULT NULL`
 
-索引分别覆盖 `(company_id, project_id, shift_date)`。历史数据优先从对应排班或打卡时间点的任职记录回填；无法可靠判断的记录保留空值并列入迁移核查，不猜测项目。
+索引分别覆盖 `(company_id, project_id, shift_date)`。考勤计算读取排班时优先使用人工单日排班的 `attendance_shift_rules`，否则读取 `attendance_project_rules`。历史数据优先从对应排班或打卡时间点的任职记录回填；无法可靠判断的记录保留空值并列入迁移核查，不猜测项目。
 
 ## 5. API
 
@@ -284,6 +286,8 @@
 
 - 新迁移仅使用 `CREATE TABLE IF NOT EXISTS`、经 `information_schema` 判断的 `ALTER TABLE` 和幂等回填。
 - 现有项目围栏先回填 `customer_id` 并建立项目关联，确认关联完整后业务切换为客户围栏库。
+- 旧库的 `attendance_geofences.project_id` 改为可空；重复迁移只能补建缺失的项目围栏关联，不得重新启用已经人工停用的关联。
+- 同客户存在同名围栏导致唯一索引不能建立时，部署后核查必须失败并输出待处理原因，不静默忽略结构漂移。
 - 保留旧 `project_id` 一次发布周期用于回滚读取，不在本期删除列。
 - 现有员工打卡接口地址不变；服务端改为从当日项目快照加载多个围栏。
 - 无可靠项目归属的历史结果不进入项目报表，并在管理页面显示待核查数量。
@@ -296,4 +300,3 @@
 - 报表：日报人数与状态合计一致；月报从同一项目日报聚合；调项目前后分别归属正确项目。
 - 前端：项目切换、日期月份筛选、保存锁定、空状态、错误重试和权限隐藏。
 - 回归：`npm run test:attendance`、`npm run test:attendance-geofence`、项目新增专项测试、`npm run check`、`npm audit --audit-level=high` 和 `git diff --check`。
-
