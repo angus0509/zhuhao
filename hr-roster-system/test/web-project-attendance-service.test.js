@@ -17,10 +17,107 @@ async function run() {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
   const service = require('../src/services/attendance-project.service');
+  const geofenceService = require('../src/services/attendance-geofence-management.service');
+  const attendanceService = require('../src/services/attendance.service');
 
   for (const name of ['listProjects', 'getProjectSettings', 'saveProjectSettings', 'listCalendar', 'saveCalendarDay', 'resolveProjectRule']) {
     assert.equal(typeof service[name], 'function', `${name} missing`);
   }
+  assert.equal(typeof geofenceService.replaceProjectGeofences, 'function');
+  assert.equal(typeof attendanceService.evaluateEmployeeLocation, 'function');
+
+  const inside = await attendanceService.evaluateEmployeeLocation({
+    execute: async () => [[
+      { id: 31, latitude: 30, longitude: 120, radiusMeters: 20, maxAccuracyMeters: 100 },
+      { id: 32, latitude: 31.2, longitude: 121.4, radiusMeters: 300, maxAccuracyMeters: 100 }
+    ]]
+  }, 3, 101, 12, { latitude: 31.2, longitude: 121.4, accuracy: 10 });
+  assert.equal(inside.status, 'INSIDE');
+  assert.equal(inside.geofenceId, 32);
+  const lowAccuracy = await attendanceService.evaluateEmployeeLocation({ execute: async () => [[
+    { id: 31, latitude: 31.2, longitude: 121.4, radiusMeters: 300, maxAccuracyMeters: 5 },
+    { id: 32, latitude: 30, longitude: 120, radiusMeters: 20, maxAccuracyMeters: 100 }
+  ]] }, 3, 101, 12, { latitude: 31.2, longitude: 121.4, accuracy: 10 });
+  assert.equal(lowAccuracy.status, 'LOW_ACCURACY');
+  assert.equal(lowAccuracy.geofenceId, 31);
+  const failed = await attendanceService.evaluateEmployeeLocation({ execute: async () => [[
+    { id: 31, latitude: 31.2, longitude: 121.4, radiusMeters: 300, maxAccuracyMeters: 100 }
+  ]] }, 3, 101, 12, { failed: true, reason: '用户拒绝定位' });
+  assert.equal(failed.status, 'LOCATION_FAILED');
+  const nearest = await attendanceService.evaluateEmployeeLocation({ execute: async () => [[
+    { id: 31, latitude: 30, longitude: 120, radiusMeters: 20, maxAccuracyMeters: 100 },
+    { id: 32, latitude: 31.19, longitude: 121.39, radiusMeters: 20, maxAccuracyMeters: 100 }
+  ]] }, 3, 101, 12, { latitude: 31.2, longitude: 121.4, accuracy: 10 });
+  assert.equal(nearest.status, 'OUTSIDE');
+  assert.equal(nearest.geofenceId, 32);
+  const noFence = await attendanceService.evaluateEmployeeLocation({ execute: async () => [[]] }, 3, 101, 12, {
+    latitude: 31.2, longitude: 121.4, accuracy: 10
+  });
+  assert.equal(noFence.status, 'NO_FENCE');
+
+  const punchWrites = [];
+  db.transaction = async handler => handler({
+    execute: async (sql, params) => {
+      punchWrites.push({ sql, params });
+      if (/FROM hr_employee WHERE/.test(sql)) return [[{ id: 101 }]];
+      if (/FROM attendance_schedules s/.test(sql)) return [[{
+        id: 55, projectId: null, shiftDate: shanghaiDate(), scheduleStatus: 'WORK',
+        workStartTime: '08:00:00', workEndTime: '17:00:00', restStartTime: '12:00:00',
+        restEndTime: '13:00:00', standardMinutes: 480, lateGraceMinutes: 5,
+        earlyGraceMinutes: 5, overtimeMinMinutes: 30
+      }]];
+      if (/FROM hr_employee_job/.test(sql)) return [[{ projectId: 12 }]];
+      if (/client_request_id=:clientRequestId/.test(sql) && /SELECT id/.test(sql)) return [[]];
+      if (/FROM attendance_project_geofence/.test(sql)) return [[{
+        id: 31, latitude: 31.2, longitude: 121.4, radiusMeters: 300, maxAccuracyMeters: 5
+      }]];
+      if (/INSERT INTO attendance_punches/.test(sql)) return [{ insertId: 77 }];
+      if (/SELECT punch_type/.test(sql)) return [[{ punchType: 'IN', punchTime: '2026-09-15 08:01:00' }]];
+      return [{ insertId: 88 }];
+    }
+  });
+  const punched = await attendanceService.punchEmployee(3, 101, {
+    punchType: 'IN', source: 'WEB', clientRequestId: 'project-punch-001',
+    location: { latitude: 31.2, longitude: 121.4, accuracy: 10 }
+  });
+  assert.equal(punched.geofenceStatus, 'LOW_ACCURACY');
+  const projectLookup = punchWrites.find(item => /FROM hr_employee_job/.test(item.sql));
+  assert.match(projectLookup.sql, /hire_date IS NULL OR hire_date<=:shiftDate/);
+  assert.match(projectLookup.sql, /ORDER BY hire_date DESC,updated_at DESC,id DESC/);
+  assert.equal(projectLookup.params.shiftDate, shanghaiDate());
+  assert.ok(punchWrites.some(item => /UPDATE attendance_schedules SET project_id=:projectId/.test(item.sql) && item.params.projectId === 12));
+  const punchInsert = punchWrites.find(item => /INSERT INTO attendance_punches/.test(item.sql));
+  assert.equal(punchInsert.params.projectId, 12);
+  assert.equal(punchInsert.params.geofenceId, 31);
+  assert.equal(punchInsert.params.radiusSnapshot, 300);
+  assert.ok(punchWrites.some(item => /INSERT INTO attendance_correction_requests/.test(item.sql) && item.params.punchId === 77));
+
+  const noProjectWrites = [];
+  db.transaction = async handler => handler({
+    execute: async (sql, params) => {
+      noProjectWrites.push({ sql, params });
+      if (/FROM hr_employee WHERE/.test(sql)) return [[{ id: 101 }]];
+      if (/FROM attendance_schedules s/.test(sql)) return [[{
+        id: 55, projectId: null, scheduleStatus: 'WORK', workStartTime: '08:00:00', workEndTime: '17:00:00',
+        restStartTime: null, restEndTime: null, standardMinutes: 480, lateGraceMinutes: 5,
+        earlyGraceMinutes: 5, overtimeMinMinutes: 30
+      }]];
+      if (/client_request_id=:clientRequestId/.test(sql)) return [[]];
+      if (/FROM hr_employee_job/.test(sql)) return [[]];
+      if (/INSERT INTO attendance_punches/.test(sql)) return [{ insertId: 78 }];
+      if (/SELECT punch_type/.test(sql)) return [[{ punchType: 'IN', punchTime: '2026-09-15 08:01:00' }]];
+      return [{ insertId: 89 }];
+    }
+  });
+  const noProjectPunch = await attendanceService.punchEmployee(3, 101, {
+    punchType: 'IN', clientRequestId: 'project-punch-002', location: { latitude: 31.2, longitude: 121.4, accuracy: 10 }
+  });
+  assert.equal(noProjectPunch.geofenceStatus, 'NO_FENCE');
+  const noProjectInsert = noProjectWrites.find(item => /INSERT INTO attendance_punches/.test(item.sql));
+  assert.equal(noProjectInsert.params.projectId, null);
+  assert.equal(noProjectInsert.params.geofenceId, null);
+  assert.equal(noProjectWrites.some(item => /FROM attendance_project_geofence/.test(item.sql)), false);
+  assert.equal(noProjectWrites.some(item => /INSERT INTO attendance_correction_requests/.test(item.sql)), false);
 
   try {
     let captured;
@@ -121,8 +218,9 @@ async function run() {
     db.transaction = async handler => handler({
       execute: async (sql, params) => {
         writes.push({ sql, params });
-        if (/SELECT p\.id/.test(sql)) return [[{ id: 12 }]];
+        if (/SELECT p\.id/.test(sql)) return [[{ id: 12, customerId: 7 }]];
         if (/FROM attendance_project_rules/.test(sql)) return [[]];
+        if (/FROM attendance_geofences/.test(sql)) return [[{ id: 31, customerId: 7 }, { id: 32, customerId: 7 }]];
         if (/INSERT INTO attendance_project_rules/.test(sql)) return [{ insertId: 25 }];
         return [{ insertId: 100 }];
       }
@@ -130,13 +228,14 @@ async function run() {
     const saved = await service.saveProjectSettings(3, { id: 9, companyId: 3, dataScope: 5 }, 9, 12, {
       ruleName: '白班', workStartTime: '08:00', workEndTime: '17:00', restStartTime: '12:00', restEndTime: '13:00',
       standardMinutes: 480, lateGraceMinutes: 5, earlyGraceMinutes: 5, overtimeMinMinutes: 30,
-      workWeekdays: [1, 2, 3, 4, 5, 6], effectiveFrom: '2026-09-16'
+      workWeekdays: [1, 2, 3, 4, 5, 6], effectiveFrom: '2026-09-16', geofenceIds: [31, 32]
     });
-    assert.deepEqual(saved, { projectId: 12, ruleId: 25, effectiveFrom: '2026-09-16' });
+    assert.deepEqual(saved, { projectId: 12, ruleId: 25, effectiveFrom: '2026-09-16', geofenceIds: [31, 32] });
     assert.ok(writes.some(item => /ON DUPLICATE KEY UPDATE/.test(item.sql)));
+    assert.deepEqual(writes.filter(item => /INSERT INTO attendance_project_geofence/.test(item.sql)).map(item => item.params.geofenceId), [31, 32]);
     const audit = writes.find(item => /INSERT INTO hr_operation_log/.test(item.sql));
     assert.ok(audit, 'project rule audit missing');
-    assert.deepEqual(JSON.parse(audit.params.afterData), { projectId: 12, ruleId: 25, effectiveFrom: '2026-09-16' });
+    assert.deepEqual(JSON.parse(audit.params.afterData), { projectId: 12, ruleId: 25, effectiveFrom: '2026-09-16', geofenceIds: [31, 32] });
 
     const today = shanghaiDate();
     const tomorrow = addDays(today, 1);

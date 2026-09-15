@@ -203,17 +203,17 @@ git commit -m "feat: add project attendance settings"
 - Consumes: `customerScope`、`projectScope`、`attendance_project_geofence`。
 - Produces: `list(companyId, user, { customerId, includeCoordinates })`、`create(companyId, user, operatorId, body)`、`update(companyId, user, operatorId, id, body)`、`replaceProjectGeofences(client, companyId, user, operatorId, projectId, geofenceIds)`、`evaluateEmployeeLocation(client, companyId, employeeId, projectId, location)`。
 
-- [ ] **Step 1: 扩展失败测试**
+- [x] **Step 1: 扩展失败测试**
 
 新增断言覆盖：客户围栏不要求项目 ID；项目可关联多个同客户围栏；跨客户围栏返回 `GEOFENCE_CUSTOMER_MISMATCH`；`attendance:view` 列表不返回经纬度；驻厂不能修改未授权项目客户的孤立围栏；任一围栏命中即 `INSIDE`。
 
-- [ ] **Step 2: 运行测试确认正确失败**
+- [x] **Step 2: 运行测试确认正确失败**
 
 Run: `node test/attendance-geofence-management.test.js && node test/attendance-geofence-privacy.test.js && node test/web-project-attendance-service.test.js`
 
 Expected: FAIL，原因是服务仍使用单项目围栏。
 
-- [ ] **Step 3: 改造围栏管理服务**
+- [x] **Step 3: 改造围栏管理服务**
 
 创建和更新先调用客户范围断言：驻厂必须至少拥有该客户下一个授权项目；关联项目时分别执行项目授权、项目客户和围栏客户三项校验。只读列表使用明确字段投影：
 
@@ -228,17 +228,17 @@ WHERE g.company_id=:companyId AND g.customer_id=:customerId
 
 只有 `attendance:manage` 请求加入 `latitude`、`longitude`。
 
-- [ ] **Step 4: 改造打卡多围栏判定**
+- [x] **Step 4: 改造打卡多围栏判定**
 
 从员工当日项目快照读取所有有效关联围栏；逐个执行现有 `evaluateGeofence`。任一结果 `INSIDE` 即返回该围栏；全部未命中时优先返回 `LOW_ACCURACY`、`LOCATION_FAILED`，否则返回距离最近的 `OUTSIDE`。写入 `attendance_punches.project_id`、实际围栏 ID、距离和半径快照。
 
-- [ ] **Step 5: 运行围栏回归**
+- [x] **Step 5: 运行围栏回归**
 
 Run: `npm run test:attendance-geofence && node test/web-project-attendance-service.test.js && npm run lint && git diff --check`
 
 Expected: 全部退出码 0；普通日报响应不包含 `latitude` / `longitude`。
 
-- [ ] **Step 6: 提交围栏任务**
+- [x] **Step 6: 提交围栏任务**
 
 ```bash
 git add src/services/attendance-geofence-management.service.js src/services/attendance.service.js src/controllers/attendance.controller.js src/routes/attendance.routes.js test/attendance-geofence-management.test.js test/attendance-geofence-privacy.test.js test/web-project-attendance-service.test.js

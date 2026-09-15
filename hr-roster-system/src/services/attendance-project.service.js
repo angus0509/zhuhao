@@ -1,6 +1,7 @@
 const db = require('../db');
 const { projectScope } = require('../utils/data-scope');
 const { createError } = require('../utils/response');
+const { replaceProjectGeofences } = require('./attendance-geofence-management.service');
 
 async function query(client, sql, params = {}) {
   const [rows] = await client.execute(sql, params);
@@ -154,6 +155,10 @@ async function saveProjectSettings(companyId, user, operatorId, projectId, body 
     });
     const ruleId = Number(result.insertId);
     const summary = { projectId: positiveId(projectId), ruleId, effectiveFrom: values.effectiveFrom };
+    if (Array.isArray(body.geofenceIds)) {
+      const association = await replaceProjectGeofences(client, companyId, user, operatorId, projectId, body.geofenceIds);
+      summary.geofenceIds = association.geofenceIds;
+    }
     await query(client, `INSERT INTO hr_operation_log
       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
       VALUES (:companyId,:operatorId,'项目考勤','attendance_project_rule',:ruleId,'upsert',:afterData)`, {
