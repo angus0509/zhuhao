@@ -214,6 +214,27 @@ async function run() {
       companyId: 3, projectId: 12, scopeUserId: 9, scopeCompanyId: 3
     });
 
+    const settingsQueries = [];
+    db.transaction = async handler => handler({
+      execute: async (sql, params) => {
+        settingsQueries.push({ sql, params });
+        if (/SELECT p\.id/.test(sql)) return [[{ id: 12, customerId: 7, projectName: '一厂项目' }]];
+        if (/FROM attendance_project_rules/.test(sql)) return [[{
+          ruleId: 25, ruleName: '白班', workWeekdays: '1,2,3,4,5', effectiveFrom: '2026-09-01', status: 1
+        }]];
+        if (/FROM attendance_project_geofence/.test(sql)) return [[{ geofenceId: 31 }, { geofenceId: 32 }]];
+        return [[]];
+      }
+    });
+    const settings = await service.getProjectSettings(3, { id: 9, companyId: 3, dataScope: 5 }, 12);
+    assert.deepEqual(settings.geofenceIds, [31, 32]);
+    const settingsGeofences = settingsQueries.find(item => /FROM attendance_project_geofence/.test(item.sql));
+    assert.ok(settingsGeofences, '项目设置未读取已关联围栏');
+    assert.match(settingsGeofences.sql, /company_id=:companyId/);
+    assert.match(settingsGeofences.sql, /project_id=:projectId/);
+    assert.match(settingsGeofences.sql, /status=1/);
+    assert.deepEqual(settingsGeofences.params, { companyId: 3, projectId: 12 });
+
     const writes = [];
     db.transaction = async handler => handler({
       execute: async (sql, params) => {

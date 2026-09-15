@@ -258,17 +258,17 @@ git commit -m "feat: reuse customer geofences by project"
 - Consumes: `resolveProjectRule(client, companyId, projectId, shiftDate)`、`employeeScope`、`projectScope`。
 - Produces: `ensureProjectSchedules(companyId, user, projectId, shiftDate)`、`listDaily(companyId, user, { projectId, date }) -> { project, summary, list, unresolvedHistoryCount }`、`listMonthly(companyId, user, { projectId, month }) -> { project, summary, list, unresolvedHistoryCount }`。
 
-- [ ] **Step 1: 写统计和隔离失败测试**
+- [x] **Step 1: 写统计和隔离失败测试**
 
 用替身数据库记录 SQL 与参数，覆盖：缺少 `projectId` 返回 `PROJECT_REQUIRED`；未授权项目拒绝；日报按 `d.project_id` 过滤；月报按同一项目聚合；员工调项前后归属不同项目；特殊休息日不计旷工；没有规则显示 `NO_PROJECT_RULE`；汇总各状态合计与明细一致。
 
-- [ ] **Step 2: 运行测试确认正确失败**
+- [x] **Step 2: 运行测试确认正确失败**
 
 Run: `node test/web-project-attendance-service.test.js && node test/web-project-attendance-isolation.test.js`
 
 Expected: FAIL，原因是日报和月报尚未要求项目 ID，也未返回项目汇总。
 
-- [ ] **Step 3: 实现按日项目排班快照**
+- [x] **Step 3: 实现按日项目排班快照**
 
 `ensureProjectSchedules` 在事务中查询目标日期有效项目员工，解析项目规则并幂等写入：
 
@@ -283,21 +283,23 @@ ON DUPLICATE KEY UPDATE
 
 已有员工单日排班不覆盖其 `shift_rule_id` 和 `schedule_status`。`loadSchedule` 在 `shift_rule_id` 非空时读取 `attendance_shift_rules`，否则按 `project_rule_id` 读取 `attendance_project_rules`；两种来源统一映射为计算器现有 `schedule` 输入。
 
-- [ ] **Step 4: 实现项目日报/月报**
+- [x] **Step 4: 实现项目日报/月报**
 
 入口先断言项目授权，再按 `attendance_daily_results.project_id` 查询。日报返回固定键：`scheduled`、`normal`、`late`、`earlyLeave`、`missingPunch`、`absent`、`geofenceException`；月报返回固定键：`employeeCount`、`approvedNormalMinutes`、`approvedOvertimeMinutes`。异常次数按同项目的打卡围栏状态聚合，不返回坐标。
 
-- [ ] **Step 5: 强化异常审核项目范围**
+- [x] **Step 5: 强化异常审核项目范围**
 
 异常列表要求 `projectId` 并按 `attendance_punches.project_id` 或每日结果项目快照过滤。审核前读取异常项目快照并调用项目范围断言，不能依赖员工当前项目。
 
-- [ ] **Step 6: 运行考勤与隔离回归**
+- [x] **Step 6: 运行考勤与隔离回归**
 
 Run: `npm run test:attendance && node test/web-project-attendance-service.test.js && node test/web-project-attendance-isolation.test.js && node test/attendance-security-regression.test.js && npm run lint && git diff --check`
 
 Expected: 全部退出码 0。
 
 - [ ] **Step 7: 提交报表任务**
+
+> 注：功能和验证已完成；源文件与已有小程序/工资条改动重叠，为避免混入无关改动，提交延后到最终分拣阶段。
 
 ```bash
 git add src/services/attendance.service.js src/controllers/attendance.controller.js test/web-project-attendance-service.test.js test/web-project-attendance-isolation.test.js test/attendance-security-regression.test.js
@@ -317,7 +319,7 @@ git commit -m "feat: scope attendance reports by project"
 - Consumes: Task 2-4 的项目、设置、日历、围栏、日报、月报和异常 API。
 - Produces: `loadAttendanceProjects()`、`selectAttendanceProject(projectId)`、`loadAttendanceDaily(projectId, date)`、`loadAttendanceMonthly(projectId, month)`、`loadAttendanceProjectSettings(projectId)`、`saveAttendanceProjectSettings(event)`、`loadAttendanceCustomerGeofences(customerId)`。
 
-- [ ] **Step 1: 写页面失败测试**
+- [x] **Step 1: 写页面失败测试**
 
 ```js
 for (const id of ['attendanceCustomerFilter', 'attendanceProjectFilter', 'attendanceDate', 'attendanceMonth', 'attendanceProjectSettingsForm', 'attendanceCalendarForm', 'attendanceGeofenceForm']) {
@@ -329,17 +331,17 @@ assert.match(js, /projectId=.*month=/);
 assert.match(js, /requestSequence/);
 ```
 
-- [ ] **Step 2: 运行测试确认正确失败**
+- [x] **Step 2: 运行测试确认正确失败**
 
 Run: `node test/web-project-attendance-ui.test.js && node test/web-attendance-geofence.test.js`
 
 Expected: FAIL，原因是页面尚无项目级联、项目设置和特殊日期控件。
 
-- [ ] **Step 3: 重排考勤页面结构**
+- [x] **Step 3: 重排考勤页面结构**
 
 顶部提供客户与项目 `<select>`、日期和月份输入；内容使用“按天查看 / 按月汇总 / 项目设置 / 客户围栏库”四个标签。日报展示汇总条和员工明细，月报展示员工聚合；不使用嵌套卡片。无项目时禁用所有业务表单并显示“当前账号暂无授权项目”。
 
-- [ ] **Step 4: 实现项目驱动的数据加载**
+- [x] **Step 4: 实现项目驱动的数据加载**
 
 `loadAttendance()` 先取 `/api/attendance/projects`，默认选择第一个授权项目。客户筛选只过滤已授权项目。每个异步加载捕获递增请求序号：
 
@@ -352,15 +354,15 @@ render(data);
 
 日报、月报和异常请求始终携带当前 `projectId`。
 
-- [ ] **Step 5: 实现项目规则与围栏设置**
+- [x] **Step 5: 实现项目规则与围栏设置**
 
 星期使用七个复选框；特殊日期使用日期、类型选择和说明；围栏先选择当前项目所属客户，再编辑名称、坐标、半径和精度。项目设置中的围栏使用复选框多选。`attendance:view` 只呈现可见信息，`attendance:manage` 才显示坐标和保存操作。
 
-- [ ] **Step 6: 实现错误和提交状态**
+- [x] **Step 6: 实现错误和提交状态**
 
 保存期间禁用对应提交按钮；成功后重新读取服务端设置；403 显示“项目不存在或无权访问”；空日报/月报分别显示空状态；失败提供明确重试按钮。
 
-- [ ] **Step 7: 运行前端回归**
+- [x] **Step 7: 运行前端回归**
 
 Run: `node test/web-project-attendance-ui.test.js && node test/web-attendance-geofence.test.js && npm run lint && git diff --check`
 
@@ -389,31 +391,31 @@ git commit -m "feat: add web project attendance workspace"
 
 在 `test/web-project-attendance-isolation.test.js` 固定覆盖：企业管理员跨项目可见；驻厂 A 只能访问项目 A；驻厂 B 只能访问项目 B；驻厂 A 即使和项目 B 同客户也不能读取项目 B 员工考勤；跨客户围栏关联失败；薪资专员只读且不能保存设置。
 
-- [ ] **Step 2: 运行项目考勤专项测试**
+- [x] **Step 2: 运行项目考勤专项测试**
 
 Run: `npm run test:web-project-attendance`
 
 Expected: 所有项目考勤结构、服务、API、UI 和隔离测试通过。
 
-- [ ] **Step 3: 运行既有考勤回归**
+- [x] **Step 3: 运行既有考勤回归**
 
 Run: `npm run test:attendance && npm run test:attendance-geofence`
 
 Expected: 原有员工打卡、工时计算、围栏异常和小程序考勤测试全部通过。
 
-- [ ] **Step 4: 运行全项目检查**
+- [x] **Step 4: 运行全项目检查**
 
 Run: `npm run lint && npm run check`
 
 Expected: 退出码 0，无语法或回归失败。
 
-- [ ] **Step 5: 运行安全和变更检查**
+- [x] **Step 5: 运行安全和变更检查**
 
 Run: `npm audit --audit-level=high && git diff --check`
 
 Expected: high/critical 漏洞数为 0，变更格式检查通过。
 
-- [ ] **Step 6: 更新本地验收文档**
+- [x] **Step 6: 更新本地验收文档**
 
 在 `docs/attendance-geofence-verification.md` 加入：使用两个驻厂账号验证项目隔离；建立同客户两个围栏并关联一个项目；验证任一围栏内正常；验证工作日、特殊休息日、日报、月报和调项目历史归属。不写生产账号、密码、Token 或员工真实定位。
 

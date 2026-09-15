@@ -369,10 +369,43 @@
         </section>
 
         <section class="module-view hidden" id="attendanceView">
-          <div class="module-hero"><div><p class="eyebrow">ATTENDANCE & HOURS</p><h2>考勤工时</h2><p>查看每日打卡、异常状态和月度核准工时。</p></div></div>
-          <div class="business-panel" style="margin-top:16px"><div class="panel-head"><div><h3>今日考勤</h3><p id="attendanceDailySummary">正在加载</p></div><button class="secondary-button" id="attendanceDailyRefresh" type="button">刷新</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>上班</th><th>下班</th><th>实际工时</th><th>正常工时</th><th>加班候选</th><th>状态</th></tr></thead><tbody id="attendanceDailyBody"></tbody></table></div></div>
-          <div class="business-panel" style="margin-top:16px"><div class="panel-head"><div><h3>月度汇总</h3><p>核准工时可供薪酬模块读取</p></div><label>月份 <input id="attendanceMonth" type="month"></label></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>正常工时</th><th>核准加班</th><th>迟到分钟</th><th>早退分钟</th><th>缺卡天数</th><th>旷工天数</th></tr></thead><tbody id="attendanceMonthlyBody"></tbody></table></div></div>
-          <div class="business-panel" style="margin-top:16px" data-action-perm="attendance:manage"><div class="panel-head"><div><h3>电子围栏</h3><p>按客户项目配置打卡范围</p></div></div><form id="attendanceGeofenceForm" class="filter-form"><label><span>项目 ID</span><input name="projectId" type="number" min="1" required></label><label><span>围栏名称</span><input name="fenceName" maxlength="100" required></label><label><span>中心纬度</span><input name="latitude" type="number" step="0.0000001" min="-90" max="90" required></label><label><span>中心经度</span><input name="longitude" type="number" step="0.0000001" min="-180" max="180" required></label><label><span>半径（米）</span><input name="radiusMeters" type="number" min="20" max="5000" value="300" required></label><label><span>最大定位误差（米）</span><input name="maxAccuracyMeters" type="number" min="10" max="1000" value="100" required></label><button class="primary-button" type="submit">保存围栏</button></form><div class="table-wrap"><table class="data-table"><thead><tr><th>项目</th><th>围栏</th><th>中心坐标</th><th>半径</th><th>精度要求</th><th>状态</th><th>操作</th></tr></thead><tbody id="attendanceGeofenceBody"></tbody></table></div></div>
+          <div class="module-hero"><div><p class="eyebrow">PROJECT ATTENDANCE DESK</p><h2>项目考勤</h2><p>按授权客户项目查看出勤、维护规则与围栏。</p></div><strong class="attendance-context-mark" id="attendanceProjectContext">未选择项目</strong></div>
+          <div class="attendance-context-bar">
+            <label><span>客户</span><select id="attendanceCustomerFilter"><option value="">暂无授权客户</option></select></label>
+            <label><span>项目</span><select id="attendanceProjectFilter"><option value="">暂无授权项目</option></select></label>
+            <label><span>考勤日期</span><input id="attendanceDate" type="date"></label>
+            <label><span>汇总月份</span><input id="attendanceMonth" type="month"></label>
+            <button class="secondary-button" id="attendanceRefresh" type="button">刷新</button>
+          </div>
+          <p class="attendance-workspace-status hidden" id="attendanceWorkspaceStatus" role="status"></p>
+          <nav class="attendance-workspace-tabs" role="tablist" aria-label="项目考勤视图">
+            <button class="active" type="button" role="tab" aria-selected="true" data-attendance-tab="daily">按天查看</button>
+            <button type="button" role="tab" aria-selected="false" data-attendance-tab="monthly">按月汇总</button>
+            <button type="button" role="tab" aria-selected="false" data-attendance-tab="settings">项目设置</button>
+            <button type="button" role="tab" aria-selected="false" data-attendance-tab="geofences">客户围栏库</button>
+          </nav>
+          <section class="attendance-workspace-panel" data-attendance-panel="daily">
+            <div class="attendance-summary-strip" id="attendanceDailySummary"></div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>上班</th><th>下班</th><th>实际工时</th><th>正常工时</th><th>迟到</th><th>早退</th><th>结果</th><th>围栏</th></tr></thead><tbody id="attendanceDailyBody"></tbody></table></div>
+            <div class="business-panel attendance-review-panel" data-action-perm="attendance:review"><div class="panel-head"><div><h3>围栏异常审核</h3><p>仅显示当前项目待审核记录</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>日期</th><th>定位状态</th><th>距离</th><th>原因</th><th>操作</th></tr></thead><tbody id="attendanceCorrectionBody"></tbody></table></div></div>
+          </section>
+          <section class="attendance-workspace-panel hidden" data-attendance-panel="monthly">
+            <div class="attendance-summary-strip" id="attendanceMonthlySummary"></div>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>应出勤</th><th>出勤</th><th>正常工时</th><th>核准加班</th><th>迟到</th><th>早退</th><th>缺卡</th><th>旷工</th><th>围栏异常</th></tr></thead><tbody id="attendanceMonthlyBody"></tbody></table></div>
+          </section>
+          <section class="attendance-workspace-panel hidden" data-attendance-panel="settings">
+            <form id="attendanceProjectSettingsForm" class="attendance-settings-form" data-action-perm="attendance:manage">
+              <div class="attendance-form-section"><h3>班次规则</h3><div class="attendance-form-grid"><label><span>规则名称</span><input name="ruleName" maxlength="100" required></label><label><span>生效日期</span><input name="effectiveFrom" type="date" required></label><label><span>上班时间</span><input name="workStartTime" type="time" required></label><label><span>下班时间</span><input name="workEndTime" type="time" required></label><label><span>午休开始</span><input name="restStartTime" type="time"></label><label><span>午休结束</span><input name="restEndTime" type="time"></label><label><span>标准分钟</span><input name="standardMinutes" type="number" min="1" max="1440" value="480" required></label><label><span>迟到宽限</span><input name="lateGraceMinutes" type="number" min="0" max="1440" value="0" required></label><label><span>早退宽限</span><input name="earlyGraceMinutes" type="number" min="0" max="1440" value="0" required></label><label><span>最低加班分钟</span><input name="overtimeMinMinutes" type="number" min="0" max="1440" value="30" required></label></div></div>
+              <div class="attendance-form-section"><h3>每周工作日</h3><div class="attendance-check-grid"><label><input type="checkbox" name="workWeekdays" value="1" checked> 周一</label><label><input type="checkbox" name="workWeekdays" value="2" checked> 周二</label><label><input type="checkbox" name="workWeekdays" value="3" checked> 周三</label><label><input type="checkbox" name="workWeekdays" value="4" checked> 周四</label><label><input type="checkbox" name="workWeekdays" value="5" checked> 周五</label><label><input type="checkbox" name="workWeekdays" value="6"> 周六</label><label><input type="checkbox" name="workWeekdays" value="7"> 周日</label></div></div>
+              <div class="attendance-form-section"><h3>启用围栏</h3><div class="attendance-check-grid" id="attendanceProjectGeofenceOptions"><span class="muted">请选择项目</span></div></div>
+              <button class="primary-button" type="submit">保存项目设置</button>
+            </form>
+            <div class="attendance-form-section"><div class="panel-head"><div><h3>特殊日期</h3><p>优先于每周工作日</p></div></div><form id="attendanceCalendarForm" class="attendance-inline-form" data-action-perm="attendance:manage"><label><span>日期</span><input name="calendarDate" type="date" required></label><label><span>类型</span><select name="dayType"><option value="WORKDAY">工作日</option><option value="REST_DAY">休息日</option></select></label><label class="attendance-grow"><span>说明</span><input name="remark" maxlength="255"></label><button class="primary-button" type="submit">保存</button></form><div class="table-wrap"><table class="data-table"><thead><tr><th>日期</th><th>类型</th><th>说明</th></tr></thead><tbody id="attendanceCalendarBody"></tbody></table></div></div>
+          </section>
+          <section class="attendance-workspace-panel hidden" data-attendance-panel="geofences">
+            <form id="attendanceGeofenceForm" class="attendance-inline-form" data-action-perm="attendance:manage"><label><span>围栏名称</span><input name="fenceName" maxlength="100" required></label><label><span>中心纬度</span><input name="latitude" type="number" step="0.0000001" min="-90" max="90" required></label><label><span>中心经度</span><input name="longitude" type="number" step="0.0000001" min="-180" max="180" required></label><label><span>半径（米）</span><input name="radiusMeters" type="number" min="20" max="5000" value="300" required></label><label><span>定位误差（米）</span><input name="maxAccuracyMeters" type="number" min="10" max="1000" value="100" required></label><button class="primary-button" type="submit">新增围栏</button></form>
+            <div class="table-wrap"><table class="data-table"><thead><tr><th>围栏</th><th data-action-perm="attendance:manage">中心坐标</th><th>半径</th><th>精度要求</th><th>状态</th><th data-action-perm="attendance:manage">操作</th></tr></thead><tbody id="attendanceGeofenceBody"></tbody></table></div>
+          </section>
         </section>
         <section class="module-view hidden" id="payrollView">
           <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYSLIP DELIVERY</p><h2>工资条发放管理</h2><p>从表格导入、数据校验到员工签收，按流程集中处理。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">导入工资条表格</button></div>
@@ -1132,6 +1165,7 @@
     <script src="/js/core/navigation-groups.js" defer></script>
     <script src="/js/core/onboarding-workbench.js" defer></script>
     <script src="/js/views/dashboard.js" defer></script>
+    <script src="/js/core/request-gate.js" defer></script>
     <script src="/js/views/attendance.js" defer></script>
     <script src="/js/views/roster-table.js" defer></script>
     <script src="/js/views/roster.js" defer></script>

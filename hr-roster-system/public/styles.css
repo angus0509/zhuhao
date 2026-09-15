@@ -23,6 +23,125 @@
   --radius: 10px;
 }
 
+/* 项目考勤：以固定上下文和高密度表格形成安静的运营工作台。 */
+.attendance-context-mark {
+  align-self: center;
+  border-left: 3px solid var(--cyan, #20b7c9);
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.attendance-context-bar {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(190px, 1.35fr) 150px 150px auto;
+  gap: 12px;
+  align-items: end;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--cyan, #20b7c9);
+  background: var(--card);
+}
+
+.attendance-context-bar label,
+.attendance-form-grid label,
+.attendance-inline-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.attendance-context-bar label > span,
+.attendance-form-grid label > span,
+.attendance-inline-form label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.attendance-workspace-status {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-left: 3px solid var(--blue);
+  background: rgba(36, 107, 206, .07);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.attendance-workspace-status.warning { border-color: #d39319; }
+.attendance-workspace-status.error { border-color: #cf3f4f; color: #a52836; }
+
+.attendance-workspace-tabs {
+  display: flex;
+  gap: 0;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.attendance-workspace-tabs button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.attendance-workspace-tabs button.active {
+  border-bottom-color: var(--cyan, #20b7c9);
+  color: var(--text);
+}
+
+.attendance-workspace-panel {
+  padding-top: 14px;
+}
+
+.attendance-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(90px, 1fr));
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+
+.attendance-summary-strip:empty { display: none; }
+.attendance-summary-strip span { padding: 11px 13px; border-right: 1px solid var(--line); }
+.attendance-summary-strip span:last-child { border-right: 0; }
+.attendance-summary-strip small { display: block; color: var(--muted); font-size: 11px; }
+.attendance-summary-strip strong { display: block; margin-top: 3px; font-size: 20px; }
+.attendance-review-panel { margin-top: 14px; }
+.attendance-empty { padding: 28px 16px !important; text-align: center; color: var(--muted); }
+
+.attendance-settings-form,
+.attendance-form-section {
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+}
+
+.attendance-settings-form { padding-top: 0; }
+.attendance-form-section h3 { margin: 0 0 12px; font-size: 15px; }
+.attendance-form-grid { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 12px; }
+.attendance-check-grid { display: flex; flex-wrap: wrap; gap: 8px 18px; min-height: 30px; align-items: center; }
+.attendance-check-grid label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.attendance-inline-form { display: flex; gap: 12px; align-items: end; margin-bottom: 14px; }
+.attendance-inline-form .attendance-grow { flex: 1; }
+
+@media (max-width: 980px) {
+  .attendance-context-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-summary-strip { grid-template-columns: repeat(4, minmax(80px, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .attendance-context-bar,
+  .attendance-form-grid { grid-template-columns: 1fr; }
+  .attendance-workspace-tabs { overflow-x: auto; }
+  .attendance-workspace-tabs button { flex: 0 0 auto; padding: 0 14px; }
+  .attendance-summary-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-inline-form { display: grid; grid-template-columns: 1fr; }
+}
+
 /* 花名册客户分组：工业运营控制台式客户轨道 */
 .roster-command-bar {
   display: flex;

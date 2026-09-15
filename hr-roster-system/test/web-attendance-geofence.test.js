@@ -4,6 +4,9 @@ for (const id of ['attendanceGeofenceForm', 'attendanceGeofenceBody']) assert.ma
 assert.match(html, /data-action-perm="attendance:manage"/);
 assert.match(js, /\/api\/attendance\/geofences/);
 assert.match(js, /data-disable-geofence/);
+assert.match(js, /customerId/);
+assert.match(js, /geofenceIds/);
+assert.match(html, /id="attendanceProjectGeofenceOptions"/);
 assert.match(js, /attendanceCorrectionBody/);
 assert.match(js, /\/api\/attendance\/corrections\?status=PENDING/);
 assert.match(js, /data-review-correction/);

@@ -107,9 +107,14 @@ async function getProjectSettings(companyId, user, projectId) {
       FROM attendance_project_rules
       WHERE company_id=:companyId AND project_id=:projectId
       ORDER BY effective_from DESC,id DESC`, { companyId, projectId: positiveId(projectId) });
+    const geofences = await query(client, `SELECT geofence_id AS geofenceId
+      FROM attendance_project_geofence
+      WHERE company_id=:companyId AND project_id=:projectId AND status=1
+      ORDER BY geofence_id`, { companyId, projectId: positiveId(projectId) });
     return {
       project: { projectId: project.id, projectName: project.projectName, customerId: project.customerId },
-      rules: rules.map(rule => ({ ...rule, workWeekdays: String(rule.workWeekdays).split(',').map(Number) }))
+      rules: rules.map(rule => ({ ...rule, workWeekdays: String(rule.workWeekdays).split(',').map(Number) })),
+      geofenceIds: geofences.map(item => Number(item.geofenceId))
     };
   });
 }
