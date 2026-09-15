@@ -8,6 +8,11 @@ async function query(client, sql, params) { const [rows] = await client.execute(
 function shanghaiDate(value = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
 }
+function shanghaiDateTime(value = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).formatToParts(value);
+  const get = type => parts.find(part => part.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`;
+}
 
 async function loadSchedule(client, companyId, employeeId, shiftDate) {
   return query(client, `SELECT s.id, s.shift_date AS shiftDate, s.schedule_status AS scheduleStatus,
@@ -59,7 +64,7 @@ async function punchEmployee(companyId, employeeId, body = {}) {
     const fence = await evaluateEmployeeLocation(client, companyId, employeeId, body.location);
     const location = body.location && !body.location.failed ? body.location : {};
     const inserted = await query(client, `INSERT INTO attendance_punches (company_id,employee_id,shift_date,punch_type,punch_time,source,geofence_id,latitude,longitude,location_accuracy,distance_meters,geofence_radius_snapshot,geofence_status,location_reason,client_request_id)
-      VALUES (:companyId,:employeeId,:shiftDate,:punchType,CURRENT_TIMESTAMP(3),:source,:geofenceId,:latitude,:longitude,:accuracy,:distanceMeters,:radiusSnapshot,:geofenceStatus,:locationReason,:clientRequestId)`, { companyId, employeeId, shiftDate, punchType: body.punchType, source: body.source === 'WEB' ? 'WEB' : 'WECHAT', clientRequestId: body.clientRequestId, geofenceId: fence.geofenceId, latitude: Number.isFinite(Number(location.latitude)) ? Number(location.latitude) : null, longitude: Number.isFinite(Number(location.longitude)) ? Number(location.longitude) : null, accuracy: Number.isFinite(Number(location.accuracy)) ? Number(location.accuracy) : null, distanceMeters: fence.distanceMeters, radiusSnapshot: fence.radiusSnapshot, geofenceStatus: fence.status, locationReason: fence.reason || null });
+      VALUES (:companyId,:employeeId,:shiftDate,:punchType,:punchTime,:source,:geofenceId,:latitude,:longitude,:accuracy,:distanceMeters,:radiusSnapshot,:geofenceStatus,:locationReason,:clientRequestId)`, { companyId, employeeId, shiftDate, punchType: body.punchType, punchTime: shanghaiDateTime(), source: body.source === 'WEB' ? 'WEB' : 'WECHAT', clientRequestId: body.clientRequestId, geofenceId: fence.geofenceId, latitude: Number.isFinite(Number(location.latitude)) ? Number(location.latitude) : null, longitude: Number.isFinite(Number(location.longitude)) ? Number(location.longitude) : null, accuracy: Number.isFinite(Number(location.accuracy)) ? Number(location.accuracy) : null, distanceMeters: fence.distanceMeters, radiusSnapshot: fence.radiusSnapshot, geofenceStatus: fence.status, locationReason: fence.reason || null });
     if (['OUTSIDE', 'LOW_ACCURACY', 'LOCATION_FAILED'].includes(fence.status)) {
       await query(client, `INSERT INTO attendance_correction_requests (company_id,employee_id,shift_date,request_type,reason,status,submitted_by_employee_id)
         VALUES (:companyId,:employeeId,:shiftDate,'GEOFENCE_EXCEPTION',:reason,'PENDING',:employeeId)`, { companyId, employeeId, shiftDate, reason: `电子围栏异常：${fence.status}${fence.reason ? `，${fence.reason}` : ''}` });
