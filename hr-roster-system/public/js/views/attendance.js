@@ -11,8 +11,30 @@ async function loadAttendance() {
   if (monthInput && !monthInput.value) monthInput.value = date.slice(0, 7);
   await loadAttendanceDaily(date);
   await loadAttendanceMonthly(monthInput?.value || date.slice(0, 7));
+  if ($('#attendanceGeofenceBody')) await loadAttendanceGeofences();
   $('#attendanceDailyRefresh')?.addEventListener('click', () => loadAttendanceDaily(date).catch(error => toast(error.message, 'error')), { once: true });
   monthInput?.addEventListener('change', event => loadAttendanceMonthly(event.target.value).catch(error => toast(error.message, 'error')), { once: true });
+  $('#attendanceGeofenceForm')?.addEventListener('submit', saveAttendanceGeofence, { once: true });
+  $('#attendanceGeofenceBody')?.addEventListener('click', disableAttendanceGeofence, { once: true });
+}
+
+async function loadAttendanceGeofences() {
+  const data = await api('/api/attendance/geofences');
+  const rows = data.list || [];
+  $('#attendanceGeofenceBody').innerHTML = rows.length ? rows.map(row => `<tr><td>${escapeHtml(row.projectName || String(row.projectId))}</td><td>${escapeHtml(row.fenceName)}</td><td>${row.latitude}, ${row.longitude}</td><td>${row.radiusMeters} 米</td><td>${row.maxAccuracyMeters} 米</td><td>${Number(row.status) === 1 ? '启用' : '停用'}</td><td>${Number(row.status) === 1 ? `<button class="text-button" type="button" data-disable-geofence="${row.id}">停用</button>` : '-'}</td></tr>`).join('') : '<tr><td colspan="7" class="muted">暂无电子围栏</td></tr>';
+}
+
+async function saveAttendanceGeofence(event) {
+  event.preventDefault();
+  const form = event.currentTarget; const values = Object.fromEntries(new FormData(form));
+  await api('/api/attendance/geofences', { method: 'POST', body: { ...values, projectId: Number(values.projectId), latitude: Number(values.latitude), longitude: Number(values.longitude), radiusMeters: Number(values.radiusMeters), maxAccuracyMeters: Number(values.maxAccuracyMeters) } });
+  toast('电子围栏已保存'); form.reset(); await loadAttendanceGeofences();
+}
+
+async function disableAttendanceGeofence(event) {
+  const button = event.target.closest('[data-disable-geofence]'); if (!button) return;
+  await api(`/api/attendance/geofences/${button.dataset.disableGeofence}`, { method: 'PUT', body: { status: 0 } });
+  toast('电子围栏已停用'); await loadAttendanceGeofences();
 }
 
 async function loadAttendanceDaily(date) {
