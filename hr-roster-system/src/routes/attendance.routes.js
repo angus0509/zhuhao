@@ -11,6 +11,9 @@ router.put('/attendance/corrections/:id/review', requireAuth, requirePermission(
 router.post('/attendance/shift-rules', requireAuth, requirePermission('attendance:manage'), controller.createShiftRule);
 router.put('/attendance/schedules', requireAuth, requirePermission('attendance:manage'), controller.upsertSchedule);
 router.get('/payroll/attendance-summary', requireAuth, requirePermission('payroll:view'), controller.payrollSummary);
+router.get('/attendance/geofences', requireAuth, requirePermission('attendance:view'), controller.listGeofences);
+router.post('/attendance/geofences', requireAuth, requirePermission('attendance:manage'), controller.createGeofence);
+router.put('/attendance/geofences/:id', requireAuth, requirePermission('attendance:manage'), controller.updateGeofence);
 router.get('/attendance/daily', requireAuth, requirePermission('attendance:view'), controller.daily);
 router.get('/attendance/monthly', requireAuth, requirePermission('attendance:view'), controller.monthly);
 
