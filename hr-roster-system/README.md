@@ -126,6 +126,7 @@ npm run prototype
 
 | 模块 | 功能 |
 |---|---|
+| 考勤与电子围栏 | 项目班次、员工排班、上下班打卡、工时计算、补卡审核、月度汇总；项目围栏内外判定，定位异常允许打卡并进入 HR 审核 |
 | 员工花名册 | 列表、查询、筛选、详情 |
 | 客户项目 | 客户单位、结算周期、用工项目、厂区、驻场负责人 |
 | 人才库 | 招聘来源、意向岗位、人才标签、跟进状态 |
@@ -162,6 +163,9 @@ npm run prototype
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| GET/POST/PUT | `/api/attendance/*` | 考勤日报、月报、排班、补卡审核和项目电子围栏管理 |
+| POST | `/api/employee/attendance/punch` | 员工本人打卡，服务端时间与围栏距离判定 |
+| GET | `/api/payroll/attendance-summary` | 薪酬模块读取核准工时汇总 |
 | GET | `/api/bootstrap` | 获取企业、部门、岗位、字典 |
 | GET/POST | `/api/clients` | 客户列表/新增客户 |
 | GET/POST | `/api/projects` | 项目列表/新建项目 |
