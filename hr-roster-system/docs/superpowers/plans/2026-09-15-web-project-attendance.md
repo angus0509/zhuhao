@@ -129,7 +129,7 @@ git commit -m "feat: add project attendance schema"
 - Consumes: `projectScope(user, params, 'p')`、`attendance_project_rules`、`attendance_project_calendar`。
 - Produces: `listProjects(companyId, user)`、`getProjectSettings(companyId, user, projectId)`、`saveProjectSettings(companyId, user, operatorId, projectId, body)`、`listCalendar(companyId, user, projectId, month)`、`saveCalendarDay(companyId, user, operatorId, projectId, body)`、`resolveProjectRule(client, companyId, projectId, shiftDate)`。
 
-- [ ] **Step 1: 写服务和路由失败测试**
+- [x] **Step 1: 写服务和路由失败测试**
 
 ```js
 const service = require('../src/services/attendance-project.service');
@@ -143,13 +143,13 @@ assert.match(routes, /get\('\/attendance\/projects\/:projectId\/exceptions'/);
 assert.match(routes, /put\('\/attendance\/projects\/:projectId\/exceptions'/);
 ```
 
-- [ ] **Step 2: 运行测试确认正确失败**
+- [x] **Step 2: 运行测试确认正确失败**
 
 Run: `node test/web-project-attendance-service.test.js && node test/web-project-attendance-api.test.js`
 
 Expected: FAIL，原因是项目服务和路由尚不存在。
 
-- [ ] **Step 3: 实现输入校验和规则解析**
+- [x] **Step 3: 实现输入校验和规则解析**
 
 `saveProjectSettings` 校验：项目授权、`HH:mm` 时间、`workWeekdays` 是 1-7 的去重整数、分钟为 0-1440 整数、`effectiveFrom` 为 `YYYY-MM-DD`。规则解析顺序：
 
@@ -165,7 +165,7 @@ async function resolveProjectRule(client, companyId, projectId, shiftDate) {
 
 写入规则和日历使用参数化 SQL 与 upsert；新增、更新写 `sys_operation_log`，审计详情只记录项目、规则和日期摘要。
 
-- [ ] **Step 4: 注册权限明确的控制器和路由**
+- [x] **Step 4: 注册权限明确的控制器和路由**
 
 ```js
 router.get('/attendance/projects', requireAuth, requirePermission('attendance:view'), controller.projects);
@@ -175,13 +175,13 @@ router.get('/attendance/projects/:projectId/exceptions', requireAuth, requirePer
 router.put('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:manage'), controller.saveProjectException);
 ```
 
-- [ ] **Step 5: 运行专项检查**
+- [x] **Step 5: 运行专项检查**
 
 Run: `node test/web-project-attendance-service.test.js && node test/web-project-attendance-api.test.js && npm run lint && git diff --check`
 
 Expected: 全部退出码 0。
 
-- [ ] **Step 6: 提交规则服务任务**
+- [x] **Step 6: 提交规则服务任务**
 
 ```bash
 git add src/services/attendance-project.service.js src/controllers/attendance.controller.js src/routes/attendance.routes.js test/web-project-attendance-service.test.js test/web-project-attendance-api.test.js
