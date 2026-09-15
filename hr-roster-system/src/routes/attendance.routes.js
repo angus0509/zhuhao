@@ -7,6 +7,7 @@ router.get('/employee/attendance/month', requireAuth, requireEmployeeAccount, co
 router.get('/employee/attendance/today', requireAuth, requireEmployeeAccount, controller.employeeToday);
 router.post('/employee/attendance/punch', requireAuth, requireEmployeeAccount, controller.punch);
 router.post('/employee/attendance/corrections', requireAuth, requireEmployeeAccount, controller.createCorrection);
+router.get('/attendance/corrections', requireAuth, requirePermission('attendance:review'), controller.listCorrections);
 router.put('/attendance/corrections/:id/review', requireAuth, requirePermission('attendance:review'), controller.reviewCorrection);
 router.post('/attendance/shift-rules', requireAuth, requirePermission('attendance:manage'), controller.createShiftRule);
 router.put('/attendance/schedules', requireAuth, requirePermission('attendance:manage'), controller.upsertSchedule);

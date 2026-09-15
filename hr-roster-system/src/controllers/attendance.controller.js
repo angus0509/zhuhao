@@ -6,6 +6,7 @@ exports.employeeMonth = asyncHandler(async (req, res) => success(res, await serv
 exports.employeeToday = asyncHandler(async (req, res) => success(res, await service.getEmployeeToday(req.companyId, req.user.employeeId)));
 exports.punch = asyncHandler(async (req, res) => success(res, await service.punchEmployee(req.companyId, req.user.employeeId, req.body), '打卡成功'));
 exports.createCorrection = asyncHandler(async (req, res) => success(res, await service.createCorrection(req.companyId, req.user.employeeId, req.body), '申请已提交'));
+exports.listCorrections = asyncHandler(async (req, res) => success(res, { list: await service.listCorrections(req.companyId, req.user, req.query) }));
 exports.reviewCorrection = asyncHandler(async (req, res) => success(res, await service.reviewCorrection(req.companyId, req.user, Number(req.params.id), req.body), '审核结果已保存'));
 exports.daily = asyncHandler(async (req, res) => success(res, { list: await service.listDaily(req.companyId, req.user, req.query) }));
 exports.monthly = asyncHandler(async (req, res) => success(res, { list: await service.listMonthly(req.companyId, req.user, req.query) }));

@@ -4,4 +4,7 @@ for (const id of ['attendanceGeofenceForm', 'attendanceGeofenceBody']) assert.ma
 assert.match(html, /data-action-perm="attendance:manage"/);
 assert.match(js, /\/api\/attendance\/geofences/);
 assert.match(js, /data-disable-geofence/);
+assert.match(js, /attendanceCorrectionBody/);
+assert.match(js, /\/api\/attendance\/corrections\?status=PENDING/);
+assert.match(js, /data-review-correction/);
 console.log('web-attendance-geofence.test.js: contract passed');

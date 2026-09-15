@@ -6,16 +6,38 @@ function attendanceMinutes(value) {
 function attendanceDate() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date()); }
 
 async function loadAttendance() {
+  ensureAttendanceCorrectionPanel();
   const date = attendanceDate();
   const monthInput = $('#attendanceMonth');
   if (monthInput && !monthInput.value) monthInput.value = date.slice(0, 7);
   await loadAttendanceDaily(date);
   await loadAttendanceMonthly(monthInput?.value || date.slice(0, 7));
   if ($('#attendanceGeofenceBody')) await loadAttendanceGeofences();
+  await loadAttendanceCorrections();
   $('#attendanceDailyRefresh')?.addEventListener('click', () => loadAttendanceDaily(date).catch(error => toast(error.message, 'error')), { once: true });
   monthInput?.addEventListener('change', event => loadAttendanceMonthly(event.target.value).catch(error => toast(error.message, 'error')), { once: true });
   $('#attendanceGeofenceForm')?.addEventListener('submit', saveAttendanceGeofence, { once: true });
   $('#attendanceGeofenceBody')?.addEventListener('click', disableAttendanceGeofence, { once: true });
+}
+
+function ensureAttendanceCorrectionPanel() {
+  if ($('#attendanceCorrectionBody')) return;
+  const panel = document.createElement('div'); panel.className = 'business-panel'; panel.style.marginTop = '16px'; panel.dataset.actionPerm = 'attendance:review';
+  panel.innerHTML = '<div class="panel-head"><div><h3>围栏异常审核</h3><p>处理围栏外、低精度和定位失败打卡</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>日期</th><th>定位状态</th><th>距离</th><th>原因</th><th>操作</th></tr></thead><tbody id="attendanceCorrectionBody"></tbody></table></div>';
+  $('#attendanceGeofenceForm')?.closest('.business-panel')?.before(panel);
+  panel.addEventListener('click', reviewAttendanceCorrection);
+}
+
+async function loadAttendanceCorrections() {
+  if (!$('#attendanceCorrectionBody')) return;
+  const data = await api('/api/attendance/corrections?status=PENDING'); const rows = data.list || [];
+  $('#attendanceCorrectionBody').innerHTML = rows.length ? rows.map(row => `<tr><td>${escapeHtml(row.name)}</td><td>${escapeHtml(row.shiftDate)}</td><td>${escapeHtml(row.geofenceStatus || '-')}</td><td>${row.distanceMeters == null ? '-' : `${row.distanceMeters} 米`}</td><td>${escapeHtml(row.reason)}</td><td><button class="text-button" data-review-correction="${row.id}" data-review-action="APPROVE">通过</button><button class="text-button" data-review-correction="${row.id}" data-review-action="REJECT">驳回</button></td></tr>`).join('') : '<tr><td colspan="6" class="muted">暂无待审核异常</td></tr>';
+}
+
+async function reviewAttendanceCorrection(event) {
+  const button = event.target.closest('[data-review-correction]'); if (!button) return;
+  await api(`/api/attendance/corrections/${button.dataset.reviewCorrection}/review`, { method: 'PUT', body: { action: button.dataset.reviewAction, reviewComment: 'Web 考勤工作台审核' } });
+  toast('审核结果已保存'); await loadAttendanceCorrections();
 }
 
 async function loadAttendanceGeofences() {

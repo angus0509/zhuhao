@@ -81,6 +81,18 @@ async function createCorrection(companyId, employeeId, body = {}) {
   return { id: result.insertId, status: 'PENDING' };
 }
 
+async function listCorrections(companyId, user, params = {}) {
+  const queryParams = { companyId, status: params.status || 'PENDING' };
+  const scope = employeeScope(user, queryParams, 'e', 'j');
+  return database.query(`SELECT c.id,c.employee_id AS employeeId,e.name,c.shift_date AS shiftDate,c.request_type AS requestType,
+    c.reason,c.status,c.created_at AS createdAt,
+    (SELECT p.geofence_status FROM attendance_punches p WHERE p.company_id=c.company_id AND p.employee_id=c.employee_id AND p.shift_date=c.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS geofenceStatus,
+    (SELECT p.distance_meters FROM attendance_punches p WHERE p.company_id=c.company_id AND p.employee_id=c.employee_id AND p.shift_date=c.shift_date ORDER BY p.punch_time DESC LIMIT 1) AS distanceMeters
+    FROM attendance_correction_requests c JOIN hr_employee e ON e.id=c.employee_id AND e.company_id=c.company_id
+    LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
+    WHERE c.company_id=:companyId AND c.status=:status ${scope} ORDER BY c.created_at DESC`, queryParams);
+}
+
 async function reviewCorrection(companyId, user, id, body = {}) {
   if (!['APPROVE', 'REJECT'].includes(body.action)) throw createError('审核动作无效', 400, 'INVALID_REVIEW_ACTION');
   return database.transaction(async client => {
@@ -178,4 +190,4 @@ async function attendanceSummaryForPayroll(companyId, user, params = {}) {
   return { month: params.month, list: rows.map(row => ({ employeeId: row.employeeId, name: row.name, normalMinutes: Number(row.approvedNormalMinutes || 0), overtimeMinutes: Number(row.approvedOvertimeMinutes || 0) })) };
 }
 
-module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, reviewCorrection, createShiftRule, upsertSchedule, attendanceSummaryForPayroll };
+module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, createCorrection, listCorrections, reviewCorrection, createShiftRule, upsertSchedule, attendanceSummaryForPayroll };
