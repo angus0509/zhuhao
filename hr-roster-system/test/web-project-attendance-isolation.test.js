@@ -2,6 +2,16 @@ const assert = require('node:assert/strict');
 const db = require('../src/db');
 const service = require('../src/services/attendance.service');
 
+function monthDatesThroughShanghaiToday(month) {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date());
+  const [year, monthNumber] = month.split('-').map(Number);
+  const lastDay = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+  const endDay = month === today.slice(0, 7) ? Number(today.slice(8, 10)) : lastDay;
+  return Array.from({ length: endDay }, (_, index) => `${month}-${String(index + 1).padStart(2, '0')}`);
+}
+
 async function run() {
   const originalQuery = db.query;
   const originalTransaction = db.transaction;
@@ -117,8 +127,9 @@ async function run() {
     assert.match(monthlySql.sql, /d\.project_id=:projectId/);
     assert.match(monthlySql.sql, /p\.project_id=d\.project_id/);
     assert.match(monthlySql.sql, /SUM\(d\.result_status<>'REST'\) AS scheduledDays/);
-    assert.deepEqual(monthlyScheduleDates, Array.from({ length: 15 }, (_, index) => `2026-09-${String(index + 1).padStart(2, '0')}`));
-    assert.equal(monthlyDailyResults.length, 14, '无规则日不应生成每日结果');
+    const expectedMonthlyDates = monthDatesThroughShanghaiToday('2026-09');
+    assert.deepEqual(monthlyScheduleDates, expectedMonthlyDates);
+    assert.equal(monthlyDailyResults.length, expectedMonthlyDates.length - 1, '无规则日不应生成每日结果');
     assert.equal(monthlyDailyResults.find(item => item.shiftDate === '2026-09-03').resultStatus, 'REST');
     assert.equal(monthlyDailyResults.find(item => item.shiftDate === '2026-09-01').resultStatus, 'ABSENT');
 
