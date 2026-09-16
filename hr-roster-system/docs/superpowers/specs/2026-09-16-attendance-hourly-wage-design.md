@@ -414,7 +414,25 @@ calculateDailyWage({
 {"success":false,"code":"WAGE_PREVIEW_BLOCKED","message":"仍有2条考勤异常未处理，不能生成工资批次"}
 ```
 
-### 6.6 日结支付状态
+### 6.6 工资预览详情
+
+`GET /api/payroll/calculations/:runId`
+
+权限：`payroll:view`，同时校验计算批次所属项目的数据范围。返回项目月份汇总、员工汇总和逐日计算快照；不返回内部审计数据或其他项目记录。
+
+成功响应：
+
+```json
+{"success":true,"data":{"runId":81,"projectId":12,"salaryMonth":"2026-10","status":"PREVIEW","summary":{"totalEarned":"128600.00","totalDailyPaid":"18600.00","totalPayable":"110000.00","blockedCount":2},"employees":[]}}
+```
+
+### 6.7 日结列表
+
+`GET /api/payroll/daily-payments?projectId=12&date=2026-10-08&status=PAID&keyword=`
+
+权限：`payroll:view`，同时校验项目数据范围。返回员工姓名、班次日期、当日应得、支付状态、支付时间和脱敏后的操作人展示信息。
+
+### 6.8 日结支付状态
 
 `PUT /api/payroll/daily-payments`
 
@@ -434,7 +452,7 @@ calculateDailyWage({
 {"success":true,"data":{"employeeId":101,"shiftDate":"2026-10-08","status":"PAID","amount":"175.00"}}
 ```
 
-### 6.7 腾讯地图配置
+### 6.9 腾讯地图配置
 
 `GET /api/attendance/map-config`
 
