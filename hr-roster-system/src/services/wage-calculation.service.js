@@ -285,4 +285,213 @@ async function getPreview(companyIdValue, user, runIdValue) {
   };
 }
 
-module.exports = { createPreview, getPreview };
+function validDate(value) {
+  const text = String(value || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  const date = new Date(`${text}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text;
+}
+
+async function cancelProjectPreviews(client, companyId, projectId) {
+  await query(client, `UPDATE wage_calculation_runs SET status='CANCELLED'
+    WHERE company_id=:companyId AND project_id=:projectId AND status='PREVIEW'`, { companyId, projectId });
+}
+
+async function setDailyPayment(companyIdValue, user, operatorIdValue, body = {}) {
+  const companyId = positiveId(companyIdValue);
+  const operatorId = positiveId(operatorIdValue);
+  const projectId = positiveId(body.projectId);
+  const employeeId = positiveId(body.employeeId);
+  const shiftDate = String(body.shiftDate || '');
+  const action = String(body.action || '');
+  const remark = String(body.remark || '').trim();
+  if (!companyId || !operatorId || !projectId || !employeeId || !validDate(shiftDate)
+    || !['MARK_PAID', 'REVOKE'].includes(action)) {
+    throw createError('日结状态参数无效', 400, 'INVALID_DAILY_PAYMENT');
+  }
+  if (action === 'REVOKE' && !remark) {
+    throw createError('撤销日结必须填写原因', 400, 'DAILY_PAYMENT_REMARK_REQUIRED');
+  }
+  return db.transaction(async client => {
+    await assertProject(client, companyId, user, projectId);
+    const lines = await query(client, `SELECT line.employee_id AS employeeId,line.shift_date AS shiftDate,
+        line.settlement_mode AS settlementMode,line.earned_amount AS earnedAmount,
+        line.calculation_status AS calculationStatus
+      FROM wage_calculation_daily_lines line
+      JOIN wage_calculation_runs run ON run.id=line.run_id AND run.company_id=line.company_id
+      WHERE line.company_id=:companyId AND line.project_id=:projectId AND line.employee_id=:employeeId
+        AND line.shift_date=:shiftDate AND run.status IN ('PREVIEW','CANCELLED')
+      ORDER BY run.revision_no DESC,line.id DESC LIMIT 1 FOR UPDATE`, {
+      companyId, projectId, employeeId, shiftDate
+    });
+    const line = lines[0];
+    if (!line) throw createError('未找到可日结的工资明细', 404, 'DAILY_WAGE_NOT_FOUND');
+    if (line.settlementMode !== 'DAILY_PAID') {
+      throw createError('该员工不是日结已支付模式', 409, 'DAILY_PAYMENT_MODE_REQUIRED');
+    }
+    if (!['READY', 'ZERO'].includes(line.calculationStatus)) {
+      throw createError('当日工资仍有阻断项，不能标记日结', 409, 'DAILY_WAGE_BLOCKED');
+    }
+    const payments = await query(client, `SELECT id,status,amount FROM wage_daily_payments
+      WHERE company_id=:companyId AND project_id=:projectId AND employee_id=:employeeId
+        AND shift_date=:shiftDate LIMIT 1 FOR UPDATE`, { companyId, projectId, employeeId, shiftDate });
+    const existing = payments[0];
+    if (action === 'MARK_PAID' && existing?.status === 'PAID') {
+      return { employeeId, shiftDate, status: 'PAID', amount: String(existing.amount) };
+    }
+    if (action === 'REVOKE' && (!existing || existing.status !== 'PAID')) {
+      throw createError('该日工资尚未标记为已支付', 409, 'DAILY_PAYMENT_NOT_PAID');
+    }
+    const amount = String(line.earnedAmount);
+    if (action === 'MARK_PAID') {
+      await query(client, `INSERT INTO wage_daily_payments
+        (company_id,project_id,employee_id,shift_date,amount,status,remark,paid_by,paid_at)
+        VALUES (:companyId,:projectId,:employeeId,:shiftDate,:amount,'PAID',:remark,:operatorId,NOW())
+        ON DUPLICATE KEY UPDATE amount=VALUES(amount),status='PAID',remark=VALUES(remark),
+          paid_by=VALUES(paid_by),paid_at=NOW(),revoked_by=NULL,revoked_at=NULL`, {
+        companyId, projectId, employeeId, shiftDate, amount, remark: remark || null, operatorId
+      });
+    } else {
+      await query(client, `UPDATE wage_daily_payments SET status='REVOKED',remark=:remark,
+          revoked_by=:operatorId,revoked_at=NOW()
+        WHERE company_id=:companyId AND project_id=:projectId AND employee_id=:employeeId
+          AND shift_date=:shiftDate AND status='PAID'`, {
+        companyId, projectId, employeeId, shiftDate, remark, operatorId
+      });
+    }
+    await cancelProjectPreviews(client, companyId, projectId);
+    await query(client, `INSERT INTO hr_operation_log
+      (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+      VALUES (:companyId,:operatorId,'考勤工资','wage_daily_payment',:employeeId,:actionType,:afterData)`, {
+      companyId, operatorId, employeeId,
+      actionType: action === 'MARK_PAID' ? 'mark_paid' : 'revoke',
+      afterData: JSON.stringify({ projectId, employeeId, shiftDate, amount, remark: remark || null })
+    });
+    return { employeeId, shiftDate, status: action === 'MARK_PAID' ? 'PAID' : 'REVOKED', amount };
+  });
+}
+
+function employeeWageSnapshot(employee) {
+  const items = [
+    { label: '当月应得工资', value: formatCents(employee.earnedCents), category: 'display', sortOrder: 1 },
+    { label: '已日结金额', value: formatCents(employee.dailyPaidCents), category: 'display', sortOrder: 2 },
+    { label: '月度待发金额', value: formatCents(employee.payableCents), category: 'display', sortOrder: 3 }
+  ];
+  employee.days.forEach((day, index) => {
+    const shiftName = day.shiftType === 'NIGHT' ? '夜班' : '白班';
+    items.push({
+      label: `${String(day.shiftDate).slice(5, 10).replace('-', '月')}日 ${shiftName}`,
+      value: `实际${(Number(day.workedMinutes || 0) / 60).toFixed(2)}小时，计薪${(Number(day.payableMinutes || 0) / 60).toFixed(2)}小时，时薪${day.hourlyRate}元，补贴${day.allowanceAmount}元，应得${day.earnedAmount}元，已日结${day.dailyPaidAmount}元，待发${day.payableAmount}元`,
+      category: 'display',
+      sortOrder: index + 4
+    });
+  });
+  return items;
+}
+
+async function confirmPreview(companyIdValue, user, operatorIdValue, runIdValue) {
+  const companyId = positiveId(companyIdValue);
+  const operatorId = positiveId(operatorIdValue);
+  const runId = positiveId(runIdValue);
+  if (!companyId || !operatorId || !runId) {
+    throw createError('工资预览确认参数无效', 400, 'INVALID_WAGE_CONFIRMATION');
+  }
+  return db.transaction(async client => {
+    const params = { companyId, runId };
+    const scope = projectScope(user, params, 'p');
+    const runs = await query(client, `SELECT run.id AS runId,run.project_id AS projectId,
+        run.salary_month AS salaryMonth,run.revision_no AS revisionNo,run.status,
+        run.blocked_count AS blockedCount,run.salary_batch_id AS salaryBatchId
+      FROM wage_calculation_runs run
+      JOIN labor_project p ON p.id=run.project_id AND p.company_id=run.company_id
+      WHERE run.company_id=:companyId AND run.id=:runId ${scope} LIMIT 1 FOR UPDATE`, params);
+    const run = runs[0];
+    if (!run) throw createError('工资预览不存在或无权访问', 404, 'WAGE_PREVIEW_NOT_FOUND');
+    if (run.status === 'CONFIRMED' && positiveId(run.salaryBatchId)) {
+      return { runId, salaryBatchId: Number(run.salaryBatchId), batchStatus: 3 };
+    }
+    const existingBatches = await query(client, `SELECT id FROM salary_batch
+      WHERE company_id=:companyId AND calculation_run_id=:runId LIMIT 1 FOR UPDATE`, { companyId, runId });
+    if (existingBatches[0]) {
+      return { runId, salaryBatchId: Number(existingBatches[0].id), batchStatus: 3 };
+    }
+    if (run.status !== 'PREVIEW') throw createError('该工资预览已失效，请重新生成', 409, 'WAGE_PREVIEW_STALE');
+    if (Number(run.blockedCount || 0) > 0) {
+      throw createError(`仍有${Number(run.blockedCount)}条考勤异常未处理，不能生成工资批次`, 409, 'WAGE_PREVIEW_BLOCKED');
+    }
+    const latest = await query(client, `SELECT id FROM wage_calculation_runs
+      WHERE company_id=:companyId AND project_id=:projectId AND salary_month=:salaryMonth
+        AND status='PREVIEW' ORDER BY revision_no DESC LIMIT 1 FOR UPDATE`, {
+      companyId, projectId: Number(run.projectId), salaryMonth: run.salaryMonth
+    });
+    if (Number(latest[0]?.id) !== runId) {
+      throw createError('该工资预览不是最新版本，请刷新后重试', 409, 'WAGE_PREVIEW_STALE');
+    }
+    const lines = await query(client, `SELECT line.employee_id AS employeeId,line.shift_date AS shiftDate,
+        line.shift_type AS shiftType,line.worked_minutes AS workedMinutes,
+        line.payable_minutes AS payableMinutes,line.hourly_rate AS hourlyRate,
+        line.allowance_amount AS allowanceAmount,line.earned_amount AS earnedAmount,
+        line.daily_paid_amount AS dailyPaidAmount,line.payable_amount AS payableAmount
+      FROM wage_calculation_daily_lines line
+      WHERE line.company_id=:companyId AND line.run_id=:runId AND line.calculation_status IN ('READY','ZERO')
+      ORDER BY line.employee_id,line.shift_date,line.id`, { companyId, runId });
+    const employees = new Map();
+    for (const line of lines) {
+      const employeeId = Number(line.employeeId);
+      if (!employees.has(employeeId)) {
+        employees.set(employeeId, { employeeId, earnedCents: 0, dailyPaidCents: 0, payableCents: 0, days: [] });
+      }
+      const employee = employees.get(employeeId);
+      employee.earnedCents += parseMoneyToCents(line.earnedAmount);
+      employee.dailyPaidCents += parseMoneyToCents(line.dailyPaidAmount);
+      employee.payableCents += parseMoneyToCents(line.payableAmount);
+      employee.days.push(line);
+    }
+    const batchNo = `GZAUTO${String(run.salaryMonth).replace('-', '')}${runId}`;
+    const totalGrossCents = [...employees.values()].reduce((sum, item) => sum + item.earnedCents, 0);
+    const totalNetCents = [...employees.values()].reduce((sum, item) => sum + item.payableCents, 0);
+    const sourceType = 'ATTENDANCE_AUTO';
+    const batchResult = await query(client, `INSERT INTO salary_batch
+      (company_id,project_id,batch_no,salary_month,payroll_type,source_type,calculation_run_id,
+       batch_status,total_gross,total_net,created_by)
+      VALUES (:companyId,:projectId,:batchNo,:salaryMonth,1,:sourceType,:runId,3,
+        :totalGross,:totalNet,:operatorId)`, {
+      companyId, projectId: Number(run.projectId), batchNo, salaryMonth: run.salaryMonth,
+      sourceType, runId, totalGross: formatCents(totalGrossCents), totalNet: formatCents(totalNetCents), operatorId
+    });
+    const salaryBatchId = Number(batchResult.insertId);
+    let sourceRowNo = 1;
+    for (const employee of employees.values()) {
+      await query(client, `INSERT INTO salary_detail
+        (company_id,batch_id,employee_id,allowance_amount,gross_amount,other_deduction,net_amount,
+         item_snapshot,source_row_no,receipt_status)
+        VALUES (:companyId,:batchId,:employeeId,:allowanceAmount,:grossAmount,:otherDeduction,
+          :netAmount,:itemSnapshot,:sourceRowNo,0)`, {
+        companyId, batchId: salaryBatchId, employeeId: employee.employeeId,
+        allowanceAmount: formatCents(employee.days.reduce(
+          (sum, day) => sum + parseMoneyToCents(day.allowanceAmount), 0
+        )),
+        grossAmount: formatCents(employee.earnedCents),
+        otherDeduction: formatCents(employee.dailyPaidCents),
+        netAmount: formatCents(employee.payableCents),
+        itemSnapshot: JSON.stringify(employeeWageSnapshot(employee)),
+        sourceRowNo
+      });
+      sourceRowNo += 1;
+    }
+    await query(client, `UPDATE wage_calculation_runs SET status='CONFIRMED',salary_batch_id=:salaryBatchId,
+        confirmed_by=:operatorId,confirmed_at=NOW()
+      WHERE company_id=:companyId AND id=:runId AND status='PREVIEW'`, {
+      companyId, runId, salaryBatchId, operatorId
+    });
+    await query(client, `INSERT INTO hr_operation_log
+      (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+      VALUES (:companyId,:operatorId,'考勤工资','wage_calculation_run',:runId,'confirm',:afterData)`, {
+      companyId, operatorId, runId,
+      afterData: JSON.stringify({ salaryBatchId, projectId: Number(run.projectId), salaryMonth: run.salaryMonth })
+    });
+    return { runId, salaryBatchId, batchStatus: 3 };
+  });
+}
+
+module.exports = { createPreview, getPreview, setDailyPayment, confirmPreview };
