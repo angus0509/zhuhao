@@ -28,14 +28,14 @@ assert.equal(typeof authExports.clearRememberedManagerLogin, 'function', '缺少
 authExports.saveSession({
   token: 'short-access-token',
   refreshToken: 'long-device-token',
-  refreshExpiresAt: '2026-09-16 11:00:00',
+  refreshExpiresAt: '2099-09-16 11:00:00',
   user: { id: 9, companyId: 1, username: 'onsite01', realName: '驻厂张三', accountType: 'MANAGER' }
 });
 assert.deepEqual(
   JSON.parse(JSON.stringify(authExports.getRememberedManagerLogin())),
   {
     refreshToken: 'long-device-token',
-    refreshExpiresAt: '2026-09-16 11:00:00',
+    refreshExpiresAt: '2099-09-16 11:00:00',
     username: 'onsite01',
     realName: '驻厂张三'
   }
@@ -54,7 +54,7 @@ const requests = [];
 let pageDefinition = null;
 const remembered = {
   refreshToken: 'remembered-token',
-  refreshExpiresAt: '2026-09-16 11:00:00',
+  refreshExpiresAt: '2099-09-16 11:00:00',
   username: 'onsite01',
   realName: '驻厂张三'
 };

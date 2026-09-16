@@ -20,7 +20,8 @@ async function main() {
 
   const connection = {
     async execute(sql, params = {}) {
-      if (sql.includes('FROM hr_department') && sql.includes('ORDER BY sort_no')) return [[{ id: 5 }]];
+      if (sql.includes('FROM hr_company') && sql.includes('FOR UPDATE')) return [[{ id: 1 }]];
+      if (sql.includes('FROM hr_department') && sql.includes('dept_code=:deptCode')) return [[{ id: 5, status: 1 }]];
       if (sql.includes('FROM person_blacklist')) return [[]];
       if (sql.includes('FROM hr_employee') && sql.includes('id_card_hash') && sql.includes('id<>')) return [[]];
       if (sql.includes('FROM hr_employee') && sql.includes('employee_no')) return [[]];
