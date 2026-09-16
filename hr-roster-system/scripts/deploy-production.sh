@@ -297,7 +297,7 @@ test "$HOURLY_WAGE_TABLE_COUNT" = "6" || { echo "小时工资核心表迁移不�
 HOURLY_WAGE_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND ((TABLE_NAME='attendance_schedules' AND COLUMN_NAME IN ('shift_type','project_shift_rule_id')) OR (TABLE_NAME='salary_batch' AND COLUMN_NAME IN ('source_type','calculation_run_id')))")"
 test "$HOURLY_WAGE_COLUMN_COUNT" = "4" || { echo "小时工资扩展字段迁移不完整: $HOURLY_WAGE_COLUMN_COUNT/4" >&2; exit 1; }
 
-HOURLY_WAGE_INDEX_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_batch' AND INDEX_NAME='uk_salary_batch_calculation_run'")"
+HOURLY_WAGE_INDEX_COUNT="$(mysql_scalar "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_batch' AND INDEX_NAME='uk_salary_batch_calculation_run'")"
 test "$HOURLY_WAGE_INDEX_COUNT" = "1" || { echo "自动工资批次唯一索引迁移不完整" >&2; exit 1; }
 
 UNASSIGNED_ATTENDANCE_GEOFENCE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM attendance_geofences WHERE customer_id IS NULL")"
