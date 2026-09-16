@@ -14,6 +14,7 @@
     "test:page-logic": "node test/page-logic-integrity.test.js",
     "test:attendance": "node test/attendance-calculator.test.js && node test/attendance-write-contract.test.js && node test/attendance-management-contract.test.js && node test/attendance-security-regression.test.js",
     "test:attendance-geofence": "node test/attendance-geofence.test.js && node test/attendance-geofence-schema.test.js && node test/attendance-geofence-privacy.test.js && node test/attendance-geofence-management.test.js && node test/web-attendance-geofence.test.js && node test/miniprogram-attendance-geofence.test.js && node test/miniprogram-manager-attendance.test.js",
+    "test:hourly-wage": "node test/attendance-hourly-wage-schema.test.js",
     "test:web-project-attendance": "node test/web-project-attendance-schema.test.js && node test/web-project-attendance-service.test.js && node test/web-project-attendance-api.test.js && node test/web-project-attendance-ui.test.js && node test/web-project-attendance-isolation.test.js",
     "test:web-employee-bind-code": "node test/web-employee-bind-code.test.js",
     "test:web-payroll-view-policy-layout": "node test/web-payroll-view-policy-layout.test.js",

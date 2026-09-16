@@ -90,7 +90,8 @@ assert.doesNotMatch(payslipViewPolicyMigration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\
 for (const attendanceMigrationPath of [
   'sql/migrate-attendance-timekeeping-20260909.mysql.sql',
   'sql/migrate-attendance-geofence-20260915.mysql.sql',
-  'sql/migrate-web-project-attendance-20260915.mysql.sql'
+  'sql/migrate-web-project-attendance-20260915.mysql.sql',
+  'sql/migrate-attendance-hourly-wage-20260916.mysql.sql'
 ]) {
   const attendanceMigration = read(attendanceMigrationPath);
   assert.ok(verify.includes(`"${attendanceMigrationPath}"`), `发布包必须包含 ${attendanceMigrationPath}`);
@@ -107,5 +108,9 @@ assert.match(deploy, /ATTENDANCE_GEOFENCE_READY=.*attendance_geofences.*punch_id
   '部署后必须核验电子围栏表和异常打卡关联字段');
 assert.match(deploy, /PROJECT_ATTENDANCE_READY=.*attendance_project_rules.*attendance_project_calendar.*attendance_project_geofence.*customer_id.*attendance_schedules.*attendance_punches.*attendance_daily_results/s,
   '部署后必须核验项目考勤表、客户围栏和历史项目快照');
+assert.match(deploy, /HOURLY_WAGE_TABLE_COUNT=.*attendance_project_shift_rules.*attendance_allowance_rules.*employee_pay_profiles.*wage_calculation_runs.*wage_calculation_daily_lines.*wage_daily_payments/s,
+  '部署后必须核验小时工资核心表');
+assert.match(deploy, /HOURLY_WAGE_COLUMN_COUNT=.*shift_type.*project_shift_rule_id.*source_type.*calculation_run_id/s,
+  '部署后必须核验小时工资扩展字段');
 
 console.log('release-migration-consistency-tests-ok');
