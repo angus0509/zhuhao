@@ -5,6 +5,7 @@ const { calculateDailyAttendance } = require('./attendance-calculator.service');
 const { evaluateGeofence } = require('./attendance-geofence.service');
 const { assertEmployeeScope } = require('./employee.service');
 const { resolveProjectRule } = require('./attendance-project.service');
+const { resolvePayProfile } = require('./employee-pay-profile.service');
 async function query(client, sql, params) { const [rows] = await client.execute(sql, params); return rows; }
 
 function shanghaiDate(value = new Date()) {
@@ -40,19 +41,47 @@ function isJobEffectiveOnDate(job, shiftDate) {
 
 async function loadSchedule(client, companyId, employeeId, shiftDate) {
   return query(client, `SELECT s.id,s.project_id AS projectId,s.shift_date AS shiftDate,s.schedule_status AS scheduleStatus,
-      s.shift_rule_id AS shiftRuleId,s.project_rule_id AS projectRuleId,
-      COALESCE(sr.work_start_time,pr.work_start_time) AS workStartTime,
-      COALESCE(sr.work_end_time,pr.work_end_time) AS workEndTime,
-      COALESCE(sr.rest_start_time,pr.rest_start_time) AS restStartTime,
-      COALESCE(sr.rest_end_time,pr.rest_end_time) AS restEndTime,
-      COALESCE(sr.standard_minutes,pr.standard_minutes) AS standardMinutes,
+      s.shift_rule_id AS shiftRuleId,s.project_rule_id AS projectRuleId,s.shift_type AS shiftType,
+      s.project_shift_rule_id AS projectShiftRuleId,
+      COALESCE(sr.work_start_time,psr.work_start_time,pr.work_start_time) AS workStartTime,
+      COALESCE(sr.work_end_time,psr.work_end_time,pr.work_end_time) AS workEndTime,
+      COALESCE(sr.rest_start_time,psr.rest_start_time,pr.rest_start_time) AS restStartTime,
+      COALESCE(sr.rest_end_time,psr.rest_end_time,pr.rest_end_time) AS restEndTime,
+      COALESCE(sr.standard_minutes,psr.standard_minutes,pr.standard_minutes) AS standardMinutes,
       COALESCE(sr.late_grace_minutes,pr.late_grace_minutes) AS lateGraceMinutes,
       COALESCE(sr.early_grace_minutes,pr.early_grace_minutes) AS earlyGraceMinutes,
       COALESCE(sr.overtime_min_minutes,pr.overtime_min_minutes) AS overtimeMinMinutes
     FROM attendance_schedules s
     LEFT JOIN attendance_shift_rules sr ON sr.id=s.shift_rule_id AND sr.company_id=s.company_id
     LEFT JOIN attendance_project_rules pr ON pr.id=s.project_rule_id AND pr.company_id=s.company_id
+    LEFT JOIN attendance_project_shift_rules psr ON psr.id=s.project_shift_rule_id AND psr.company_id=s.company_id
     WHERE s.company_id=:companyId AND s.employee_id=:employeeId AND s.shift_date=:shiftDate`, { companyId, employeeId, shiftDate }).then(rows => rows[0] || null);
+}
+
+async function resolveEmployeeShift(client, companyId, projectId, employeeId, shiftDate) {
+  if (!validDate(shiftDate)) throw createError('日期格式应为 YYYY-MM-DD', 400, 'INVALID_DATE');
+  const schedules = await query(client, `SELECT s.id AS scheduleId,s.project_rule_id AS projectRuleId,
+      s.project_shift_rule_id AS projectShiftRuleId,s.shift_type AS shiftType,s.schedule_status AS scheduleStatus
+    FROM attendance_schedules s
+    WHERE s.company_id=:companyId AND s.project_id=:projectId AND s.employee_id=:employeeId
+      AND s.shift_date=:shiftDate LIMIT 1`, { companyId, projectId, employeeId, shiftDate });
+  if (schedules[0]?.shiftType) return { ...schedules[0], source: 'SCHEDULE' };
+  const profile = await resolvePayProfile(client, companyId, projectId, employeeId, shiftDate);
+  if (!profile) return { source: 'MISSING_PAY_PROFILE', shiftType: null };
+  const rules = await query(client, `SELECT id FROM attendance_project_rules
+    WHERE company_id=:companyId AND project_id=:projectId AND status=1 AND effective_from<=:shiftDate
+    ORDER BY effective_from DESC,id DESC LIMIT 1`, { companyId, projectId, shiftDate });
+  if (!rules[0]) return { source: 'MISSING_PROJECT_RULE', shiftType: profile.defaultShiftType };
+  const shifts = await query(client, `SELECT id AS projectShiftRuleId,shift_type AS shiftType,
+      work_start_time AS workStartTime,work_end_time AS workEndTime,rest_start_time AS restStartTime,
+      rest_end_time AS restEndTime,standard_minutes AS standardMinutes,hourly_rate AS hourlyRate
+    FROM attendance_project_shift_rules
+    WHERE company_id=:companyId AND project_id=:projectId AND project_rule_id=:projectRuleId
+      AND shift_type=:shiftType AND status=1 LIMIT 1`, {
+    companyId, projectId, projectRuleId: Number(rules[0].id), shiftType: profile.defaultShiftType
+  });
+  if (!shifts[0]) return { source: 'MISSING_SHIFT_RULE', shiftType: profile.defaultShiftType, ...profile };
+  return { ...shifts[0], ...profile, projectRuleId: Number(rules[0].id), source: 'DEFAULT' };
 }
 
 async function recalculateDaily(client, companyId, employeeId, shiftDate, schedule) {
@@ -328,12 +357,15 @@ async function generateProjectSchedules(client, companyId, user, projectId, shif
   const rule = await resolveProjectRule(client, companyId, projectId, shiftDate);
   if (!rule) return { projectId, shiftDate, generated: 0, status: 'NO_PROJECT_RULE' };
   for (const employee of employees) {
+    const employeeShift = await resolveEmployeeShift(client, companyId, projectId, employee.employeeId, shiftDate);
+    const shiftType = employeeShift.shiftType || null;
+    const projectShiftRuleId = Number(employeeShift.projectShiftRuleId) || null;
     await query(client, `INSERT INTO attendance_schedules
-      (company_id,employee_id,project_id,shift_date,project_rule_id,shift_rule_id,schedule_status,created_by)
-      VALUES (:companyId,:employeeId,:projectId,:shiftDate,:projectRuleId,NULL,:scheduleStatus,:operatorId)
+      (company_id,employee_id,project_id,shift_date,project_rule_id,shift_rule_id,shift_type,project_shift_rule_id,schedule_status,created_by)
+      VALUES (:companyId,:employeeId,:projectId,:shiftDate,:projectRuleId,NULL,:shiftType,:projectShiftRuleId,:scheduleStatus,:operatorId)
       ON DUPLICATE KEY UPDATE project_id=COALESCE(project_id,VALUES(project_id)),updated_at=CURRENT_TIMESTAMP`, {
       companyId, employeeId: employee.employeeId, projectId, shiftDate, projectRuleId: rule.id,
-      scheduleStatus: rule.scheduleStatus, operatorId: Number(user.id || 0)
+      shiftType, projectShiftRuleId, scheduleStatus: rule.scheduleStatus, operatorId: Number(user.id || 0)
     });
     if (shiftDate <= shanghaiDate()) {
       const schedule = await loadSchedule(client, companyId, employee.employeeId, shiftDate);
@@ -341,6 +373,49 @@ async function generateProjectSchedules(client, companyId, user, projectId, shif
     }
   }
   return { projectId, shiftDate, generated: employees.length, status: rule.scheduleStatus };
+}
+
+async function upsertProjectSchedules(companyId, user, operatorId, projectIdValue, body = {}) {
+  const projectId = requiredProjectId(projectIdValue);
+  const shiftDate = String(body.shiftDate || '');
+  const assignments = Array.isArray(body.assignments) ? body.assignments : [];
+  if (!validDate(shiftDate) || assignments.length === 0 || assignments.length > 500) {
+    throw createError('项目排班参数无效', 400, 'INVALID_PROJECT_SCHEDULE');
+  }
+  const normalized = assignments.map(item => ({ employeeId: Number(item.employeeId), shiftType: String(item.shiftType || '') }));
+  if (normalized.some(item => !Number.isInteger(item.employeeId) || item.employeeId <= 0 || !['DAY', 'NIGHT'].includes(item.shiftType))
+    || new Set(normalized.map(item => item.employeeId)).size !== normalized.length) {
+    throw createError('项目排班参数无效', 400, 'INVALID_PROJECT_SCHEDULE');
+  }
+  return database.transaction(async client => {
+    await assertProjectAccess(client, companyId, user, projectId);
+    const projectRule = await resolveProjectRule(client, companyId, projectId, shiftDate);
+    if (!projectRule) throw createError('该日期没有生效的项目规则', 409, 'PROJECT_RULE_NOT_FOUND');
+    for (const assignment of normalized) {
+      const employees = await query(client, `SELECT j.employee_id AS employeeId FROM hr_employee_job j
+        WHERE j.company_id=:companyId AND j.project_id=:projectId AND j.employee_id=:employeeId
+          AND (j.hire_date IS NULL OR j.hire_date<=:shiftDate)
+        ORDER BY j.hire_date DESC,j.id DESC LIMIT 1`, { companyId, projectId, shiftDate, employeeId: assignment.employeeId });
+      if (!employees[0]) throw createError('员工不属于当前项目', 403, 'EMPLOYEE_PROJECT_FORBIDDEN');
+      const shifts = await query(client, `SELECT id AS projectShiftRuleId,shift_type AS shiftType
+        FROM attendance_project_shift_rules
+        WHERE company_id=:companyId AND project_id=:projectId AND project_rule_id=:projectRuleId
+          AND shift_type=:shiftType AND status=1 LIMIT 1`, {
+        companyId, projectId, projectRuleId: Number(projectRule.id), shiftType: assignment.shiftType
+      });
+      if (!shifts[0]) throw createError('班次规则不存在或未启用', 409, 'PROJECT_SHIFT_RULE_NOT_FOUND');
+      await query(client, `INSERT INTO attendance_schedules
+        (company_id,employee_id,project_id,shift_date,project_rule_id,shift_rule_id,shift_type,project_shift_rule_id,schedule_status,created_by)
+        VALUES (:companyId,:employeeId,:projectId,:shiftDate,:projectRuleId,NULL,:shiftType,:projectShiftRuleId,'WORK',:operatorId)
+        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id),project_rule_id=VALUES(project_rule_id),shift_rule_id=NULL,
+          shift_type=VALUES(shift_type),project_shift_rule_id=VALUES(project_shift_rule_id),schedule_status='WORK',updated_at=CURRENT_TIMESTAMP`, {
+        companyId, projectId, shiftDate, projectRuleId: Number(projectRule.id), operatorId: Number(operatorId),
+        employeeId: assignment.employeeId, shiftType: assignment.shiftType,
+        projectShiftRuleId: Number(shifts[0].projectShiftRuleId)
+      });
+    }
+    return { projectId, shiftDate, updatedCount: normalized.length };
+  });
 }
 
 function validateShiftRule(body = {}) {
@@ -398,4 +473,4 @@ async function attendanceSummaryForPayroll(companyId, user, params = {}) {
   return { month: params.month, list: rows.map(row => ({ employeeId: row.employeeId, name: row.name, normalMinutes: Number(row.approvedNormalMinutes || 0), overtimeMinutes: Number(row.approvedOvertimeMinutes || 0) })) };
 }
 
-module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, evaluateEmployeeLocation, createCorrection, listCorrections, reviewCorrection, validateShiftRule, createShiftRule, upsertSchedule, attendanceSummaryForPayroll, ensureProjectSchedules, loadSchedule, recalculateDaily, validDate, validMonth, isJobEffectiveOnDate, monthDatesThroughToday };
+module.exports = { getEmployeeToday, getEmployeeMonth, listDaily, listMonthly, monthRange, punchEmployee, evaluateEmployeeLocation, createCorrection, listCorrections, reviewCorrection, validateShiftRule, createShiftRule, upsertSchedule, upsertProjectSchedules, resolveEmployeeShift, attendanceSummaryForPayroll, ensureProjectSchedules, loadSchedule, recalculateDaily, validDate, validMonth, isJobEffectiveOnDate, monthDatesThroughToday };
