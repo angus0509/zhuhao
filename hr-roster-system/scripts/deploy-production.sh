@@ -308,6 +308,7 @@ test "$BROKEN_ROLE_COUNT" = "0" || { echo "有 $BROKEN_ROLE_COUNT 个角色权�
 
 # 覆盖代码前再次确认生产配置，发布包本身不包含该文件。
 cp -R "$STAGE_DIR"/. "$PROJECT_DIR"/
+bash "$PROJECT_DIR/scripts/normalize-public-permissions.sh" "$PROJECT_DIR/public"
 ENV_SHA_AFTER="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
 test "$ENV_SHA_BEFORE" = "$ENV_SHA_AFTER" || { echo ".env.production被修改，停止部署" >&2; exit 1; }
 
