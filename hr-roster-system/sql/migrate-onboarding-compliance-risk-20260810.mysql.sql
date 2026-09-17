@@ -42,7 +42,12 @@ WHERE e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at
     WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1)
   AND NOT EXISTS (SELECT 1 FROM hr_work_task t
     WHERE t.company_id=e.company_id AND t.employee_id=e.id
-      AND t.task_type='CONTRACT' AND t.task_status IN (0,1));
+      AND t.task_type='CONTRACT' AND t.task_status IN (0,1))
+  AND NOT EXISTS (SELECT 1 FROM hr_work_task archived
+    WHERE archived.company_id=e.company_id AND archived.employee_id=e.id
+      AND archived.task_type='CONTRACT'
+      AND archived.source_type='LEGACY_CLOSED'
+      AND archived.task_status=3);
 
 -- 为历史员工补齐雇主险待办；不授予额外风险权限，仍沿用驻厂项目数据范围。
 INSERT INTO hr_work_task
@@ -62,7 +67,12 @@ WHERE e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' AND e.deleted_at
       AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE()))
   AND NOT EXISTS (SELECT 1 FROM hr_work_task t
     WHERE t.company_id=e.company_id AND t.employee_id=e.id
-      AND t.task_type='INSURANCE' AND t.task_status IN (0,1));
+      AND t.task_type='INSURANCE' AND t.task_status IN (0,1))
+  AND NOT EXISTS (SELECT 1 FROM hr_work_task archived
+    WHERE archived.company_id=e.company_id AND archived.employee_id=e.id
+      AND archived.task_type='INSURANCE'
+      AND archived.source_type='LEGACY_CLOSED'
+      AND archived.task_status=3);
 
 -- 非核心风险保留历史记录但不再进入待处理队列。
 UPDATE hr_risk_alert

@@ -113,4 +113,21 @@ assert.match(deploy, /HOURLY_WAGE_TABLE_COUNT=.*attendance_project_shift_rules.*
 assert.match(deploy, /HOURLY_WAGE_COLUMN_COUNT=.*shift_type.*project_shift_rule_id.*source_type.*calculation_run_id/s,
   '部署后必须核验小时工资扩展字段');
 
+// 历史合规迁移每次部署都会执行，必须识别已归档记录，避免反复生成再关闭。
+const onboardingComplianceMigration = read('sql/migrate-onboarding-compliance-risk-20260810.mysql.sql');
+for (const taskType of ['CONTRACT', 'INSURANCE']) {
+  const archivedTaskGuard = new RegExp(
+    `NOT EXISTS \\(SELECT 1 FROM hr_work_task archived[\\s\\S]*?archived\\.task_type='${taskType}'[\\s\\S]*?archived\\.source_type='LEGACY_CLOSED'[\\s\\S]*?archived\\.task_status=3\\)`
+  );
+  assert.match(onboardingComplianceMigration, archivedTaskGuard,
+    `历史迁移会重复生成已归档的 ${taskType} 待办`);
+}
+
+const simplifiedOnsiteMigration = read('sql/migrate-simplified-onsite-flow-20260813.mysql.sql');
+assert.match(
+  simplifiedOnsiteMigration,
+  /NOT EXISTS \([\s\S]*?FROM hr_work_task archived[\s\S]*?archived\.task_type='ONBOARDING_COMPLIANCE'[\s\S]*?archived\.source_type='LEGACY_CLOSED'[\s\S]*?archived\.task_status=3[\s\S]*?\)/,
+  '历史迁移会重复生成已归档的 ONBOARDING_COMPLIANCE 待办'
+);
+
 console.log('release-migration-consistency-tests-ok');
