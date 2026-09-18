@@ -310,7 +310,7 @@ function downloadCsvTemplate(filename, headers, example) {
 }
 
 async function downloadXlsxTemplate(filename, headers, example) {
-  if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+  await ensureExcelJs();
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('批量录入');
   worksheet.addRow(headers);
@@ -491,7 +491,7 @@ async function handleBatchFile(file, textarea, fileNameEl, options = {}) {
         actualHeaders = firstLine.split(sep).map(c => c.trim());
       }
     } else {
-      if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+      await ensureExcelJs();
       const workbook = new ExcelJS.Workbook();
       const buffer = await readFileAsArrayBuffer(file);
       await workbook.xlsx.load(buffer);
@@ -2513,7 +2513,7 @@ async function readPayrollFile(file) {
     const text = await readFileAsText(file, '工资表读取失败');
     return { ...payrollRowsFromText(text), sheetName: 'CSV' };
   }
-  if (typeof ExcelJS === 'undefined') throw new Error('Excel 组件未加载，请刷新页面重试');
+  await ensureExcelJs();
   const buffer = await readFileAsArrayBuffer(file, '工资表读取失败');
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(buffer);
