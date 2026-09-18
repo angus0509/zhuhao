@@ -15,7 +15,15 @@ const excelJsBundle = require.resolve('exceljs/dist/exceljs.min.js');
 assert.ok(fs.statSync(excelJsBundle).size > 100000, '本地 ExcelJS 浏览器包不存在或内容异常');
 assert.doesNotMatch(html, /<script[^>]+src="\/vendor\/exceljs\.min\.js"/, '首屏不得预加载 ExcelJS');
 assert.doesNotMatch(html, /xlsx\/0\.18\.5\/xlsx\.full\.min\.js/, '页面仍依赖外部 SheetJS CDN');
-assert.match(html, /src="\/js\/core\/resource-loader\.js"[^>]*defer/, '页面缺少按需资源加载器');
+const browserAssetVersion = '20260918-1';
+for (const assetPath of ['/js/core/resource-loader.js', '/js/views/dashboard.js', '/app.js']) {
+  const escapedPath = assetPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(
+    html,
+    new RegExp(`src="${escapedPath}\\?v=${browserAssetVersion}"[^>]*defer`),
+    `${assetPath} 缺少本次发布版本号`
+  );
+}
 assert.ok(
   html.indexOf('/js/core/resource-loader.js') < html.indexOf('/app.js'),
   '按需资源加载器必须在 app.js 之前加载'
