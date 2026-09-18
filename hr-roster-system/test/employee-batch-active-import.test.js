@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-characters';
+process.env.DATA_ENCRYPT_KEY = '12345678901234567890123456789012';
+process.env.DATA_ENCRYPT_IV = '1234567890123456';
 
 const db = require('../src/db');
 const employeeService = require('../src/services/employee.service');
