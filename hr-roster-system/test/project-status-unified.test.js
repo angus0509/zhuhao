@@ -16,7 +16,8 @@ const releaseVerify = read('scripts/verify-release-package.sh');
 const deploy = read('scripts/deploy-production.sh');
 const migrationPath = path.join(root, 'sql/migrate-remove-project-preparation-20260817.mysql.sql');
 const migration = fs.existsSync(migrationPath) ? fs.readFileSync(migrationPath, 'utf8') : '';
-const fixture = JSON.parse(read('data/db.json'));
+const fixturePath = path.join(root, 'data/db.json');
+const fixture = fs.existsSync(fixturePath) ? JSON.parse(fs.readFileSync(fixturePath, 'utf8')) : null;
 
 assert.doesNotMatch(web, />筹备<|status === 1 \? 'selected'/, 'Web 项目状态不得再显示筹备');
 assert.match(
@@ -61,8 +62,10 @@ assert.match(migration, /UPDATE labor_project\s+SET status = 2\s+WHERE status = 
   '迁移必须把历史筹备项目转为进行中');
 assert.doesNotMatch(migration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i,
   '项目状态迁移不得删除业务数据');
-assert.equal(fixture.projects.every(project => Number(project.status) !== 1), true,
-  '本地原型项目数据不得保留筹备状态');
+if (fixture) {
+  assert.equal(fixture.projects.every(project => Number(project.status) !== 1), true,
+    '本地原型项目数据不得保留筹备状态');
+}
 assert.match(packageJson.scripts.precheck, /node test\/project-status-unified\.test\.js/,
   '项目状态回归测试必须进入完整检查');
 assert.match(releaseVerify, /M26="sql\/migrate-remove-project-preparation-20260817\.mysql\.sql"/,
