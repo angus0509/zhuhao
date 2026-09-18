@@ -32,8 +32,8 @@ HIGH_CONFLICT_FILES="$(
     | awk '
       $0 == "public/app.js" || $0 == "public/index.html" || $0 == "public/styles.css" ||
       $0 == "src/services/operations.service.js" || $0 == "package.json" ||
-      $0 == "sql/schema.mysql.sql" || $0 == "scripts/build-release-package.sh" ||
-      $0 == "scripts/verify-release-package.sh" || $0 == "scripts/deploy-production.sh" { print }
+      $0 ~ /^sql\/.*\.sql$/ ||
+      $0 ~ /^scripts\/.*(deploy|release).*\.sh$/ { print }
     ' \
     | paste -sd, -
 )"

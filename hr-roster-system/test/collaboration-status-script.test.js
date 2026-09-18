@@ -20,9 +20,21 @@ const run = (command, args) => spawnSync(command, args, { cwd: repo, encoding: '
 try {
   assert.equal(run('git', ['init', '-b', 'codex/safe-test']).status, 0);
   fs.mkdirSync(path.join(repo, 'public'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'sql'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'public/app.js'), 'console.log("safe");\n');
+  fs.writeFileSync(path.join(repo, 'sql/migrate-example.mysql.sql'), 'SELECT 1;\n');
+  fs.writeFileSync(path.join(repo, 'scripts/deploy-cloud.sh'), '#!/bin/bash\n');
   fs.writeFileSync(path.join(repo, '.env'), 'DO_NOT_PRINT=secret-marker\n');
-  assert.equal(run('git', ['add', 'public/app.js']).status, 0);
+  assert.equal(
+    run('git', [
+      'add',
+      'public/app.js',
+      'sql/migrate-example.mysql.sql',
+      'scripts/deploy-cloud.sh'
+    ]).status,
+    0
+  );
   assert.equal(
     run('git', [
       '-c',
@@ -37,6 +49,8 @@ try {
   );
 
   fs.appendFileSync(path.join(repo, 'public/app.js'), 'console.log("dirty");\n');
+  fs.appendFileSync(path.join(repo, 'sql/migrate-example.mysql.sql'), 'SELECT 2;\n');
+  fs.appendFileSync(path.join(repo, 'scripts/deploy-cloud.sh'), 'exit 0\n');
   const statusBefore = run('git', ['status', '--short']).stdout;
   const result = spawnSync('bash', [script, repo], { encoding: 'utf8' });
   const statusAfter = run('git', ['status', '--short']).stdout;
@@ -47,8 +61,11 @@ try {
   assert.match(result.stdout, /owner=Codex/);
   assert.match(result.stdout, /head=[0-9a-f]{7,40}/);
   assert.match(result.stdout, /worktree_state=dirty/);
-  assert.match(result.stdout, /tracked_changes=1/);
-  assert.match(result.stdout, /high_conflict_files=public\/app\.js/);
+  assert.match(result.stdout, /tracked_changes=3/);
+  assert.match(
+    result.stdout,
+    /high_conflict_files=public\/app\.js,scripts\/deploy-cloud\.sh,sql\/migrate-example\.mysql\.sql/
+  );
   assert.doesNotMatch(result.stdout + result.stderr, /secret-marker|DO_NOT_PRINT/);
 } finally {
   fs.rmSync(repo, { recursive: true, force: true });

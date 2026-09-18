@@ -34,6 +34,8 @@ const requiredFields = [
   '数据库影响：',
   '允许提交：',
   '允许推送：',
+  '允许生产 SSH：',
+  '允许数据库迁移：',
   '允许部署：',
   '允许上传小程序：',
   '完成标准：'
@@ -44,7 +46,7 @@ for (const field of requiredFields) {
 
 assert.match(
   template,
-  /本地修改：[\s\S]*本地提交：[\s\S]*交叉审核：[\s\S]*完整测试：[\s\S]*远程推送：[\s\S]*Web\/API部署：[\s\S]*小程序上传：[\s\S]*生产验收：/
+  /本地修改：[\s\S]*本地提交：[\s\S]*交叉审核：[\s\S]*完整测试：[\s\S]*远程推送：[\s\S]*生产 SSH：[\s\S]*数据库迁移：[\s\S]*Web\/API部署：[\s\S]*小程序上传：[\s\S]*生产验收：/
 );
 
 const packageJson = require('../package.json');

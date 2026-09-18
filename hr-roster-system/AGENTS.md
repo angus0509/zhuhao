@@ -70,7 +70,7 @@
 - Claude、Codex 和集成发布必须使用独立 Worktree 与独立分支；集成目录不用于双方同时开发。
 - 一个任务只能有一个主开发者，另一方默认只读审核；代为修复必须获得用户明确授权并使用独立提交。
 - 每项任务必须声明基础提交、工作目录、分支、允许修改、禁止修改、高冲突文件占用和发布权限。
-- `public/app.js`、`src/services/operations.service.js`、`package.json`、数据库迁移和部署脚本同一时间只能由一个任务占用。
+- `public/app.js`、`public/index.html`、`public/styles.css`、`src/services/operations.service.js`、`package.json`、全部 `sql/*.sql` 以及名称包含 `deploy` 或 `release` 的 Shell 脚本同一时间只能由一个任务占用。
 - 交接只接受明确提交号，禁止通过复制整个文件覆盖另一方改动。
 - 使用显式文件列表暂存，禁止使用 `git add .`。
 - 禁止使用 `git reset --hard`、`git checkout --`、`git clean` 清理另一方或用户改动。
