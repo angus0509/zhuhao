@@ -22,17 +22,20 @@ assert.deepStrictEqual(parser.parseDelimitedRows(
 ], '分号分隔的工资 CSV 应自动识别且不拆分引号内容');
 
 assert.deepStrictEqual(parsed.rows[0].itemSnapshot, [
-  { label: '底薪', value: 4500, category: 'income', sortOrder: 1 },
-  { label: '夜班奖', value: 380, category: 'income', sortOrder: 2 },
-  { label: '住宿扣款', value: 150, category: 'deduction', sortOrder: 3 },
-  { label: '实发工资', value: 4730, category: 'summary', sortOrder: 4 },
+  { label: '底薪', value: '4500', category: 'display', sortOrder: 1 },
+  { label: '夜班奖', value: '380', category: 'display', sortOrder: 2 },
+  { label: '住宿扣款', value: '150', category: 'display', sortOrder: 3 },
+  { label: '实发工资', value: '4730', category: 'display', sortOrder: 4 },
   { label: '班组', value: 'A组', category: 'display', sortOrder: 5 }
 ]);
-assert.equal(parsed.rows[0].grossAmount, 4880, '未知收入项目必须计入应发合计');
-assert.equal(parsed.rows[0].otherDeduction, 150, '未知扣款项目必须计入其他扣款');
+assert.equal(parsed.rows[0].grossAmount, 0, '未上传应发工资时不得用实发工资自动补写');
+assert.equal(parsed.rows[0].otherDeduction, 0, '展示项不得参与系统扣款汇总');
 assert.equal(parsed.rows[0].netAmount, 4730);
 assert.deepStrictEqual(parsed.rows[0].errors, []);
 assert.ok(!parsed.rows[0].itemSnapshot.some(item => item.label === '姓名'), '身份字段不得进入工资条快照');
+assert.ok(parsed.rows[0].itemSnapshot.every(item => item.category === 'display'),
+  '上传的所有非身份字段都必须作为展示项保存');
+assert.deepStrictEqual(parsed.rows[0].warnings, [], '上传工资条不得提示金额关系异常');
 
 const realProjectSheet = parser.parseFlexiblePayrollRows([
   ['姓名', '部门', '岗位', '出勤天数', '上班工时', '基本工资', '岗位工资', '加班工资', '绩效工资', '全勤奖', '交通补贴', '养老补贴', '应发合计', '考勤扣款', '个税代扣', '其他扣款', '实发'],
@@ -40,7 +43,7 @@ const realProjectSheet = parser.parseFlexiblePayrollRows([
 ]);
 assert.equal(realProjectSheet.rows[0].grossAmount, 8000, '明确提供应发合计时必须保留原表金额');
 assert.equal(realProjectSheet.rows[0].netAmount, 7910, '明确提供实发金额时必须保留原表金额');
-assert.equal(realProjectSheet.rows[0].otherDeduction, 90, '应按应发与实发差额保留扣款合计');
+assert.equal(realProjectSheet.rows[0].otherDeduction, 0, '展示项不得参与系统扣款汇总');
 assert.deepStrictEqual(realProjectSheet.rows[0].errors, []);
 assert.equal(realProjectSheet.columnMapping.find(item => item.sourceHeader === '出勤天数').category, 'display',
   '出勤天数不得自动识别为收入');
@@ -55,8 +58,8 @@ const mapping = parser.buildSuggestedMapping(
 );
 assert.deepStrictEqual(mapping.map(item => [item.target, item.category, item.includeInPayslip]), [
   ['employeeName', '', false],
-  ['custom', 'income', true],
-  ['netAmount', 'summary', true]
+  ['custom', 'display', true],
+  ['netAmount', 'display', true]
 ]);
 assert.doesNotThrow(() => parser.validateColumnMapping(mapping));
 
@@ -64,9 +67,48 @@ const customCategories = parser.buildSuggestedMapping(
   ['姓名', '收入项目', '扣除项目', '实际到账'],
   [['赵七', '1000', '100', '900']]
 );
-assert.equal(customCategories[1].category, 'income', '自定义收入项目应自动归类为收入');
-assert.equal(customCategories[2].category, 'deduction', '自定义扣除项目应自动归类为扣款');
+assert.equal(customCategories[1].category, 'display', '自定义收入项目应按原表内容展示');
+assert.equal(customCategories[2].category, 'display', '自定义扣除项目应按原表内容展示');
 assert.equal(customCategories[3].target, 'netAmount', '实际到账应自动识别为实发工资');
+
+const duplicateNetHeaders = parser.parseFlexiblePayrollRows([
+  ['名字', '手机号', '工时', '餐费扣款', '生产扣款', '基本工资', '加班', '考勤扣款',
+    '社保补贴', '实发工资', '商保', '税前工资', '税点', '税后工资', '住宿费', '实发工资', '备注'],
+  ['赵八', '13800138000', '176', '100', '50', '4000', '600', '0',
+    '300', '4750', '80', '4670', '10', '4660', '200', '4460', '正常']
+]);
+assert.equal(duplicateNetHeaders.rows.length, 1, '重复实发工资表头不应导致整张工作表无法解析');
+assert.equal(duplicateNetHeaders.rows[0].netAmount, 4460, '最右侧实发工资应作为最终发放金额');
+assert.deepEqual(
+  duplicateNetHeaders.columnMapping.filter(item => item.sourceHeader === '实发工资').map(item => [item.target, item.category]),
+  [['custom', 'display'], ['netAmount', 'display']],
+  '前面的同名实发工资应保留为展示项，最右侧作为最终实发金额'
+);
+assert.deepEqual(
+  duplicateNetHeaders.rows[0].itemSnapshot.filter(item => item.label === '实发工资').map(item => item.value),
+  ['4750', '4460'],
+  '两个原始实发工资值都应保留在工资条明细中'
+);
+
+const duplicateGrossHeaders = parser.parseFlexiblePayrollRows([
+  ['名字', '手机号', '工时', '餐费扣款', '生产扣款', '基本工资', '加班', '考勤扣款',
+    '社保补贴', '应发工资', '商保', '税前工资', '税点', '税后工资', '住宿费', '实发工资', '备注'],
+  ['赵九', '13800138001', '176', '100', '50', '4000', '600', '0',
+    '300', '4750', '80', '4670', '10', '4660', '200', '4460', '正常']
+]);
+assert.equal(duplicateGrossHeaders.rows[0].grossAmount, 4750, '最左侧明确的应发工资应作为应发金额');
+assert.deepEqual(
+  duplicateGrossHeaders.columnMapping.filter(item => ['应发工资', '税前工资'].includes(item.sourceHeader))
+    .map(item => [item.sourceHeader, item.target, item.category]),
+  [['应发工资', 'grossAmount', 'display'], ['税前工资', 'custom', 'display']],
+  '税前工资与应发工资冲突时应保留为展示项，不能阻止工资表解析'
+);
+assert.deepEqual(
+  duplicateGrossHeaders.rows[0].itemSnapshot.filter(item => ['应发工资', '税前工资'].includes(item.label))
+    .map(item => [item.label, item.value]),
+  [['应发工资', '4750'], ['税前工资', '4670']],
+  '应发工资和税前工资原始值都应保留在工资条明细中'
+);
 
 assert.throws(
   () => parser.validateColumnMapping(mapping.filter(item => item.target !== 'netAmount')),

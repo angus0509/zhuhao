@@ -76,8 +76,15 @@ function createOfficialNotificationService(dependencies = {}) {
     const jobs = await database.query(
       `SELECT j.id,j.company_id companyId,j.employee_id employeeId,j.salary_month salaryMonth,j.template_key templateKey,
               b.official_openid officialOpenid,j.attempt_count attemptCount
-       FROM wechat_official_notification_job j JOIN employee_official_binding b
-       ON b.company_id=j.company_id AND b.employee_id=j.employee_id AND b.binding_status=1
+       FROM wechat_official_notification_job j
+       JOIN employee_official_binding b
+         ON b.company_id=j.company_id AND b.employee_id=j.employee_id AND b.binding_status=1
+       JOIN salary_batch salary_batch
+         ON salary_batch.company_id=j.company_id AND salary_batch.id=j.batch_id AND salary_batch.batch_status=5
+       JOIN salary_detail salary_detail
+         ON salary_detail.company_id=j.company_id AND salary_detail.id=j.payslip_id
+           AND salary_detail.batch_id=j.batch_id AND salary_detail.employee_id=j.employee_id
+           AND salary_detail.receipt_status=1
        WHERE j.delivery_status='PENDING' AND j.next_attempt_at<=NOW() ORDER BY j.id LIMIT ${safeLimit}`
     );
     const summary = { claimed: jobs.length, sent: 0, failed: 0 };

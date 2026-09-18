@@ -1847,9 +1847,9 @@ function payrollBatchActions(item) {
   } else if (item.status === 'PUBLISHED' && canManage && item.withdrawBlockedReason) {
     flowAction = `<span class="muted payroll-withdraw-blocked">${escapeHtml(item.withdrawBlockedReason)}</span>`;
   } else if (item.status === 'PUBLISHED') flowAction = '<span class="muted">已发放</span>';
-  else if (Number(item.batchStatus) === 1 && canManage) flowAction = `<button class="table-button" type="button" data-submit-payroll="${item.id}">提交复核</button>`;
-  else if (Number(item.batchStatus) === 3 && canReview) flowAction = `<button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="1">复核通过</button> <button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="0">退回</button>`;
-  else if (Number(item.batchStatus) === 4 && canManage) flowAction = `<button class="table-button" type="button" data-publish-payroll="${item.id}">发布工资条</button>`;
+  else if (Number(item.batchStatus) === 1 && canManage) flowAction = `<button class="table-button" type="button" data-submit-payroll="${item.id}">重新提交工资复核</button> <button class="table-button danger" type="button" data-delete-payroll="${item.id}">删除</button>`;
+  else if (Number(item.batchStatus) === 3 && canReview) flowAction = `<button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="1">复核并发放</button> <button class="table-button" type="button" data-review-payroll="${item.id}" data-approved="0">退回</button>`;
+  else if (Number(item.batchStatus) === 4 && canManage) flowAction = `<button class="table-button" type="button" data-publish-payroll="${item.id}">发布历史批次</button> <button class="table-button danger" type="button" data-delete-payroll="${item.id}">删除</button>`;
   return `<div class="payroll-row-actions"><button class="table-button" type="button" data-payroll-batch-detail="${item.id}">发放详情</button>${flowAction}</div>`;
 }
 
@@ -1903,38 +1903,40 @@ function renderPayrollOverview(data = state.payrollOverviewData || { batches: []
   ].map(([label, value, filter, note]) => `<button type="button" data-payroll-record-filter="${filter}"><span>${label}</span><strong>${value}</strong><small>${note}</small></button>`).join('');
 }
 
-function payrollRecordMatches(item) {
-  if (state.payrollRecordMonth && item.salaryMonth !== state.payrollRecordMonth) return false;
-  if (state.payrollRecordFilter === 'published') return item.status === 'PUBLISHED';
-  const pendingBatchStatuses = new Set([1, 2, 3, 4]);
-  if (state.payrollRecordFilter === 'pending') return pendingBatchStatuses.has(Number(item.batchStatus));
-  if (state.payrollRecordFilter === 'failed') return Number(item.deliveryFailedCount || 0) > 0;
-  if (state.payrollRecordFilter === 'unsigned') return Number(item.unsignedCount || 0) > 0;
-  if (state.payrollRecordFilter === 'unread') return item.status === 'PUBLISHED' && Number(item.viewedCount || 0) < Number(item.employeeCount || 0);
-  return true;
-}
-
 function renderPayrollRecords(data = state.payrollOverviewData || { batches: [] }) {
-  const batches = (data.batches || []).filter(payrollRecordMatches);
+  const batches = data.batches || [];
+  const page = Math.max(1, Number(data.page || 1));
+  const pageSize = Math.max(1, Number(data.pageSize || 20));
+  const total = Math.max(0, Number(data.total ?? data.batchCount ?? batches.length));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const groups = batches.reduce((result, item) => {
     const month = item.salaryMonth || '未设置月份';
     if (!result[month]) result[month] = [];
     result[month].push(item);
     return result;
   }, {});
-  $('#payrollRecordSummary').textContent = `共 ${batches.length} 个批次`;
+  $('#payrollRecordSummary').textContent = `当前显示 ${batches.length} 个 · 共 ${total} 个批次`;
   $('#payrollRecordsGroups').innerHTML = Object.entries(groups).sort(([left], [right]) => right.localeCompare(left)).map(([month, items]) => `
     <section class="payroll-record-month"><div class="payroll-record-month-head"><strong>${escapeHtml(month)}</strong><span>${items.length} 个批次 · ${items.reduce((sum, item) => sum + Number(item.employeeCount || 0), 0)} 人</span></div><div class="payroll-record-list">${items.map(item => {
       const progress = payrollBatchProgress(item);
       const expiry = item.viewExpiresMinutes == null ? '不限时' : item.viewExpiresMinutes < 1440 ? `${item.viewExpiresMinutes}分钟` : `${Math.round(item.viewExpiresMinutes / 1440)}天`;
       return `<article class="payroll-record-card"><div class="payroll-record-title"><div><strong>${escapeHtml(item.projectName || '未关联项目')}</strong><small>${escapeHtml(item.batchNo)}</small></div>${badge(item.statusName, item.status === 'PUBLISHED' ? 'green' : 'blue')}</div><div class="payroll-record-metrics"><span><small>计薪人数</small><strong>${item.employeeCount || 0}人</strong></span><span><small>应发工资</small><strong>${money(item.grossTotal)}</strong></span><span><small>实发工资</small><strong>${money(item.netTotal)}</strong></span><span><small>有效查看</small><strong>${expiry}</strong></span></div><div class="payroll-record-progress"><div><span>员工已查看 ${progress.viewedCount}/${item.employeeCount || 0}</span><strong>${progress.viewRate}%</strong></div><div class="payroll-progress-track"><i style="width:${progress.viewRate}%"></i></div><div><span>员工已签收 ${progress.signedCount}/${item.employeeCount || 0}</span><strong>${progress.signRate}%</strong></div><div class="payroll-progress-track signed"><i style="width:${progress.signRate}%"></i></div></div><div class="payroll-record-footer"><span>发放成功 ${item.deliverySuccessCount || 0} 人 · 发放失败 ${item.deliveryFailedCount || 0} 人</span>${payrollBatchActions(item)}</div></article>`;
     }).join('')}</div></section>`).join('') || '<div class="empty-panel"><strong>暂无符合条件的发放记录</strong><small>可调整工资月份或状态筛选</small></div>';
+  $('#payrollRecordsPagination').innerHTML = totalPages > 1
+    ? `<button type="button" data-payroll-record-page="${page - 1}" aria-label="上一页" title="上一页" ${page <= 1 ? 'disabled' : ''}>‹</button><span>第 ${page} / ${totalPages} 页</span><button type="button" data-payroll-record-page="${page + 1}" aria-label="下一页" title="下一页" ${page >= totalPages ? 'disabled' : ''}>›</button>`
+    : '';
 }
 
 async function loadPayrollOverview() {
   setPanelLoading('#payrollView');
   try {
-    const data = await api('/api/payroll/overview');
+    const page = Math.max(1, Number(state.payrollRecordPage || 1));
+    const searchParams = new URLSearchParams({ page: String(page), pageSize: '20' });
+    if (state.payrollRecordMonth) searchParams.set('salaryMonth', state.payrollRecordMonth);
+    if (state.payrollRecordFilter && state.payrollRecordFilter !== 'all') {
+      searchParams.set('status', state.payrollRecordFilter);
+    }
+    const data = await api(`/api/payroll/overview?${searchParams.toString()}`);
     state.payrollOverviewData = data;
     renderPayrollOverview(data);
     renderPayrollRecords(data);
@@ -2053,12 +2055,9 @@ function renderPayrollBatchEmployeeRows() {
     const itemsHtml = (item.items && item.items.length)
       ? `<details class="payroll-items-detail"><summary>${item.items.length} 项</summary><div class="payroll-items-list">${item.items.map(entry => `<div class="payroll-item-row"><span>${escapeHtml(entry.label)}</span><strong>${escapeHtml(String(entry.value ?? ''))}</strong></div>`).join('')}</div></details>`
       : '<span class="muted">无</span>';
-    const amountWarningHtml = item.hasAmountWarning && Array.isArray(item.amountWarnings)
-      ? `<details class="payroll-amount-warning"><summary>金额异常</summary><ul>${item.amountWarnings.map(message => `<li>${escapeHtml(message)}</li>`).join('')}</ul></details>`
-      : '';
     return `<tr>
       <td><strong>${escapeHtml(item.employeeName)}</strong><small>${escapeHtml(item.deptName || '未关联部门')} · ${escapeHtml(item.phoneMasked || '手机号未登记')}</small></td>
-      <td><span class="payroll-amount-pair"><small>应发 ${money(item.grossAmount)}</small><strong>实发 ${money(item.netAmount)}</strong></span>${amountWarningHtml}</td>
+      <td><span class="payroll-amount-pair"><small>应发 ${money(item.grossAmount)}</small><strong>实发 ${money(item.netAmount)}</strong></span></td>
       <td>${itemsHtml}</td>
       <td><div class="payroll-channel-stack"><span class="payroll-bind-state ${item.wechatBound ? 'bound' : 'unbound'}">微信${item.wechatBound ? '已绑定' : '未绑定'}</span><span class="payroll-sms-state">短信 · ${escapeHtml(item.smsStatusName || '未创建通知')}</span>${smsNote}</div></td>
       <td>${badge(item.deliveryStatus, payrollDetailTone(item.deliveryStatus))}</td>
@@ -2182,6 +2181,30 @@ async function withdrawPayrollBatch(batchId) {
   await Promise.all([loadPayroll(), loadOffice()]);
 }
 
+async function deletePayrollBatch(batchId, button) {
+  const reason = window.prompt('请输入删除原因（5-200字）');
+  if (reason === null) return;
+  const normalizedReason = String(reason).trim();
+  if (normalizedReason.length < 5 || normalizedReason.length > 200) {
+    throw new Error('删除原因需填写5至200字');
+  }
+  const confirmed = await confirmDialog({
+    title: '确认删除工资批次',
+    message: '删除后不可恢复。仅已退回或已撤回且没有员工查看、签名、签收或异议记录的批次可以删除。',
+    confirmText: '确认删除',
+    danger: true
+  });
+  if (!confirmed) return;
+  await withSubmitLock(button, async () => {
+    await api(`/api/payroll/batches/${batchId}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmed: true, reason: normalizedReason })
+    });
+    toast('工资批次已删除', 'success');
+    await Promise.all([loadPayroll(), loadOffice()]);
+  }, '删除中…');
+}
+
 async function openPayrollSignature(payslipId, signedName, signedAt) {
   const requestSessionVersion = state.sessionVersion;
   const response = await fetch(`/api/payroll/payslips/${payslipId}/signature`, {
@@ -2302,7 +2325,7 @@ function resetPayrollImport(options = {}) {
   if (summary) summary.innerHTML = '';
   if (body) body.innerHTML = '';
   if (fileName) fileName.textContent = '';
-  if (confirmButton) confirmButton.disabled = true;
+  if (confirmButton) confirmButton.disabled = false;
   if (mappingPanel) {
     mappingPanel.classList.add('hidden');
     mappingPanel.classList.remove('needs-review');
@@ -2457,6 +2480,7 @@ function reparsePayrollImport(mapping = state.payrollImport.mapping) {
     );
     state.payrollImport.parsedRows = parsed.rows;
     state.payrollImport.mappingRequired = false;
+    if ($('#payrollConfirmButton')) $('#payrollConfirmButton').disabled = false;
     renderPayrollMappingPanel();
     return parsed;
   } catch (error) {
@@ -2537,25 +2561,20 @@ function renderPayrollImportPreview(preview) {
   const confirmButton = $('#payrollConfirmButton');
   if (!panel || !summary || !body || !confirmButton) return;
   panel.classList.remove('hidden');
-  const warningRows = Number(preview.warningRows ?? preview.rows.filter(item => item.warnings?.length).length);
   summary.innerHTML = [
     `<span>总计 <strong>${preview.totalRows}</strong> 行</span>`,
     `<span class="success">可导入 <strong>${preview.validRows}</strong> 行</span>`,
-    `<span class="${preview.errorRows ? 'danger' : ''}">无法创建 <strong>${preview.errorRows}</strong> 行</span>`,
-    `<span class="${warningRows ? 'warning' : ''}">异常提示 <strong>${warningRows}</strong> 行</span>`
+    `<span class="${preview.errorRows ? 'danger' : ''}">无法上传 <strong>${preview.errorRows}</strong> 行</span>`
   ].join('');
   body.innerHTML = preview.rows.map(item => {
-    const gross = Number(item.grossAmount || 0);
-    const net = Number(item.netAmount || 0);
     const sourceItems = Array.isArray(item.itemSnapshot) ? item.itemSnapshot : [];
     const itemsHtml = sourceItems.length
       ? `<details class="payroll-items-detail" open><summary>${sourceItems.length} 项</summary><div class="payroll-items-list">${sourceItems.map(entry => `<div class="payroll-item-row"><span>${escapeHtml(entry.label || '')}</span><strong>${escapeHtml(String(entry.value ?? ''))}</strong></div>`).join('')}</div></details>`
       : '<span class="muted">无可展示项目</span>';
     const messages = [
-      ...(item.errors || []).map(message => `<span class="payroll-row-error">${escapeHtml(message)}</span>`),
-      ...(item.warnings || []).map(message => `<span class="payroll-row-warning">${escapeHtml(message)}</span>`)
+      ...(item.errors || []).map(message => `<span class="payroll-row-error">${escapeHtml(message)}</span>`)
     ].join('') || '<span class="payroll-row-success">校验通过</span>';
-    return `<tr class="${item.errors?.length ? 'has-error' : ''}"><td>${item.rowNumber}</td><td><strong>${escapeHtml(item.employeeName || '-')}</strong><small>${escapeHtml(item.employeeNo || '')}</small></td><td>${money(gross)}</td><td>${money(Math.max(0, gross - net))}</td><td><strong>${money(net)}</strong></td><td>${itemsHtml}</td><td>${messages}</td></tr>`;
+    return `<tr class="${item.errors?.length ? 'has-error' : ''}"><td>${item.rowNumber}</td><td><strong>${escapeHtml(item.employeeName || '-')}</strong><small>${escapeHtml(item.employeeNo || '')}</small></td><td>${itemsHtml}</td><td>${messages}</td></tr>`;
   }).join('');
   confirmButton.disabled = preview.errorRows > 0;
 }
@@ -2587,8 +2606,8 @@ async function previewPayrollImport(event) {
   const manualEntry = document.querySelector('.payroll-manual-entry');
   if (manualEntry) manualEntry.open = false;
   if (preview.errorRows > 0) toast(`发现 ${preview.errorRows} 行无法创建，请修改员工身份或非法数据`, 'error');
-  else if (preview.warningRows > 0) toast(`发现 ${preview.warningRows} 行金额异常提示，仍可继续创建工资条`, 'warning');
-  else toast(`校验通过，可创建 ${preview.validRows} 人工资批次`, 'success');
+  else toast(`员工匹配完成，可上传 ${preview.validRows} 人工资条`, 'success');
+  return preview;
 }
 
 async function confirmPayrollBatchImport() {
@@ -2597,47 +2616,40 @@ async function confirmPayrollBatchImport() {
   if (!preview) throw new Error('请先解析并预览工资表');
   if (preview.errorRows > 0) throw new Error('工资表存在无法创建的数据，请修正员工身份或非法金额后重新预览');
   if (!state.payrollImport.parsedRows.length) throw new Error('工资表数据已失效，请重新上传');
-  const warningRows = preview.rows.filter(item => item.warnings?.length).length;
-  if (warningRows > 0) {
-    const confirmed = await confirmDialog({
-      title: '工资数据存在异常提示',
-      message: `${warningRows} 行工资的应发、实发或明细核对存在差异。系统将保留原表金额，确认仍然创建工资条吗？`,
-      confirmText: '仍然创建工资条',
-      danger: true
-    });
-    if (!confirmed) return;
-  }
+  const data = await api('/api/payroll/batches', {
+    method: 'POST',
+    body: JSON.stringify({
+      projectId: Number(form.projectId.value),
+      salaryMonth: form.salaryMonth.value,
+      payrollType: 3,
+      employeeViewEnabled: Number(form.employeeViewEnabled.value),
+      viewOnce: Number(form.viewOnce.value),
+      viewExpiresMinutes: form.viewExpiresMinutes.value ? Number(form.viewExpiresMinutes.value) : null,
+      headerSignature: state.payrollImport.headerSignature,
+      sourceHeaders: state.payrollImport.headers,
+      mapping: state.payrollImport.mapping,
+      sheetName: state.payrollImport.sheetName,
+      rows: state.payrollImport.parsedRows
+    })
+  });
+  $('#payrollBatchResult').classList.remove('hidden');
+  $('#payrollBatchResult').innerHTML = `<strong>工资条 ${escapeHtml(data.batchNo)} 已上传并提交复核，共 ${data.employeeCount} 人。</strong>`;
+  await Promise.all([loadPayroll(), loadOffice()]);
+  window.setTimeout(() => {
+    $('#payrollBatchModal').close();
+    form.reset();
+    resetPayrollImport({ keepResult: true });
+  }, 900);
+}
+
+async function uploadPayrollBatch(event) {
+  if (event) event.preventDefault();
   const button = $('#payrollConfirmButton');
-  button.disabled = true;
-  try {
-    const data = await api('/api/payroll/batches', {
-      method: 'POST',
-      body: JSON.stringify({
-        projectId: Number(form.projectId.value),
-        salaryMonth: form.salaryMonth.value,
-        payrollType: 3,
-        employeeViewEnabled: Number(form.employeeViewEnabled.value),
-        viewOnce: Number(form.viewOnce.value),
-        viewExpiresMinutes: form.viewExpiresMinutes.value ? Number(form.viewExpiresMinutes.value) : null,
-        headerSignature: state.payrollImport.headerSignature,
-        sourceHeaders: state.payrollImport.headers,
-        mapping: state.payrollImport.mapping,
-        sheetName: state.payrollImport.sheetName,
-        rows: state.payrollImport.parsedRows
-      })
-    });
-    $('#payrollBatchResult').classList.remove('hidden');
-    $('#payrollBatchResult').innerHTML = `<strong>工资批次 ${escapeHtml(data.batchNo)} 创建成功，共 ${data.employeeCount} 人。</strong>`;
-    await Promise.all([loadPayroll(), loadOffice()]);
-    window.setTimeout(() => {
-      $('#payrollBatchModal').close();
-      form.reset();
-      resetPayrollImport({ keepResult: true });
-    }, 900);
-  } catch (error) {
-    button.disabled = false;
-    throw error;
-  }
+  return withSubmitLock(button, async () => {
+    const preview = await previewPayrollImport();
+    if (!preview || preview.errorRows > 0) return;
+    await confirmPayrollBatchImport();
+  }, '上传中…');
 }
 
 function bindPayrollFileZone() {
@@ -3250,7 +3262,7 @@ function bindEvents() {
     submitSimpleForm(event.currentTarget, '/api/blacklist', '黑名单已录入并全公司共享', 'blacklistModal', loadBlacklist).catch(error => toast(error.message));
   });
   $('#batchBlacklistForm').addEventListener('submit', event => submitBlacklistBatch(event).catch(error => toast(error.message)));
-  $('#payrollBatchForm').addEventListener('submit', event => previewPayrollImport(event).catch(error => toast(error.message, 'error')));
+  $('#payrollBatchForm').addEventListener('submit', event => uploadPayrollBatch(event).catch(error => toast(error.message, 'error')));
   $('#payrollBatchEmployeeSearchForm').addEventListener('submit', event => {
     event.preventDefault();
     state.payrollDetailKeyword = $('#payrollBatchEmployeeSearch').value.trim();
@@ -3259,29 +3271,31 @@ function bindEvents() {
   $('#payrollSaveViewPolicy')?.addEventListener('click', () => savePayrollViewPolicy().catch(error => toast(error.message, 'error')));
   $('#payrollRecordStatusFilter')?.addEventListener('change', event => {
     state.payrollRecordFilter = event.currentTarget.value || 'all';
-    renderPayrollRecords();
+    state.payrollRecordPage = 1;
+    loadPayrollOverview().catch(error => toast(error.message, 'error'));
   });
   $('#payrollRecordMonthFilter')?.addEventListener('change', event => {
     state.payrollRecordMonth = event.currentTarget.value || '';
-    renderPayrollRecords();
+    state.payrollRecordPage = 1;
+    loadPayrollOverview().catch(error => toast(error.message, 'error'));
   });
   $('#payrollRecordReset')?.addEventListener('click', () => {
     state.payrollRecordFilter = 'all';
     state.payrollRecordMonth = '';
     $('#payrollRecordStatusFilter').value = 'all';
     $('#payrollRecordMonthFilter').value = '';
-    renderPayrollRecords();
+    state.payrollRecordPage = 1;
+    loadPayrollOverview().catch(error => toast(error.message, 'error'));
   });
   $('#payrollBatchEmployeeSearchReset').addEventListener('click', () => {
     $('#payrollBatchEmployeeSearch').value = '';
     state.payrollDetailKeyword = '';
     renderPayrollBatchEmployeeRows();
   });
-  $('#payrollConfirmButton').addEventListener('click', () => confirmPayrollBatchImport().catch(error => toast(error.message, 'error')));
   $('#payrollProjectSelect').addEventListener('change', () => {
     state.payrollImport.preview = null;
     $('#payrollImportPreview').classList.add('hidden');
-    $('#payrollConfirmButton').disabled = true;
+    $('#payrollConfirmButton').disabled = state.payrollImport.sourceRows.length > 0;
     state.payrollImport.activeTemplateId = 0;
     loadPayrollTemplates(Number($('#payrollProjectSelect').value)).catch(error => toast(error.message, 'error'));
     if (state.payrollImport.sourceRows.length) {
@@ -3331,7 +3345,7 @@ function bindEvents() {
     $('#payrollFileName').textContent = '';
     $('#payrollMappingPanel').classList.add('hidden');
     $('#payrollImportPreview').classList.add('hidden');
-    $('#payrollConfirmButton').disabled = true;
+    $('#payrollConfirmButton').disabled = false;
   });
   $('#payrollDisputeStatusFilter').addEventListener('change', () => loadPayrollDisputes().catch(error => toast(error.message, 'error')));
   $('#channelForm').addEventListener('submit', event => { event.preventDefault(); saveRecruitmentSource(event.currentTarget).catch(error => toast(error.message, 'error')); });
@@ -3455,10 +3469,18 @@ function bindEvents() {
         return;
       }
       state.payrollRecordFilter = ['pending', 'failed', 'unsigned', 'unread'].includes(filter) ? filter : 'all';
+      state.payrollRecordPage = 1;
       const statusSelect = $('#payrollRecordStatusFilter');
       if (statusSelect) statusSelect.value = ['pending', 'failed', 'unsigned'].includes(filter) ? filter : 'all';
-      renderPayrollRecords();
+      loadPayrollOverview().catch(error => toast(error.message, 'error'));
       switchPayrollWorkspace('records');
+      return;
+    }
+
+    const payrollRecordPage = event.target.closest('[data-payroll-record-page]');
+    if (payrollRecordPage && !payrollRecordPage.disabled) {
+      state.payrollRecordPage = Math.max(1, Number(payrollRecordPage.dataset.payrollRecordPage || 1));
+      loadPayrollOverview().catch(error => toast(error.message, 'error'));
       return;
     }
 
@@ -3480,6 +3502,13 @@ function bindEvents() {
     const withdrawPayrollButton = event.target.closest('[data-withdraw-payroll]');
     if (withdrawPayrollButton) {
       withdrawPayrollBatch(Number(withdrawPayrollButton.dataset.withdrawPayroll))
+        .catch(error => toast(error.message, 'error'));
+      return;
+    }
+
+    const deletePayrollButton = event.target.closest('[data-delete-payroll]');
+    if (deletePayrollButton) {
+      deletePayrollBatch(Number(deletePayrollButton.dataset.deletePayroll), deletePayrollButton)
         .catch(error => toast(error.message, 'error'));
       return;
     }
@@ -3547,9 +3576,9 @@ function bindEvents() {
     if (submitPayrollButton) {
       const batchId = Number(submitPayrollButton.dataset.submitPayroll);
       const confirmed = await confirmDialog({
-        title: '提交工资复核',
-        message: '提交后需由具备工资复核权限的账号审核，审核前不能发布。',
-        confirmText: '确认提交'
+        title: '重新提交工资复核',
+        message: '重新提交后需由具备工资复核权限的账号审核，复核通过后将立即发放。',
+        confirmText: '确认重新提交'
       });
       if (!confirmed) return;
       api(`/api/payroll/batches/${batchId}/submit`, { method: 'PUT', body: '{}' })
@@ -3564,9 +3593,22 @@ function bindEvents() {
       const approved = Number(reviewPayrollButton.dataset.approved) === 1;
       const remark = approved ? '' : window.prompt('请输入退回原因');
       if (!approved && !remark) return;
-      api(`/api/payroll/batches/${batchId}/review`, { method: 'PUT', body: JSON.stringify({ approved, remark }) })
-        .then(() => { toast(approved ? '复核通过，已进入待发放' : '已退回工资批次', 'success'); return loadPayroll(); })
-        .catch(error => toast(error.message, 'error'));
+      if (approved) {
+        const confirmed = await confirmDialog({
+          title: '复核并发放工资条',
+          message: '确认后工资条将立即发放给员工并创建通知任务，请确认已完成复核。',
+          confirmText: '确认发放'
+        });
+        if (!confirmed) return;
+      }
+      withSubmitLock(reviewPayrollButton, async () => {
+        await api(`/api/payroll/batches/${batchId}/review`, {
+          method: 'PUT',
+          body: JSON.stringify({ approved, remark })
+        });
+        toast(approved ? '复核通过，工资条已发放' : '已退回工资批次', 'success');
+        await loadPayroll();
+      }, approved ? '发放中…' : '退回中…').catch(error => toast(error.message, 'error'));
       return;
     }
 

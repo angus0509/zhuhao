@@ -24,8 +24,9 @@ assert.match(html, /未识别列将原名保留/, '页面缺少未识别列保�
 assert.doesNotMatch(html, /额外列自动忽略/, '页面不得继续声称额外列会被忽略');
 assert.match(html, /id="payrollImportSummary"/, '缺少工资导入预览汇总');
 assert.match(html, /id="payrollImportPreviewBody"/, '缺少工资导入行级预览表');
-assert.match(html, /id="payrollPreviewButton"/, '缺少预校验按钮');
-assert.match(html, /id="payrollConfirmButton"[^>]*disabled/, '确认创建按钮默认必须禁用');
+assert.doesNotMatch(html, /id="payrollPreviewButton"/, '两步流程不应保留独立预校验按钮');
+assert.match(html, /id="payrollConfirmButton"[^>]*type="submit"[^>]*>上传并提交复核</,
+  '工资条应通过单一按钮完成预校验、上传和提交复核');
 assert.match(html, /下载 XLSX 示例/, '缺少 XLSX 示例下载入口');
 assert.match(html, /下载 CSV 示例/, '缺少 CSV 示例下载入口');
 
@@ -46,12 +47,12 @@ assert.match(app, /payroll-manual-entry[\s\S]{0,180}\.open\s*=\s*false/,
   '预览完成后应自动收起手工粘贴区，避免预览表被挤出屏幕');
 assert.match(app, /async function confirmPayrollBatchImport/, '缺少确认创建流程');
 assert.match(app, /confirmButton\.disabled\s*=\s*preview\.errorRows\s*>\s*0/, '只有阻断错误行才能禁止创建批次');
-assert.match(app, /工资数据存在异常提示[\s\S]*仍然创建工资条/, '金额异常创建前缺少二次确认');
+assert.doesNotMatch(app, /工资数据存在异常提示[\s\S]*仍然创建工资条/, '不得因金额关系显示二次确认');
+assert.match(app, /withSubmitLock\(button,[\s\S]*上传中…/, '上传全过程必须防止重复提交');
 assert.doesNotMatch(app, /escapeHtml\(item\.idCardNo\)/, '预览页面不得显示完整身份证号');
 
 assert.match(style, /\.payroll-import-guide/, '缺少工资智能导入说明样式');
 assert.match(style, /\.payroll-import-preview/, '缺少工资导入预览样式');
-assert.match(style, /\.payroll-import-summary \.warning/, '金额异常提示缺少醒目的黄色汇总样式');
 assert.match(style, /#payrollBatchModal\s*\{[^}]*width:\s*min\(1040px/s,
   '工资弹窗外框宽度未与导入面板统一');
 assert.match(style, /\.payroll-import-panel\s*\{[^}]*width:\s*100%/s,

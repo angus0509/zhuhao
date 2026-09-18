@@ -43,6 +43,7 @@ router.put('/payroll/batches/:id/submit', requirePermission('payroll:manage'), c
 router.put('/payroll/batches/:id/review', requirePermission('payroll:review'), controller.reviewPayrollBatch);
 router.put('/payroll/batches/:id/publish', sensitiveLimiter, requirePermission('payroll:manage'), controller.publishPayrollBatch);
 router.put('/payroll/batches/:id/withdraw', sensitiveLimiter, requirePermission('payroll:manage'), controller.withdrawPayrollBatch);
+router.delete('/payroll/batches/:id', sensitiveLimiter, requirePermission('payroll:manage'), controller.deletePayrollBatch);
 router.get('/operations/home', requirePermission('employee:view'), controller.operationsHome);
 router.get('/notices', requirePermission('employee:view'), controller.listNotices);
 router.get('/permissions/overview', requirePermission('system:role'), controller.permissionOverview);

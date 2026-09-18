@@ -25,8 +25,8 @@ async function main() {
     ['姓名', '应发工资', '实发工资'],
     ['张三', '100.00', '120.00']
   ]);
-  assert.equal(parsed.rows[0].errors.length, 0, '金额关系异常只能提示，不能作为阻断错误');
-  assert.match(parsed.rows[0].warnings.join('；'), /实发工资不能超过应发工资/);
+  assert.equal(parsed.rows[0].errors.length, 0, '上传金额关系不得作为阻断错误');
+  assert.deepEqual(parsed.rows[0].warnings, [], '上传工资条不得生成金额异常提示');
 
   await withDbStubs({
     first: async () => ({ id: 16, customerId: 6, projectName: '装配项目' }),
@@ -40,7 +40,21 @@ async function main() {
     assert.equal(preview.validRows, 1);
     assert.equal(preview.rows[0].grossAmount, 100, '应保留原表应发工资');
     assert.equal(preview.rows[0].netAmount, 120, '应保留原表实发工资');
-    assert.match(preview.rows[0].warnings.join('；'), /实发工资不能超过应发工资/);
+    assert.deepEqual(preview.rows[0].warnings, [], '服务端不得重新生成金额异常提示');
+  });
+
+  await withDbStubs({
+    first: async () => ({ id: 16, customerId: 6, projectName: '装配项目' }),
+    query: async () => [{ id: 88, name: '张三', employeeNo: 'YG0001' }]
+  }, async () => {
+    const displayOnly = await operationsService.previewPayrollBatch(1, {
+      projectId: 16,
+      rows: [{ employeeNo: 'YG0001', baseSalary: 5000, otherDeduction: 200, netAmount: 4700 }]
+    }, user);
+    assert.equal(displayOnly.rows[0].baseSalary, 0, '基本工资不得参与系统计算字段');
+    assert.equal(displayOnly.rows[0].otherDeduction, 0, '扣款不得参与系统计算字段');
+    assert.equal(displayOnly.rows[0].grossAmount, 0, '不得根据工资类目或实发工资推导应发工资');
+    assert.equal(displayOnly.rows[0].netAmount, 4700, '只保留上传的实发工资作为发放统计字段');
   });
 
   const executed = [];
@@ -69,29 +83,16 @@ async function main() {
 
   const app = fs.readFileSync('public/app.js', 'utf8');
   const html = fs.readFileSync('public/index.html', 'utf8');
-  assert.match(
-    app,
-    /confirmPayrollBatchImport[\s\S]*?preview\.rows[\s\S]*?warnings[\s\S]*?confirmDialog\(/,
-    '存在金额异常提示时，创建前必须使用统一确认弹窗'
-  );
-  assert.match(html, /无阻断错误即可创建，金额差异会提示并可确认继续/,
-    '工资条导入说明必须与金额异常仅提示的实际规则一致');
+  assert.doesNotMatch(app, /工资数据存在异常提示|金额异常提示，仍可继续创建工资条/,
+    '上传流程不得显示金额异常提示或二次确认');
+  assert.doesNotMatch(html, /金额差异会提示|金额异常/,
+    '工资条导入说明不得继续描述金额异常提示');
   const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   assert.match(packageJson.scripts.check, /payroll-advisory-validation\.test\.js/,
     '金额异常提示回归测试必须加入 npm run check');
 
-  assert.deepEqual(
-    operationsService.payrollAmountWarnings(6000, 5500, []),
-    [],
-    '工资条详情不能把只有应发/实发的正确金额标成异常'
-  );
-  assert.match(
-    operationsService.payrollAmountWarnings(6000, 5500, [
-      { label: '社保扣款', value: 100, category: 'deduction' }
-    ]).join('；'),
-    /应发工资减扣款明细/,
-    '原表明确提供扣款明细且无法对应时仍需提示'
-  );
+  assert.equal(operationsService.payrollAmountWarnings, undefined,
+    '服务端应彻底移除工资金额异常计算能力');
 
   console.log('payroll-advisory-validation-tests-ok');
 }

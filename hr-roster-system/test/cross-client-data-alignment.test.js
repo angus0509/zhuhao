@@ -92,10 +92,15 @@ if (fs.existsSync(miniRoot)) {
   const miniGroups = miniDetail._testing.buildPayslipItems({ items: apiItems });
   assertIncludes(read('src/services/operations.service.js'), 'item_snapshot,source_row_no', '服务端未持久化动态工资项目');
   if (JSON.stringify(apiItems) !== JSON.stringify(persistedItems)) throw new Error('员工接口改变了合法工资项目名称、顺序或值');
-  if (miniGroups.incomeItems.map(item => item.label).join(',') !== '底薪,夜班奖') throw new Error('小程序收入项目与原工资表不一致');
-  if (miniGroups.deductionItems[0]?.label !== '住宿扣款') throw new Error('小程序扣款项目与原工资表不一致');
-  if (miniGroups.summaryItems[0]?.label !== '实发工资') throw new Error('小程序实发项目与原工资表不一致');
-  if (miniGroups.displayItems[0]?.valueText !== 'A组') throw new Error('小程序文本展示项目与原工资表不一致');
+  if (miniGroups.incomeItems.length || miniGroups.deductionItems.length || miniGroups.summaryItems.length) {
+    throw new Error('新上传工资条不得再按收入、扣款或汇总分类展示');
+  }
+  if (miniGroups.displayItems.map(item => item.label).join(',') !== '底薪,夜班奖,住宿扣款,实发工资,班组') {
+    throw new Error('小程序展示项目与原工资表列名或顺序不一致');
+  }
+  if (miniGroups.displayItems.map(item => item.valueText).join(',') !== '4500,380,150,4730,A组') {
+    throw new Error('小程序展示项目与原工资表原值不一致');
+  }
 }
 
 console.log(fs.existsSync(miniRoot)

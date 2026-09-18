@@ -22,7 +22,7 @@ exports.listAdvances = asyncHandler(async (req, res) => success(res, await servi
 exports.createAdvance = asyncHandler(async (req, res) => success(res, await service.createAdvance(req.companyId, req.body, req.operatorId, req.user), req.body.recordMode === 'onsite' ? '驻厂预支记录已保存' : '预支申请提交成功'));
 exports.approveAdvance = asyncHandler(async (req, res) => success(res, await service.approveAdvance(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '审批完成'));
 exports.payAdvance = asyncHandler(async (req, res) => success(res, await service.payAdvance(req.companyId, Number(req.params.id), req.operatorId, req.user), '放款成功'));
-exports.payrollOverview = asyncHandler(async (req, res) => success(res, await service.payrollOverview(req.companyId, req.user)));
+exports.payrollOverview = asyncHandler(async (req, res) => success(res, await service.payrollOverview(req.companyId, req.user, req.query)));
 exports.getPayrollImportProfile = asyncHandler(async (req, res) => success(res, await payrollImportProfileService.findProfile(
   req.companyId,
   Number(req.query.projectId),
@@ -65,6 +65,7 @@ exports.submitPayrollBatch = asyncHandler(async (req, res) => success(res, await
 exports.reviewPayrollBatch = asyncHandler(async (req, res) => success(res, await service.reviewPayrollBatch(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '工资批次复核完成'));
 exports.publishPayrollBatch = asyncHandler(async (req, res) => success(res, await service.publishPayrollBatch(req.companyId, Number(req.params.id), req.operatorId, req.user), '工资条已发布，进入待签收'));
 exports.withdrawPayrollBatch = asyncHandler(async (req, res) => success(res, await service.withdrawPayrollBatch(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '工资条已撤回至待发放'));
+exports.deletePayrollBatch = asyncHandler(async (req, res) => success(res, await service.deletePayrollBatch(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '工资批次已删除'));
 exports.previewPayrollSignature = asyncHandler(async (req, res) => {
   const signature = await signaturePreviewService.resolveManagerSignature(
     req.companyId,

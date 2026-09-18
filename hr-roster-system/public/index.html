@@ -405,13 +405,10 @@
           </section>
         </section>
         <section class="module-view hidden" id="payrollView">
-          <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYSLIP DELIVERY</p><h2>工资条发放管理</h2><p>从表格导入、数据校验到员工签收，按流程集中处理。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">导入工资条表格</button></div>
+          <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYSLIP DELIVERY</p><h2>工资条发放管理</h2><p>上传后直接进入复核，复核通过立即发放。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">导入工资条表格</button></div>
           <div class="payroll-flow-strip" aria-label="工资条发放流程">
-            <div><span>01</span><strong>导入表格</strong><small>支持任意列顺序</small></div>
-            <div><span>02</span><strong>校验数据</strong><small>异常仅提示可核对</small></div>
-            <div><span>03</span><strong>创建工资条</strong><small>保留原表全部字段</small></div>
-            <div><span>04</span><strong>发放通知</strong><small>小程序与短信触达</small></div>
-            <div><span>05</span><strong>员工签收</strong><small>查看、签名与留痕</small></div>
+            <div><span>01</span><strong>上传工资条</strong><small>匹配员工并提交复核</small></div>
+            <div><span>02</span><strong>复核并发放</strong><small>通过后立即通知员工</small></div>
           </div>
           <nav class="payroll-workspace-tabs" role="tablist" aria-label="工资条工作区">
             <button class="active" type="button" role="tab" aria-selected="true" data-payroll-workspace-tab="overview">工作台概览</button>
@@ -428,6 +425,7 @@
           <section class="payroll-workspace-panel hidden" data-payroll-workspace-panel="records">
             <div class="payroll-record-toolbar business-panel"><div><p class="eyebrow">DELIVERY RECORDS</p><h3>工资条发放记录</h3><span id="payrollRecordSummary">共 0 个批次</span></div><div class="payroll-record-filters"><label><span>工资月份</span><input id="payrollRecordMonthFilter" type="month" /></label><label><span>状态</span><select id="payrollRecordStatusFilter"><option value="all">全部状态</option><option value="published">已发放</option><option value="pending">待处理</option><option value="failed">发放失败</option><option value="unsigned">待签收</option></select></label><button class="secondary-button" id="payrollRecordReset" type="button">重置</button></div></div>
             <div id="payrollRecordsGroups" class="payroll-record-groups"></div>
+            <nav id="payrollRecordsPagination" class="payroll-record-pagination" aria-label="工资批次翻页"></nav>
           </section>
           <section class="payroll-workspace-panel payroll-dispute-panel hidden" data-payroll-workspace-panel="disputes">
             <div class="payroll-dispute-toolbar">
@@ -862,7 +860,7 @@
         <div class="payroll-import-guide">
           <strong>无需整理成系统固定模板</strong>
           <span>不要求固定模板 · 自动识别表头 · 任意列顺序 · 未识别列将原名保留</span>
-          <small>支持前置标题、制表日期和单层/双层表头；员工可按工号、身份证号、姓名+手机号等信息匹配。上传后可调整每列用途；无阻断错误即可创建，金额差异会提示并可确认继续。</small>
+          <small>支持前置标题、制表日期和单层/双层表头；员工可按工号、身份证号、姓名+手机号等信息匹配。身份字段仅用于匹配，其他原表字段均按原名展示。</small>
         </div>
         <div class="batch-file-zone" id="payrollFileZone" tabindex="0" role="button" aria-label="点击或拖拽上传工资表">
           <input type="file" id="payrollFileInput" accept=".csv,.xlsx" hidden>
@@ -883,7 +881,7 @@
               <button type="button" class="text-button hidden" id="payrollSaveTemplateCancel">取消</button>
             </div>
           </div>
-          <div class="payroll-mapping-head"><p>核对每一列的用途。收入、扣款和展示项会按原表名称进入员工工资条。</p><span>至少需要一种员工身份和唯一的实发工资列</span></div>
+          <div class="payroll-mapping-head"><p>核对员工匹配字段和最终实发工资，其他列均按原表内容展示。</p><span>至少需要一种员工身份和唯一的实发工资列</span></div>
           <div class="payroll-mapping-rows" id="payrollMappingRows"></div>
         </details>
         <details class="payroll-manual-entry">
@@ -893,10 +891,10 @@
         </details>
         <div class="payroll-import-preview hidden" id="payrollImportPreview">
           <div class="payroll-import-summary" id="payrollImportSummary"></div>
-          <div class="table-wrap"><table class="data-table"><thead><tr><th>原表行号</th><th>匹配员工</th><th>应发</th><th>扣款</th><th>实发</th><th>原表全部信息</th><th>校验结果</th></tr></thead><tbody id="payrollImportPreviewBody"></tbody></table></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>原表行号</th><th>匹配员工</th><th>原表全部信息</th><th>匹配结果</th></tr></thead><tbody id="payrollImportPreviewBody"></tbody></table></div>
         </div>
         <div class="batch-result hidden" id="payrollBatchResult"></div>
-        <div class="modal-actions sticky-actions"><button class="secondary-button" id="payrollXlsxExampleButton" type="button">下载 XLSX 示例</button><button class="secondary-button" id="payrollCsvExampleButton" type="button">下载 CSV 示例</button><button class="secondary-button" type="button" data-close-modal="payrollBatchModal">取消</button><button class="secondary-button" id="payrollPreviewButton" type="submit">解析并预览</button><button class="primary-button" id="payrollConfirmButton" type="button" disabled>确认创建工资条</button></div>
+        <div class="modal-actions sticky-actions"><button class="secondary-button" id="payrollXlsxExampleButton" type="button">下载 XLSX 示例</button><button class="secondary-button" id="payrollCsvExampleButton" type="button">下载 CSV 示例</button><button class="secondary-button" type="button" data-close-modal="payrollBatchModal">取消</button><button class="primary-button" id="payrollConfirmButton" type="submit">上传并提交复核</button></div>
       </form>
     </dialog>
 

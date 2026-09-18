@@ -67,6 +67,12 @@ async function main() {
   assert.match(sql, /UPDATE salary_batch SET batch_status=4,paid_at=NULL/, '撤回后批次必须回到待发放');
   assert.match(sql, /UPDATE salary_detail SET receipt_status=0,receipt_at=NULL/, '撤回后员工端工资条必须隐藏');
   assert.match(sql, /UPDATE sms_delivery_job[\s\S]*delivery_status='CANCELLED'/, '撤回后短信任务必须取消');
+  assert.match(sql, /UPDATE wechat_official_notification_job[\s\S]*delivery_status='CANCELLED'/,
+    '撤回后服务号通知任务必须取消');
+  assert.match(sql, /UPDATE wechat_official_notification_job[\s\S]*dedupe_key[\s\S]*WITHDRAWN/,
+    '撤回后服务号通知任务必须释放原去重键');
+  assert.match(sql, /UPDATE wechat_official_notification_job[\s\S]*delivery_status IN \('PENDING','SENDING'\)/,
+    '撤回只能取消尚未处理的服务号通知任务');
   assert.match(sql, /action_type[\s\S]*withdraw/, '撤回必须写入审计日志');
   assert.ok(statements.some(item => item.params?.reason === '工资数据录入错误，需要撤回修正'));
 
@@ -100,6 +106,7 @@ async function main() {
   const originalQuery = db.query;
   db.first = async sql => {
     if (/COUNT\(\*\) batchCount/.test(sql)) return { batchCount: 2, totalGross: 20000, totalNet: 18000 };
+    if (/COUNT\(\*\) filteredBatchCount/.test(sql)) return { filteredBatchCount: 2 };
     if (/employeeTotal/.test(sql)) return { employeeTotal: 2, viewedTotal: 1, signedTotal: 1, unsignedTotal: 1 };
     throw new Error(`Unexpected overview first SQL: ${sql}`);
   };

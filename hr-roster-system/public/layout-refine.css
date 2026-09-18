@@ -451,7 +451,7 @@ body { overflow-x: hidden; }
 
 .payroll-flow-strip {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
   border: 1px solid #cadce4;
@@ -526,7 +526,7 @@ body { overflow-x: hidden; }
   .topbar-actions { justify-content: flex-start !important; }
   .metric-strip { grid-template-columns: repeat(5, minmax(142px, 1fr)) !important; }
   .office-lifecycle-flow { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .payroll-flow-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .payroll-flow-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* 中等宽度：延续桌面端的信息密度，避免降级回超高卡片。 */
