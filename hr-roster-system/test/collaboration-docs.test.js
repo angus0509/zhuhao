@@ -47,4 +47,16 @@ assert.match(
   /本地修改：[\s\S]*本地提交：[\s\S]*交叉审核：[\s\S]*完整测试：[\s\S]*远程推送：[\s\S]*Web\/API部署：[\s\S]*小程序上传：[\s\S]*生产验收：/
 );
 
+const packageJson = require('../package.json');
+assert.match(
+  packageJson.scripts.check,
+  /node test\/collaboration-docs\.test\.js/,
+  '完整检查未包含协作文档契约'
+);
+assert.match(
+  packageJson.scripts.check,
+  /node test\/collaboration-status-script\.test\.js/,
+  '完整检查未包含协作脚本运行时契约'
+);
+
 console.log('collaboration-docs-tests-ok');
