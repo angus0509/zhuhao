@@ -1891,6 +1891,9 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
       { companyId, employeeId }
     );
     if (!employee) throw createError('员工不存在', 404);
+    const internalDeptId = [3, 5].includes(Number(employee.employee_status))
+      ? await ensureInternalDepartment(connection, companyId)
+      : null;
     const canViewSensitiveEmployee = user?.permissions?.includes('employee:sensitive:view');
     const sensitiveBody = resolveSensitiveEmployeeFields(employee, body, canViewSensitiveEmployee);
     let normalizedBody = {
@@ -1898,7 +1901,8 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
       ...sensitiveBody,
       employeeStatus: Number(employee.employee_status),
       employeeNo: employee.employee_no,
-      deptId: Number(body.deptId || currentJobForDept?.dept_id || 0) || null
+      // 离职/未入职员工重新派驻时不能沿用可能已停用的历史部门。
+      deptId: internalDeptId || Number(body.deptId || currentJobForDept?.dept_id || 0) || null
     };
     normalizedBody = await resolveRecruitmentChannel(companyId, normalizedBody, operatorId, connection);
     const ownsUnassignedLegacyEmployee = Number(user?.dataScope) === 5
