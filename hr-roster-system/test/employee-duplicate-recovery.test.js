@@ -162,6 +162,77 @@ async function main() {
     false,
     '重新派驻不得继续校验已停用的历史部门'
   );
+
+  const pendingArrivalCalls = [];
+  const pendingArrivalConnection = {
+    execute: async (sql, params = {}) => {
+      pendingArrivalCalls.push({ sql, params });
+      if (sql.includes('SELECT id,dept_id,customer_id,project_id,job_status')) return [[]];
+      if (sql.includes('SELECT * FROM hr_employee')) {
+        return [[{
+          id: 89,
+          company_id: 7,
+          employee_no: 'E89',
+          name: '李四',
+          gender: 2,
+          id_card_no: '320311199002022222',
+          id_card_hash: 'old-hash-2',
+          address: null,
+          phone: '13900000000',
+          bank_card_no: null,
+          emergency_phone: null,
+          employee_status: 1,
+          lifecycle_status: 'PENDING_ARRIVAL',
+          created_by: 9
+        }]];
+      }
+      if (sql.includes('SELECT id FROM hr_company') && sql.includes('FOR UPDATE')) return [[{ id: 7 }]];
+      if (sql.includes('FROM hr_department') && sql.includes('dept_code=:deptCode')) {
+        return [[{ id: 8, status: 1 }]];
+      }
+      if (sql.includes('FROM person_blacklist')) return [[]];
+      if (sql.includes('SELECT id FROM hr_employee')) return [[]];
+      if (sql.includes('FROM crm_customer')) return [[{ id: 22 }]];
+      if (sql.includes('SELECT id FROM hr_department') && sql.includes('id = :deptId')) {
+        return [Number(params.deptId) === 8 ? [{ id: 8 }] : []];
+      }
+      if (sql.includes('FROM hr_position') && sql.includes('status = 1')) return [[{ id: 42 }]];
+      if (sql.includes('FROM labor_project') && sql.includes('customer_id=:customerId')) return [[{ id: 32 }]];
+      if (sql.includes('SELECT e.*,j.customer_id')) {
+        return [[{
+          id: 89,
+          name: '李四',
+          employee_status: 1,
+          customer_id: 22,
+          project_id: 32,
+          position_id: 42,
+          position_name: '操作工',
+          created_by: 9
+        }]];
+      }
+      if (sql.includes('SELECT e.id') && sql.includes('FROM hr_employee e')) return [[{ id: 89 }]];
+      return [{ affectedRows: 1, insertId: 301 }];
+    }
+  };
+  db.transaction = async callback => callback(pendingArrivalConnection);
+  await employeeService.updateEmployee(7, 89, {
+    name: '李四',
+    gender: 2,
+    customerId: 22,
+    projectId: 32,
+    positionId: 42,
+    employmentType: 1,
+    workType: 1,
+    hireDate: '2026-09-22'
+  }, 9, {
+    id: 9,
+    dataScope: 1,
+    permissions: ['employee:update']
+  });
+  assert.ok(
+    pendingArrivalCalls.some(call => call.sql.includes('INSERT INTO hr_employee_job') && call.params?.deptId === 8),
+    '待到岗员工缺少任职记录时应使用系统占位部门建立任职'
+  );
 }
 
 main()

@@ -1892,6 +1892,7 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
     );
     if (!employee) throw createError('员工不存在', 404);
     const internalDeptId = [3, 5].includes(Number(employee.employee_status))
+      || Number(currentJobForDept?.job_status) !== 1
       ? await ensureInternalDepartment(connection, companyId)
       : null;
     const canViewSensitiveEmployee = user?.permissions?.includes('employee:sensitive:view');
