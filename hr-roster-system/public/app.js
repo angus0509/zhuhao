@@ -1508,7 +1508,9 @@ async function loadTalents(keyword = '') {
   try {
   const query = String(keyword || '').trim();
   state.talents = await api(`/api/talents${query ? `?keyword=${encodeURIComponent(query)}` : ''}`);
-  const canCreateEmployee = (state.user?.permissions || []).includes('employee:create');
+  const permissions = state.user?.permissions || [];
+  const canCreateEmployee = permissions.includes('employee:create');
+  const canUpdateEmployee = permissions.includes('employee:update');
   $('#talentTableBody').innerHTML = state.talents.map(item => `
     <tr>
       <td><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.phone)}</small></td>
@@ -1520,7 +1522,14 @@ async function loadTalents(keyword = '') {
       <td>${badge(item.availableStatusName, Number(item.availableStatus) === 3 ? 'green' : 'neutral')}</td>
       <td>${escapeHtml(item.flowedAt ? new Date(item.flowedAt).toLocaleString('zh-CN', { hour12: false }) : '-')}<small>${escapeHtml(item.resignationReason || '-')}</small></td>
       <td>${escapeHtml(item.ownerName)}</td>
-      <td>${canCreateEmployee && Number(item.availableStatus) !== 3 ? `<button class="table-button" type="button" data-talent-onboard="${item.id}">${item.employeeId ? '打开员工档案' : '转入员工录入'}</button>` : `<span class="muted">${canCreateEmployee ? '无需处理' : '只读'}</span>`}</td>
+      <td>
+        ${(item.employeeId ? canUpdateEmployee : canCreateEmployee) && Number(item.availableStatus) !== 3
+          ? `<button class="table-button" type="button" data-talent-onboard="${item.id}">${item.employeeId ? '修改资料' : '转入员工录入'}</button>`
+          : `<span class="muted">${canCreateEmployee ? '无需处理' : '只读'}</span>`}
+        ${item.employeeId && Number(item.employeeStatus) === 1 && canUpdateEmployee
+          ? `<button class="primary-button" type="button" data-talent-confirm-onboard="${item.id}">确认入职</button>`
+          : ''}
+      </td>
     </tr>
   `).join('') || emptyRow(10, '暂无人才数据', '未入职和完成离职的员工会自动流转到这里，也可快速录入招聘线索');
   } catch (error) {
@@ -1562,6 +1571,30 @@ async function openTalentOnboarding(talentId) {
   form.dataset.talentCheckKey = talentCheckKey({ name: talent.name });
   syncEmployeeFormRequirements(form, 6);
   toast('已带入人才信息，请补充本次录入资料', 'success');
+}
+
+async function confirmTalentOnboarding(talentId, button) {
+  const talent = state.talents.find(item => Number(item.id) === Number(talentId));
+  if (!talent?.employeeId) throw new Error('人才记录未关联员工档案，请先转入员工录入');
+  if (Number(talent.employeeStatus) !== 1) throw new Error('该员工已不在待到岗状态，请刷新人才库');
+  const confirmed = await confirmDialog({
+    title: '确认员工入职',
+    message: `确认“${talent.name || '该员工'}”已到岗并转为在职？归属：${talent.customerName || '未关联客户'} / ${talent.projectName || '未关联项目'}。`,
+    confirmText: '确认入职'
+  });
+  if (!confirmed) return;
+  await withSubmitLock(button, () => api(`/api/employees/${talent.employeeId}/onboard`, {
+    method: 'POST',
+    body: JSON.stringify({
+      hireDate: talent.hireDate || '',
+      remark: '人才库确认入职'
+    })
+  }), '入职中…');
+  toast('员工已确认入职', 'success');
+  await refreshAfterSuccess(
+    Promise.all([loadTalents(), refreshEmployeeWorkspace()]),
+    '确认入职'
+  );
 }
 
 async function loadRecruitmentSources() {
@@ -3452,6 +3485,14 @@ function bindEvents() {
     const talentOnboard = event.target.closest('[data-talent-onboard]');
     if (talentOnboard) {
       openTalentOnboarding(Number(talentOnboard.dataset.talentOnboard)).catch(error => toast(error.message, 'error'));
+      return;
+    }
+    const talentConfirmOnboard = event.target.closest('[data-talent-confirm-onboard]');
+    if (talentConfirmOnboard) {
+      confirmTalentOnboarding(
+        Number(talentConfirmOnboard.dataset.talentConfirmOnboard),
+        talentConfirmOnboard
+      ).catch(error => toast(error.message, 'error'));
       return;
     }
 
