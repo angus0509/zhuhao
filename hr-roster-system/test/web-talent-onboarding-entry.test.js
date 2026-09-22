@@ -16,8 +16,10 @@ assert.match(app, /permissions\.includes\('employee:update'\)[\s\S]*data-talent-
   '人才库确认入职入口没有按 employee:update 权限显示');
 assert.match(app, /async function confirmTalentOnboarding\(talentId, button\)/,
   '人才库缺少确认入职处理函数');
-assert.match(app, /confirmTalentOnboarding[\s\S]*confirmDialog\([\s\S]*\/api\/employees\/\$\{talent\.employeeId\}\/onboard/,
-  '人才库确认入职必须二次确认并复用现有入职接口');
+assert.match(app, /confirmTalentOnboarding[\s\S]*confirmEmployeeOnboarding\(/,
+  '人才库确认入职没有复用网页端统一入职函数');
+assert.match(app, /confirmEmployeeOnboarding[\s\S]*confirmDialog\([\s\S]*\/api\/employees\/\$\{employee\.id\}\/onboard/,
+  '统一确认入职必须二次确认并复用现有入职接口');
 assert.match(app, /confirmTalentOnboarding[\s\S]*loadTalents\(\)[\s\S]*refreshEmployeeWorkspace\(\)/,
   '人才入职成功后没有刷新人才库和员工工作台');
 assert.match(app, /event\.target\.closest\('\[data-talent-confirm-onboard\]'\)/,

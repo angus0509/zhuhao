@@ -139,6 +139,7 @@ function renderEmployees() {
           <div class="row-actions">
             <button class="link-button" type="button" data-action="detail" data-id="${row.id}">查看</button>
             ${canEditEmployee ? `<button class="link-button" type="button" data-action="edit" data-id="${row.id}">编辑</button>` : ''}
+            ${canEditEmployee && Number(row.employeeStatus) === 1 ? `<button class="link-button" type="button" data-action="confirm-onboard" data-id="${row.id}">确认入职</button>` : ''}
             ${canTransferEmployee ? `<button class="link-button" type="button" data-action="transfer" data-id="${row.id}">调岗</button>` : ''}
             ${canResignEmployee ? `<button class="link-button danger" type="button" data-action="resign" data-id="${row.id}">离职</button>` : ''}
           </div>

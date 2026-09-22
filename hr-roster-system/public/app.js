@@ -934,6 +934,7 @@ function renderDetail(detail) {
       </div>
       <div class="topbar-actions">
         ${permissions.includes('employee:update') ? `<button class="secondary-button" type="button" data-action="edit" data-id="${basic.id}">编辑</button>` : ''}
+        ${permissions.includes('employee:update') && Number(basic.employeeStatus) === 1 ? `<button class="primary-button" type="button" data-action="confirm-onboard" data-id="${basic.id}">确认入职</button>` : ''}
         ${EmployeeBindCode.canGenerateEmployeeBindCode(permissions, basic.employeeStatus) ? `<button class="secondary-button" type="button" data-action="employee-bind-code" data-id="${basic.id}">生成绑定码</button>` : ''}
         ${permissions.includes('employee:update') && [3, 5].includes(Number(basic.employeeStatus)) ? `<button class="primary-button" type="button" data-action="reactivate" data-id="${basic.id}">重新录用</button>` : ''}
         ${permissions.includes('employee:transfer') ? `<button class="secondary-button" type="button" data-action="transfer" data-id="${basic.id}">调岗</button>` : ''}
@@ -1573,28 +1574,57 @@ async function openTalentOnboarding(talentId) {
   toast('已带入人才信息，请补充本次录入资料', 'success');
 }
 
-async function confirmTalentOnboarding(talentId, button) {
-  const talent = state.talents.find(item => Number(item.id) === Number(talentId));
-  if (!talent?.employeeId) throw new Error('人才记录未关联员工档案，请先转入员工录入');
-  if (Number(talent.employeeStatus) !== 1) throw new Error('该员工已不在待到岗状态，请刷新人才库');
+async function confirmEmployeeOnboarding(employee, button, refresh) {
+  if (!employee?.id) throw new Error('员工档案不存在，请刷新页面');
+  if (Number(employee.employeeStatus) !== 1) throw new Error('该员工已不在待到岗状态，请刷新页面');
   const confirmed = await confirmDialog({
     title: '确认员工入职',
-    message: `确认“${talent.name || '该员工'}”已到岗并转为在职？归属：${talent.customerName || '未关联客户'} / ${talent.projectName || '未关联项目'}。`,
+    message: `确认“${employee.name || '该员工'}”已到岗并转为在职？归属：${employee.customerName || '未关联客户'} / ${employee.projectName || '未关联项目'}。`,
     confirmText: '确认入职'
   });
   if (!confirmed) return;
-  await withSubmitLock(button, () => api(`/api/employees/${talent.employeeId}/onboard`, {
+  const onboarded = await withSubmitLock(button, () => api(`/api/employees/${employee.id}/onboard`, {
     method: 'POST',
     body: JSON.stringify({
-      hireDate: talent.hireDate || '',
-      remark: '人才库确认入职'
+      hireDate: employee.hireDate || '',
+      remark: employee.remark || '网页端确认入职'
     })
   }), '入职中…');
+  if (!onboarded) return;
   toast('员工已确认入职', 'success');
-  await refreshAfterSuccess(
-    Promise.all([loadTalents(), refreshEmployeeWorkspace()]),
-    '确认入职'
-  );
+  if (typeof refresh === 'function') await refreshAfterSuccess(refresh(), '确认入职');
+}
+
+async function confirmTalentOnboarding(talentId, button) {
+  const talent = state.talents.find(item => Number(item.id) === Number(talentId));
+  if (!talent?.employeeId) throw new Error('人才记录未关联员工档案，请先转入员工录入');
+  return confirmEmployeeOnboarding({
+    id: talent.employeeId,
+    employeeStatus: talent.employeeStatus,
+    name: talent.name,
+    customerName: talent.customerName,
+    projectName: talent.projectName,
+    hireDate: talent.hireDate,
+    remark: '人才库确认入职'
+  }, button, () => Promise.all([loadTalents(), refreshEmployeeWorkspace()]));
+}
+
+async function confirmRosterOnboarding(employeeId, button) {
+  const row = state.employees.find(item => Number(item.id) === Number(employeeId));
+  const basic = Number(state.selectedDetail?.basicInfo?.id) === Number(employeeId)
+    ? state.selectedDetail.basicInfo
+    : null;
+  const employee = row || basic;
+  if (!employee) throw new Error('员工档案不存在，请刷新花名册');
+  return confirmEmployeeOnboarding({
+    id: employee.id,
+    employeeStatus: employee.employeeStatus,
+    name: employee.name,
+    customerName: employee.customerName,
+    projectName: employee.projectName,
+    hireDate: employee.hireDate,
+    remark: '花名册确认入职'
+  }, button, () => refreshEmployeeWorkspace());
 }
 
 async function loadRecruitmentSources() {
@@ -3735,6 +3765,9 @@ function bindEvents() {
         .catch(error => toast(error.message || '绑定码生成失败', 'error'));
     }
     if (action === 'reactivate') reactivateExistingEmployee(Number(id)).catch(error => toast(error.message));
+    if (action === 'confirm-onboard') {
+      confirmRosterOnboarding(Number(id), actionButton).catch(error => toast(error.message, 'error'));
+    }
     if (action === 'transfer') openTransferModal(id);
     if (action === 'resign') openResignModal(id);
     if (action === 'certificate') openCertificateModal(id);
