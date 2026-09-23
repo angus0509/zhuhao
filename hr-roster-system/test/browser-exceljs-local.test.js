@@ -15,7 +15,7 @@ const excelJsBundle = require.resolve('exceljs/dist/exceljs.min.js');
 assert.ok(fs.statSync(excelJsBundle).size > 100000, '本地 ExcelJS 浏览器包不存在或内容异常');
 assert.doesNotMatch(html, /<script[^>]+src="\/vendor\/exceljs\.min\.js"/, '首屏不得预加载 ExcelJS');
 assert.doesNotMatch(html, /xlsx\/0\.18\.5\/xlsx\.full\.min\.js/, '页面仍依赖外部 SheetJS CDN');
-const browserAssetVersion = '20260918-1';
+const browserAssetVersion = '20260923-1';
 for (const assetPath of ['/js/core/resource-loader.js', '/js/views/dashboard.js', '/app.js']) {
   const escapedPath = assetPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   assert.match(

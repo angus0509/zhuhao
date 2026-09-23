@@ -12,6 +12,8 @@ const api = fs.readFileSync(path.join(root, 'public/js/core/api.js'), 'utf8');
 
 assert.match(html, /id="loginError"[^>]*role="alert"/);
 assert.match(html, /id="loginSubmitButton"/);
+assert.match(html, /src="\/js\/core\/api\.js\?v=20260923-1"/, '登录 API 脚本必须更新缓存版本');
+assert.match(html, /src="\/app\.js\?v=20260923-1"/, '登录初始化脚本必须更新缓存版本');
 assert.match(css, /\.toast\s*\{[^}]*z-index:\s*10001/s);
 assert.match(css, /\.login-error-message\s*\{/);
 assert.match(state, /let loginSubmitting = false/);
