@@ -15,7 +15,9 @@ function consumeAuthMessage() {
 function normalizeRequestOptions(options = {}) {
   const normalized = { ...options };
   const context = String(normalized.context || '').trim();
+  const suppressAuthFeedback = normalized.suppressAuthFeedback === true;
   delete normalized.context;
+  delete normalized.suppressAuthFeedback;
   const isFormData = typeof FormData !== 'undefined' && normalized.body instanceof FormData;
   const isBlob = typeof Blob !== 'undefined' && normalized.body instanceof Blob;
   if (normalized.body && typeof normalized.body === 'object' && !isFormData && !isBlob) {
@@ -26,12 +28,18 @@ function normalizeRequestOptions(options = {}) {
     ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
     ...(normalized.headers || {})
   };
-  return { normalized, context };
+  return { normalized, context, suppressAuthFeedback };
 }
 
 function operationErrorMessage(message, context = '') {
   const cleanMessage = String(message || '请求失败').trim();
   return context ? `${context}：${cleanMessage}` : cleanMessage;
+}
+
+function createHttpError(message, status) {
+  const error = new Error(message);
+  error.status = Number(status) || 0;
+  return error;
 }
 
 function createSessionSupersededError() {
@@ -78,7 +86,7 @@ function withTableLoading(wrapSelector, fn) {
 async function api(path, options = {}) {
   const requestSessionVersion = state.sessionVersion;
   showLoading();
-  const { normalized, context } = normalizeRequestOptions(options);
+  const { normalized, context, suppressAuthFeedback } = normalizeRequestOptions(options);
   try {
     const response = await fetch(path, {
       credentials: 'same-origin',
@@ -90,13 +98,16 @@ async function api(path, options = {}) {
       if (response.status === 401) {
         const message = '登录已过期，请重新登录';
         setSystemStatus('auth');
-        rememberAuthMessage(message);
+        if (!suppressAuthFeedback) rememberAuthMessage(message);
         logout(false, false);
-        if (typeof setLoginError === 'function') setLoginError(message);
-        throw new Error(operationErrorMessage(message, context));
+        if (!suppressAuthFeedback && typeof setLoginError === 'function') setLoginError(message);
+        throw createHttpError(operationErrorMessage(message, context), response.status);
       }
       setSystemStatus('error');
-      throw new Error(operationErrorMessage(`接口返回异常（${response.status}），请刷新页面后重试`, context));
+      throw createHttpError(
+        operationErrorMessage(`接口返回异常（${response.status}），请刷新页面后重试`, context),
+        response.status
+      );
     }
     const payload = await response.json();
     assertCurrentSession(requestSessionVersion);
@@ -104,13 +115,13 @@ async function api(path, options = {}) {
       const message = payload.message || `请求失败（${response.status}）`;
       if (response.status === 401) {
         setSystemStatus('auth');
-        rememberAuthMessage(message);
+        if (!suppressAuthFeedback) rememberAuthMessage(message);
         logout(false, false);
-        if (typeof setLoginError === 'function') setLoginError(message);
+        if (!suppressAuthFeedback && typeof setLoginError === 'function') setLoginError(message);
       } else if (response.status >= 500) {
         setSystemStatus('error');
       }
-      throw new Error(operationErrorMessage(message, context));
+      throw createHttpError(operationErrorMessage(message, context), response.status);
     }
     return payload.data;
   } catch (error) {

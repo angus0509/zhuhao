@@ -62,7 +62,8 @@ assert.match(migration, /UPDATE labor_project\s+SET status = 2\s+WHERE status = 
   '迁移必须把历史筹备项目转为进行中');
 assert.doesNotMatch(migration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i,
   '项目状态迁移不得删除业务数据');
-if (fixture) {
+if (fixture?.projects !== undefined) {
+  assert.equal(Array.isArray(fixture.projects), true, '本地原型项目数据必须使用数组结构');
   assert.equal(fixture.projects.every(project => Number(project.status) !== 1), true,
     '本地原型项目数据不得保留筹备状态');
 }

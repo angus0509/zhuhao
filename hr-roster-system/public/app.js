@@ -3835,10 +3835,17 @@ async function init() {
   localStorage.removeItem('hrRosterToken');
   localStorage.removeItem('hrRosterUser');
   try {
-    state.user = await api('/api/auth/me', { context: '恢复登录状态' });
+    state.user = await api('/api/auth/me', {
+      context: '恢复登录状态',
+      suppressAuthFeedback: true
+    });
   } catch (error) {
     logout(false, false);
-    setLoginError(consumeAuthMessage() || error.message || '登录状态读取失败，请重新登录');
+    const rememberedMessage = consumeAuthMessage();
+    const message = Number(error?.status) === 401
+      ? rememberedMessage
+      : rememberedMessage || error.message || '登录状态读取失败，请重新登录';
+    setLoginError(message);
     return;
   }
   await activateAuthenticatedSession(state.user);
