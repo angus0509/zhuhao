@@ -98,9 +98,11 @@ async function api(path, options = {}) {
       if (response.status === 401) {
         const message = '登录已过期，请重新登录';
         setSystemStatus('auth');
-        if (!suppressAuthFeedback) rememberAuthMessage(message);
-        logout(false, false);
-        if (!suppressAuthFeedback && typeof setLoginError === 'function') setLoginError(message);
+        if (!suppressAuthFeedback) {
+          rememberAuthMessage(message);
+          logout(false, false);
+          if (typeof setLoginError === 'function') setLoginError(message);
+        }
         throw createHttpError(operationErrorMessage(message, context), response.status);
       }
       setSystemStatus('error');
@@ -115,9 +117,11 @@ async function api(path, options = {}) {
       const message = payload.message || `请求失败（${response.status}）`;
       if (response.status === 401) {
         setSystemStatus('auth');
-        if (!suppressAuthFeedback) rememberAuthMessage(message);
-        logout(false, false);
-        if (!suppressAuthFeedback && typeof setLoginError === 'function') setLoginError(message);
+        if (!suppressAuthFeedback) {
+          rememberAuthMessage(message);
+          logout(false, false);
+          if (typeof setLoginError === 'function') setLoginError(message);
+        }
       } else if (response.status >= 500) {
         setSystemStatus('error');
       }
@@ -125,7 +129,8 @@ async function api(path, options = {}) {
     }
     return payload.data;
   } catch (error) {
-    if (isSessionSupersededError(error)) throw error;
+    // 当前请求收到 401 后会主动清理会话，不能再把这次正常退出误判为旧账号响应。
+    if (isSessionSupersededError(error) || Number(error?.status) === 401) throw error;
     assertCurrentSession(requestSessionVersion);
     if (error.name === 'TypeError') {
       setSystemStatus('error');

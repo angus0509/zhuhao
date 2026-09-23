@@ -65,12 +65,12 @@ function createAuthContext(rememberedMessage = '') {
     initializeRosterTableTools() {},
     bindEvents() {},
     initBackToTop() {},
-    logout() {},
     activateAuthenticatedSession() {
       throw new Error('未登录时不应进入已登录工作区');
     }
   });
   vm.runInContext(state, context, { filename: 'public/js/core/state.js' });
+  context.logout = () => vm.runInContext('clearSessionWorkspace()', context);
   vm.runInContext(api, context, { filename: 'public/js/core/api.js' });
   vm.runInContext(setLoginErrorSource, context, { filename: 'public/app.js' });
   vm.runInContext(initSource, context, { filename: 'public/app.js' });
