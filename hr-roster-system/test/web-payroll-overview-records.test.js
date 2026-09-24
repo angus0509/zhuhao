@@ -17,22 +17,34 @@ for (const tab of ['overview', 'records', 'disputes']) {
 assert.match(html, /id="payrollOverviewTasks"/, '概览缺少可操作待办区');
 assert.match(html, /id="payrollRecentBatches"/, '概览缺少最近工资批次');
 assert.match(html, /id="payrollRecordsGroups"/, '发放记录缺少按月分组容器');
+assert.match(html, /id="payrollRecordsPagination"/, '发放记录缺少翻页容器');
 assert.match(html, /id="payrollRecordStatusFilter"/, '发放记录缺少状态筛选');
 assert.match(app, /function switchPayrollWorkspace/);
 assert.match(app, /function renderPayrollOverview/);
 assert.match(app, /function renderPayrollRecords/);
-const overviewBlock = app.slice(app.indexOf('function renderPayrollOverview'), app.indexOf('function payrollRecordMatches'));
+assert.match(app, /new URLSearchParams\(\{ page: String\(page\), pageSize: '20' \}\)/,
+  '工资批次接口必须显式传递分页参数');
+assert.match(app, /data-payroll-record-page/, '发放记录缺少翻页交互');
+const overviewBlock = app.slice(app.indexOf('function renderPayrollOverview'), app.indexOf('function renderPayrollRecords'));
 assert.doesNotMatch(overviewBlock, /累计应发|累计实发/, '工资工作台概览不应显示应发和实发总金额');
 assert.match(overviewBlock, /['"]计薪人数['"]/);
 assert.match(app, /payroll-record-month-head[\s\S]*items\.length/,
   '工资发放记录必须按工资月份分组并显示每月批次数');
 assert.match(app, /data-payroll-record-filter/);
+assert.match(app, /searchParams\.set\('salaryMonth',\s*state\.payrollRecordMonth\)/,
+  '工资月份筛选必须传给后端后再分页');
+assert.match(app, /searchParams\.set\('status',\s*state\.payrollRecordFilter\)/,
+  '工资状态筛选必须传给后端后再分页');
+assert.doesNotMatch(app, /\.filter\(payrollRecordMatches\)/,
+  '工资记录不得只筛选当前页数据');
+assert.match(app, /payrollRecordPage\s*=\s*1[\s\S]{0,300}loadPayrollOverview\(\)/,
+  '切换工资记录筛选条件后必须从第一页重新向后端加载');
 assert.match(app, /data\.employeeTotal/, '计薪人数必须使用后端已发布批次统计');
 assert.match(app, /data\.viewedTotal/, '已查看必须使用后端已发布批次统计');
 assert.match(app, /data\.signedTotal/, '已签收必须使用后端已发布批次统计');
 assert.match(app, /data\.pendingBatchCount/, '待发布数量必须使用后端全量统计');
-assert.match(app, /pendingBatchStatuses/,
-  '待处理筛选必须限制在草稿、核算中、待复核、待发放状态，不能包含已归档批次');
+assert.match(app, /\['pending', 'failed', 'unsigned', 'unread'\]\.includes\(filter\)/,
+  '概览快捷筛选必须使用后端支持的工资批次状态');
 assert.match(app, /viewRate/);
 assert.match(app, /signRate/);
 assert.match(css, /\.payroll-record-month/);

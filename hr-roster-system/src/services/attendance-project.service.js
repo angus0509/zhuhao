@@ -31,6 +31,88 @@ function shanghaiDate(value = new Date()) {
   }).format(value);
 }
 
+function minutesOfDay(value) {
+  const [hours, minutes] = String(value).split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function validMoney(value) {
+  return /^(?:0|[1-9]\d{0,7})(?:\.\d{1,2})?$/.test(String(value ?? '').trim());
+}
+
+function validateShiftRules(shifts) {
+  const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (!Array.isArray(shifts) || shifts.length !== 2) {
+    throw createError('白班和夜班规则必须各配置一条', 400, 'INVALID_SHIFT_RULE');
+  }
+  const normalized = shifts.map(item => {
+    const shiftType = String(item?.shiftType || '');
+    const workStartTime = String(item?.workStartTime || '');
+    const workEndTime = String(item?.workEndTime || '');
+    const restStartTime = item?.restStartTime ? String(item.restStartTime) : null;
+    const restEndTime = item?.restEndTime ? String(item.restEndTime) : null;
+    const standardHours = Number(item?.standardHours);
+    const invalid = !['DAY', 'NIGHT'].includes(shiftType)
+      || !timePattern.test(workStartTime) || !timePattern.test(workEndTime)
+      || Boolean(restStartTime) !== Boolean(restEndTime)
+      || !Number.isFinite(standardHours) || standardHours <= 0 || standardHours > 24
+      || !Number.isInteger(standardHours * 2) || !validMoney(item?.hourlyRate);
+    if (invalid) throw createError('班次规则参数无效', 400, 'INVALID_SHIFT_RULE');
+    if (shiftType === 'DAY' && workEndTime <= workStartTime) {
+      throw createError('白班下班时间必须晚于上班时间', 400, 'INVALID_SHIFT_RULE');
+    }
+    if (restStartTime) {
+      if (!timePattern.test(restStartTime) || !timePattern.test(restEndTime)) {
+        throw createError('班次休息时间无效', 400, 'INVALID_SHIFT_RULE');
+      }
+      const start = minutesOfDay(workStartTime);
+      let end = minutesOfDay(workEndTime);
+      if (end <= start) end += 1440;
+      let restStart = minutesOfDay(restStartTime);
+      let restEnd = minutesOfDay(restEndTime);
+      if (restStart <= start && end > 1440) restStart += 1440;
+      if (restEnd <= start && end > 1440) restEnd += 1440;
+      if (restEnd <= restStart || restStart < start || restEnd > end) {
+        throw createError('班次休息时间必须位于上下班时间内', 400, 'INVALID_SHIFT_RULE');
+      }
+    }
+    return {
+      shiftType,
+      workStartTime,
+      workEndTime,
+      restStartTime,
+      restEndTime,
+      standardHours,
+      standardMinutes: standardHours * 60,
+      hourlyRate: Number(item.hourlyRate).toFixed(2)
+    };
+  });
+  if (new Set(normalized.map(item => item.shiftType)).size !== 2) {
+    throw createError('白班和夜班规则必须各配置一条', 400, 'INVALID_SHIFT_RULE');
+  }
+  return normalized.sort((left, right) => (left.shiftType === 'DAY' ? -1 : right.shiftType === 'DAY' ? 1 : 0));
+}
+
+function validateAllowances(allowances = []) {
+  if (!Array.isArray(allowances) || allowances.length > 50) {
+    throw createError('补贴规则参数无效', 400, 'INVALID_ALLOWANCE_RULE');
+  }
+  const seen = new Set();
+  return allowances.map((item, index) => {
+    const allowanceName = String(item?.allowanceName || '').trim();
+    const shiftScope = String(item?.shiftScope || '');
+    const calculationType = String(item?.calculationType || '');
+    const key = `${allowanceName}\u0000${shiftScope}`;
+    if (!allowanceName || allowanceName.length > 80 || !['DAY', 'NIGHT', 'ALL'].includes(shiftScope)
+      || !['PER_SHIFT', 'PER_HOUR'].includes(calculationType) || !validMoney(item?.unitAmount)) {
+      throw createError('补贴规则参数无效', 400, 'INVALID_ALLOWANCE_RULE');
+    }
+    if (seen.has(key)) throw createError('同一班次存在重复补贴', 400, 'DUPLICATE_ALLOWANCE');
+    seen.add(key);
+    return { allowanceName, shiftScope, calculationType, unitAmount: Number(item.unitAmount).toFixed(2), sortOrder: index };
+  });
+}
+
 function validateRule(body = {}) {
   const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   const ruleName = String(body.ruleName || '').trim();
@@ -111,16 +193,62 @@ async function getProjectSettings(companyId, user, projectId) {
       FROM attendance_project_geofence
       WHERE company_id=:companyId AND project_id=:projectId AND status=1
       ORDER BY geofence_id`, { companyId, projectId: positiveId(projectId) });
+    const shifts = await query(client, `SELECT project_rule_id AS projectRuleId,shift_type AS shiftType,
+        work_start_time AS workStartTime,work_end_time AS workEndTime,rest_start_time AS restStartTime,
+        rest_end_time AS restEndTime,standard_minutes AS standardMinutes,hourly_rate AS hourlyRate,status
+      FROM attendance_project_shift_rules
+      WHERE company_id=:companyId AND project_id=:projectId
+      ORDER BY project_rule_id,FIELD(shift_type,'DAY','NIGHT')`, { companyId, projectId: positiveId(projectId) });
+    const allowances = await query(client, `SELECT project_rule_id AS projectRuleId,allowance_name AS allowanceName,
+        shift_scope AS shiftScope,calculation_type AS calculationType,unit_amount AS unitAmount,sort_order AS sortOrder,status
+      FROM attendance_allowance_rules
+      WHERE company_id=:companyId AND project_id=:projectId
+      ORDER BY project_rule_id,sort_order,id`, { companyId, projectId: positiveId(projectId) });
+    const shiftsByRule = new Map();
+    for (const shift of shifts) {
+      const key = Number(shift.projectRuleId);
+      if (!shiftsByRule.has(key)) shiftsByRule.set(key, []);
+      shiftsByRule.get(key).push({ ...shift, standardHours: Number(shift.standardMinutes) / 60 });
+    }
+    const allowancesByRule = new Map();
+    for (const allowance of allowances) {
+      const key = Number(allowance.projectRuleId);
+      if (!allowancesByRule.has(key)) allowancesByRule.set(key, []);
+      allowancesByRule.get(key).push(allowance);
+    }
     return {
       project: { projectId: project.id, projectName: project.projectName, customerId: project.customerId },
-      rules: rules.map(rule => ({ ...rule, workWeekdays: String(rule.workWeekdays).split(',').map(Number) })),
+      rules: rules.map(rule => {
+        const configuredShifts = shiftsByRule.get(Number(rule.ruleId)) || [{
+          projectRuleId: Number(rule.ruleId), shiftType: 'DAY', workStartTime: rule.workStartTime,
+          workEndTime: rule.workEndTime, restStartTime: rule.restStartTime, restEndTime: rule.restEndTime,
+          standardMinutes: Number(rule.standardMinutes), standardHours: Number(rule.standardMinutes) / 60,
+          hourlyRate: null, status: rule.status
+        }];
+        return {
+          ...rule,
+          workWeekdays: String(rule.workWeekdays).split(',').map(Number),
+          shifts: configuredShifts,
+          allowances: allowancesByRule.get(Number(rule.ruleId)) || []
+        };
+      }),
       geofenceIds: geofences.map(item => Number(item.geofenceId))
     };
   });
 }
 
 async function saveProjectSettings(companyId, user, operatorId, projectId, body = {}) {
-  const values = validateRule(body);
+  const shifts = body.shifts == null ? null : validateShiftRules(body.shifts);
+  const allowances = body.allowances == null ? [] : validateAllowances(body.allowances);
+  const dayShift = shifts?.find(item => item.shiftType === 'DAY');
+  const values = validateRule(dayShift ? {
+    ...body,
+    workStartTime: dayShift.workStartTime,
+    workEndTime: dayShift.workEndTime,
+    restStartTime: dayShift.restStartTime,
+    restEndTime: dayShift.restEndTime,
+    standardMinutes: dayShift.standardMinutes
+  } : body);
   return db.transaction(async client => {
     await assertProject(client, companyId, user, projectId);
     const existingRules = await query(client, `SELECT id,effective_from AS effectiveFrom
@@ -160,6 +288,40 @@ async function saveProjectSettings(companyId, user, operatorId, projectId, body 
     });
     const ruleId = Number(result.insertId);
     const summary = { projectId: positiveId(projectId), ruleId, effectiveFrom: values.effectiveFrom };
+    if (shifts) {
+      await query(client, `UPDATE attendance_project_shift_rules SET status=0,updated_by=:operatorId
+        WHERE company_id=:companyId AND project_id=:projectId AND project_rule_id=:ruleId`, {
+        companyId, projectId: positiveId(projectId), ruleId, operatorId: positiveId(operatorId)
+      });
+      await query(client, `UPDATE attendance_allowance_rules SET status=0,updated_by=:operatorId
+        WHERE company_id=:companyId AND project_id=:projectId AND project_rule_id=:ruleId`, {
+        companyId, projectId: positiveId(projectId), ruleId, operatorId: positiveId(operatorId)
+      });
+      for (const shift of shifts) {
+        await query(client, `INSERT INTO attendance_project_shift_rules
+          (company_id,project_id,project_rule_id,shift_type,work_start_time,work_end_time,rest_start_time,
+           rest_end_time,standard_minutes,hourly_rate,status,created_by,updated_by)
+          VALUES (:companyId,:projectId,:ruleId,:shiftType,:workStartTime,:workEndTime,:restStartTime,
+           :restEndTime,:standardMinutes,:hourlyRate,1,:operatorId,:operatorId)
+          ON DUPLICATE KEY UPDATE work_start_time=VALUES(work_start_time),work_end_time=VALUES(work_end_time),
+           rest_start_time=VALUES(rest_start_time),rest_end_time=VALUES(rest_end_time),
+           standard_minutes=VALUES(standard_minutes),hourly_rate=VALUES(hourly_rate),status=1,
+           updated_by=VALUES(updated_by)`, {
+          companyId, projectId: positiveId(projectId), ruleId, operatorId: positiveId(operatorId), ...shift
+        });
+      }
+      for (const allowance of allowances) {
+        await query(client, `INSERT INTO attendance_allowance_rules
+          (company_id,project_id,project_rule_id,allowance_name,shift_scope,calculation_type,unit_amount,
+           sort_order,status,created_by,updated_by)
+          VALUES (:companyId,:projectId,:ruleId,:allowanceName,:shiftScope,:calculationType,:unitAmount,
+           :sortOrder,1,:operatorId,:operatorId)
+          ON DUPLICATE KEY UPDATE calculation_type=VALUES(calculation_type),unit_amount=VALUES(unit_amount),
+           sort_order=VALUES(sort_order),status=1,updated_by=VALUES(updated_by)`, {
+          companyId, projectId: positiveId(projectId), ruleId, operatorId: positiveId(operatorId), ...allowance
+        });
+      }
+    }
     if (Array.isArray(body.geofenceIds)) {
       const association = await replaceProjectGeofences(client, companyId, user, operatorId, projectId, body.geofenceIds);
       summary.geofenceIds = association.geofenceIds;
@@ -167,7 +329,12 @@ async function saveProjectSettings(companyId, user, operatorId, projectId, body 
     await query(client, `INSERT INTO hr_operation_log
       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
       VALUES (:companyId,:operatorId,'项目考勤','attendance_project_rule',:ruleId,'upsert',:afterData)`, {
-      companyId, operatorId: positiveId(operatorId), ruleId, afterData: JSON.stringify(summary)
+      companyId,
+      operatorId: positiveId(operatorId),
+      ruleId,
+      afterData: JSON.stringify(shifts
+        ? { ...summary, shiftCount: shifts.length, allowanceCount: allowances.length }
+        : summary)
     });
     return summary;
   });
@@ -242,5 +409,7 @@ module.exports = {
   listCalendar,
   saveCalendarDay,
   resolveProjectRule,
-  validateRule
+  validateRule,
+  validateShiftRules,
+  validateAllowances
 };

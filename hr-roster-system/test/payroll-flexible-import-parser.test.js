@@ -21,10 +21,11 @@ function main() {
   );
   assert.equal(result.rows[0].employeeName, '张三');
   assert.equal(result.rows[0].idCardNo, '320101199001011234');
-  assert.equal(result.rows[0].baseSalary, 8150, '仅有应发合计时应归入基本工资形成可计算结构');
-  assert.equal(result.rows[0].socialDeduction, 680);
-  assert.equal(result.rows[0].taxDeduction, 70);
-  assert.equal(result.rows[0].advanceDeduction, 500);
+  assert.equal(result.rows[0].baseSalary, 0, '应发工资只作为原表展示项，不得补写基本工资');
+  assert.equal(result.rows[0].grossAmount, 8150, '明确上传的应发工资可以作为批次展示统计字段');
+  assert.equal(result.rows[0].socialDeduction, 0);
+  assert.equal(result.rows[0].taxDeduction, 0);
+  assert.equal(result.rows[0].advanceDeduction, 0);
   assert.equal(result.rows[0].otherDeduction, 0);
   assert.equal(result.rows[0].netAmount, 6900);
   assert.deepEqual(result.rows[0].errors, []);
@@ -34,19 +35,16 @@ function main() {
     ['13800138000', '300', '王五', '500', '3500', '240', '200', '40']
   ]);
   assert.equal(detailed.rows[0].phone, '13800138000');
-  assert.equal(detailed.rows[0].baseSalary, 3500);
-  assert.equal(detailed.rows[0].positionSalary, 500);
-  assert.equal(detailed.rows[0].performanceSalary, 300);
-  assert.equal(detailed.rows[0].allowanceAmount, 200);
-  assert.equal(detailed.rows[0].overtime15Amount, 240);
-  assert.equal(detailed.rows[0].otherDeduction, 40);
+  assert.ok(detailed.rows[0].itemSnapshot.every(item => item.category === 'display'));
+  assert.deepEqual(detailed.rows[0].itemSnapshot.map(item => item.value), ['300', '500', '3500', '240', '200', '40']);
 
   const withEmployeeNo = parser.parseFlexiblePayrollRows([
     ['其他列', '人员编号', '计件金额', '实付工资'],
     ['可忽略', 'YG0001', '5000', '4800']
   ]);
   assert.equal(withEmployeeNo.rows[0].employeeNo, 'YG0001');
-  assert.equal(withEmployeeNo.rows[0].pieceAmount, 5000);
+  assert.equal(withEmployeeNo.rows[0].pieceAmount, 0);
+  assert.equal(withEmployeeNo.rows[0].itemSnapshot.find(item => item.label === '计件金额').value, '5000');
   assert.equal(withEmployeeNo.rows[0].otherDeduction, 0,
     '提供实发金额时应保留原表扣款明细，不得自动补写');
   assert.equal(withEmployeeNo.rows[0].warnings.length, 0,
@@ -67,9 +65,10 @@ function main() {
     ['姓名', '基本工资', '住宿扣款', '实发工资'],
     ['钱七', '¥8,000.00', '200 元', 'RMB 7,800']
   ]);
-  assert.equal(currencyFormats.rows[0].baseSalary, 8000, '应识别人民币符号和千分位金额');
-  assert.equal(currencyFormats.rows[0].otherDeduction, 200, '应识别带元后缀的扣款金额');
+  assert.equal(currencyFormats.rows[0].baseSalary, 0, '基本工资应作为展示项保留原值');
+  assert.equal(currencyFormats.rows[0].otherDeduction, 0, '住宿扣款应作为展示项保留原值');
   assert.equal(currencyFormats.rows[0].netAmount, 7800, '应识别 RMB 前缀的实发金额');
+  assert.deepEqual(currencyFormats.rows[0].itemSnapshot.map(item => item.value), ['¥8,000.00', '200 元', 'RMB 7,800']);
 
   assert.equal(parser.normalizeHeader(' 1.5倍加班费（元） '), '15倍加班费');
   assert.equal(parser.normalizeHeader('身份证号/证件号码'), '身份证号证件号码');
@@ -87,11 +86,12 @@ function main() {
     ['姓名', '底薪', '餐补', '夜班补贴', '全勤奖', '住宿费', '水电费', '实领工资'],
     ['孙七', '4000', '300', '200', '100', '150', '50', '4400']
   ]);
-  assert.equal(multiAllowanceAndDeduction.rows[0].allowanceAmount, 600,
-    '多个补贴、奖金列应合并为补贴金额');
-  assert.equal(multiAllowanceAndDeduction.rows[0].otherDeduction, 200,
-    '多个杂项扣款列应合并为其他扣款');
-  assert.equal(multiAllowanceAndDeduction.rows[0].grossAmount, 4600);
+  assert.equal(multiAllowanceAndDeduction.rows[0].allowanceAmount, 0,
+    '多个补贴、奖金列不得参与系统重算');
+  assert.equal(multiAllowanceAndDeduction.rows[0].otherDeduction, 0,
+    '多个杂项扣款列不得参与系统重算');
+  assert.equal(multiAllowanceAndDeduction.rows[0].grossAmount, 0,
+    '未上传应发工资时不得根据实发或其他类目推导应发工资');
   assert.equal(multiAllowanceAndDeduction.rows[0].netAmount, 4400);
 
   const twoLevelHeader = parser.parseFlexiblePayrollRows([
@@ -104,9 +104,9 @@ function main() {
   assert.equal(twoLevelHeader.rows.length, 1);
   assert.equal(twoLevelHeader.rows[0].employeeNo, 'YG0099');
   assert.equal(twoLevelHeader.rows[0].employeeName, '周八');
-  assert.equal(twoLevelHeader.rows[0].baseSalary, 4200);
-  assert.equal(twoLevelHeader.rows[0].allowanceAmount, 300);
-  assert.equal(twoLevelHeader.rows[0].otherDeduction, 100);
+  assert.deepEqual(twoLevelHeader.rows[0].itemSnapshot.map(item => [item.label, item.value]), [
+    ['基本工资', '4200'], ['夜班补贴', '300'], ['水电费', '100']
+  ]);
   console.log('payroll-flexible-import-parser-tests-ok');
 }
 

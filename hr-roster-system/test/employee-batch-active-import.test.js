@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-characters';
+process.env.DATA_ENCRYPT_KEY = '12345678901234567890123456789012';
+process.env.DATA_ENCRYPT_IV = '1234567890123456';
 
 const db = require('../src/db');
 const employeeService = require('../src/services/employee.service');
@@ -20,7 +22,8 @@ async function main() {
 
   const connection = {
     async execute(sql, params = {}) {
-      if (sql.includes('FROM hr_department') && sql.includes('ORDER BY sort_no')) return [[{ id: 5 }]];
+      if (sql.includes('FROM hr_company') && sql.includes('FOR UPDATE')) return [[{ id: 1 }]];
+      if (sql.includes('FROM hr_department') && sql.includes('dept_code=:deptCode')) return [[{ id: 5, status: 1 }]];
       if (sql.includes('FROM person_blacklist')) return [[]];
       if (sql.includes('FROM hr_employee') && sql.includes('id_card_hash') && sql.includes('id<>')) return [[]];
       if (sql.includes('FROM hr_employee') && sql.includes('employee_no')) return [[]];

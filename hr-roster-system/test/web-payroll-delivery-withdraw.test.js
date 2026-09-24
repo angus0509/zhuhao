@@ -15,9 +15,10 @@ assert.match(payrollUiSource, /发放失败/);
 assert.match(payrollUiSource, /已签收/);
 assert.match(payrollUiSource, /待签收/);
 
-for (const field of ['deliverySuccessCount', 'deliveryFailedCount', 'signedCount', 'unsignedCount']) {
+for (const field of ['deliverySuccessCount', 'deliveryFailedCount', 'signedCount']) {
   assert.match(app, new RegExp(`item\\.${field}`), `批次列表缺少统计字段：${field}`);
 }
+assert.match(app, /data\.unsignedTotal/, '工资概览缺少全量待签收人数');
 assert.match(app, /item\.canWithdraw[\s\S]*data-withdraw-payroll=/,
   '工资条撤回入口必须受后端撤回资格控制');
 assert.match(app, /item\.withdrawBlockedReason/,

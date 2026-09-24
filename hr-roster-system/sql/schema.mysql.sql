@@ -726,6 +726,8 @@ CREATE TABLE salary_batch (
   batch_no VARCHAR(50) NOT NULL,
   salary_month CHAR(7) NOT NULL,
   payroll_type TINYINT NOT NULL DEFAULT 1 COMMENT '1计时 2计件 3混合',
+  source_type VARCHAR(20) NOT NULL DEFAULT 'IMPORT' COMMENT 'IMPORT/ATTENDANCE_AUTO',
+  calculation_run_id BIGINT DEFAULT NULL COMMENT '自动工资计算批次',
   import_profile_id BIGINT DEFAULT NULL COMMENT '导入字段映射ID',
   source_sheet_name VARCHAR(100) DEFAULT NULL COMMENT '原工资表工作表名称',
   employee_view_enabled TINYINT NOT NULL DEFAULT 1 COMMENT '员工端是否允许查看工资条',
@@ -739,6 +741,7 @@ CREATE TABLE salary_batch (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_company_batch_no (company_id, batch_no),
+  UNIQUE KEY uk_salary_batch_calculation_run (company_id, calculation_run_id),
   INDEX idx_company_month (company_id, salary_month)
 ) COMMENT='工资批次';
 
@@ -942,6 +945,63 @@ CREATE TABLE attendance_project_geofence (
   KEY idx_attendance_project_geofence_lookup (company_id, project_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目与客户围栏关联';
 
+CREATE TABLE attendance_project_shift_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  project_rule_id BIGINT NOT NULL,
+  shift_type VARCHAR(10) NOT NULL,
+  work_start_time TIME NOT NULL,
+  work_end_time TIME NOT NULL,
+  rest_start_time TIME DEFAULT NULL,
+  rest_end_time TIME DEFAULT NULL,
+  standard_minutes SMALLINT UNSIGNED NOT NULL,
+  hourly_rate DECIMAL(10,2) DEFAULT NULL,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_project_shift_type (company_id, project_rule_id, shift_type),
+  KEY idx_attendance_project_shift_lookup (company_id, project_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目白班夜班规则';
+
+CREATE TABLE attendance_allowance_rules (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  project_rule_id BIGINT NOT NULL,
+  allowance_name VARCHAR(80) NOT NULL,
+  shift_scope VARCHAR(10) NOT NULL,
+  calculation_type VARCHAR(20) NOT NULL,
+  unit_amount DECIMAL(10,2) NOT NULL,
+  sort_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_attendance_allowance_rule (company_id, project_rule_id, allowance_name, shift_scope),
+  KEY idx_attendance_allowance_project (company_id, project_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='项目考勤工资补贴规则';
+
+CREATE TABLE employee_pay_profiles (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  employee_id BIGINT NOT NULL,
+  default_shift_type VARCHAR(10) NOT NULL,
+  settlement_mode VARCHAR(20) NOT NULL,
+  effective_from DATE NOT NULL,
+  status TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_by BIGINT DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_employee_pay_profile_effective (company_id, project_id, employee_id, effective_from),
+  KEY idx_employee_pay_profile_lookup (company_id, project_id, status, effective_from)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工项目计薪规则版本';
+
 CREATE TABLE attendance_geofences (
   id BIGINT PRIMARY KEY AUTO_INCREMENT,
   company_id BIGINT NOT NULL,
@@ -988,6 +1048,8 @@ CREATE TABLE attendance_schedules (
   shift_date DATE NOT NULL,
   shift_rule_id BIGINT DEFAULT NULL,
   project_rule_id BIGINT DEFAULT NULL,
+  shift_type VARCHAR(10) DEFAULT NULL,
+  project_shift_rule_id BIGINT DEFAULT NULL,
   schedule_status VARCHAR(20) NOT NULL DEFAULT 'WORK',
   created_by BIGINT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1068,3 +1130,71 @@ CREATE TABLE attendance_correction_requests (
   UNIQUE KEY uk_attendance_correction_punch (company_id, punch_id, request_type),
   KEY idx_attendance_correction_status (company_id, status, shift_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤异常申请与审核';
+
+CREATE TABLE wage_calculation_runs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  salary_month CHAR(7) NOT NULL,
+  revision_no INT UNSIGNED NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  salary_batch_id BIGINT DEFAULT NULL,
+  total_earned DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_daily_paid DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_payable DECIMAL(14,2) NOT NULL DEFAULT 0,
+  blocked_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_by BIGINT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  confirmed_by BIGINT DEFAULT NULL,
+  confirmed_at DATETIME DEFAULT NULL,
+  UNIQUE KEY uk_wage_run_revision (company_id, project_id, salary_month, revision_no),
+  KEY idx_wage_run_lookup (company_id, project_id, salary_month, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤工资计算批次';
+
+CREATE TABLE wage_calculation_daily_lines (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  run_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  attendance_result_id BIGINT DEFAULT NULL,
+  project_rule_id BIGINT DEFAULT NULL,
+  project_shift_rule_id BIGINT DEFAULT NULL,
+  shift_type VARCHAR(10) DEFAULT NULL,
+  settlement_mode VARCHAR(20) NOT NULL,
+  worked_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  approved_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  payable_minutes INT UNSIGNED NOT NULL DEFAULT 0,
+  hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
+  base_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  allowance_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  earned_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  daily_paid_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  payable_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  allowance_snapshot JSON DEFAULT NULL,
+  calculation_status VARCHAR(20) NOT NULL,
+  blocked_reason VARCHAR(255) DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_wage_daily_line (run_id, employee_id, shift_date),
+  KEY idx_wage_daily_employee (company_id, project_id, employee_id, shift_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工每日工资计算快照';
+
+CREATE TABLE wage_daily_payments (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  remark VARCHAR(255) DEFAULT NULL,
+  paid_by BIGINT NOT NULL,
+  paid_at DATETIME NOT NULL,
+  revoked_by BIGINT DEFAULT NULL,
+  revoked_at DATETIME DEFAULT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_wage_daily_payment (company_id, project_id, employee_id, shift_date),
+  KEY idx_wage_daily_payment_status (company_id, project_id, shift_date, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工日结支付状态';

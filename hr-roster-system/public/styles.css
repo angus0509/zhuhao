@@ -794,6 +794,9 @@ button {
 .payroll-record-filters label { min-width: 155px; color: #607985; font-size: 11px; font-weight: 700; }
 .payroll-record-filters input,.payroll-record-filters select { width: 100%; min-height: 40px; margin-top: 5px; border: 1px solid #cbdbe2; border-radius: 6px; background: #f9fbfc; }
 .payroll-record-groups { display: grid; gap: 18px; }
+.payroll-record-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; margin-top: 16px; color: #607985; font-size: 12px; }
+.payroll-record-pagination button { width: 36px; height: 36px; border: 1px solid #cbdbe2; border-radius: 6px; color: #0b6675; background: #fff; font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+.payroll-record-pagination button:disabled { color: #9cabb2; background: #f2f5f6; cursor: not-allowed; }
 .payroll-record-month { display: grid; grid-template-columns: 100px minmax(0,1fr); gap: 12px; }
 .payroll-record-month-head { padding: 13px 8px; border-top: 3px solid #0b7785; color: #173c4f; }
 .payroll-record-month-head strong,.payroll-record-month-head span { display: block; }
@@ -1028,9 +1031,6 @@ button {
 .payroll-amount-pair,.payroll-channel-stack,.payroll-receipt-stack,.payroll-time-cell { display: grid; align-content: start; gap: 6px; }
 .payroll-amount-pair strong { color: #0c6675; font-size: 14px; }
 .payroll-amount-pair small,.payroll-time-cell small { color: #7a8d9c; }
-.payroll-amount-warning { margin-top: 7px; color: #a44f08; font-size: 11px; }
-.payroll-amount-warning summary { width: max-content; padding: 3px 7px; border: 1px solid #efc078; border-radius: 999px; background: #fff6e7; font-weight: 700; cursor: pointer; }
-.payroll-amount-warning ul { margin: 6px 0 0; padding-left: 17px; line-height: 1.45; }
 .payroll-items-detail summary { cursor: pointer; color: #0c6675; font-weight: 600; font-size: 12px; }
 .payroll-items-list { margin-top: 6px; max-height: 260px; overflow-y: auto; border: 1px solid #e7eef1; border-radius: 6px; background: #fbfdfe; }
 .payroll-item-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 10px; border-bottom: 1px solid #eef3f5; font-size: 12px; }

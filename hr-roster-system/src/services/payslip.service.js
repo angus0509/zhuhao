@@ -3,6 +3,7 @@ const db = require('../db');
 const env = require('../config/env');
 const { createError } = require('../utils/response');
 const { paging } = require('../utils/pagination');
+const { isSensitiveLabel } = require('./payroll-item-snapshot.service');
 
 function employeeIdFromUser(user) {
   const employeeId = Number(user?.employeeId || 0);
@@ -40,7 +41,6 @@ function parseDynamicItems(value) {
     }
   }
   if (!Array.isArray(source)) return [];
-  const sensitiveLabel = /(?:姓名|工号|员工编号|人员编号|身份证|证件号|手机号|手机号码|联系电话|银行卡|银行账号|卡号)/;
   const categories = new Set(['income', 'deduction', 'summary', 'display']);
   const monetary = new Set(['income', 'deduction', 'summary']);
   const seenSortOrders = new Set();
@@ -48,7 +48,7 @@ function parseDynamicItems(value) {
     const label = String(item?.label || '').trim();
     const category = String(item?.category || '').trim();
     const sortOrder = Number(item?.sortOrder);
-    if (!label || label.length > 50 || sensitiveLabel.test(label) || !categories.has(category)) return [];
+    if (!label || label.length > 50 || isSensitiveLabel(label) || !categories.has(category)) return [];
     if (!Number.isInteger(sortOrder) || sortOrder <= 0 || seenSortOrders.has(sortOrder)) return [];
     let itemValue;
     if (monetary.has(category)) {

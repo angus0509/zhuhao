@@ -1606,6 +1606,36 @@ async function terminateEmployerInsuranceForResignation(connection, {
   return { covered: true, terminated: true };
 }
 
+async function ensureInternalDepartment(connection, companyId) {
+  const deptName = '未分部门（系统）';
+  const deptCode = 'SYSTEM_UNASSIGNED';
+  const [[company]] = await connection.execute(
+    'SELECT id FROM hr_company WHERE id=:companyId AND status=1 LIMIT 1 FOR UPDATE',
+    { companyId }
+  );
+  if (!company) throw createError('企业不存在或已停用');
+  const [[department]] = await connection.execute(
+    'SELECT id,status FROM hr_department WHERE company_id=:companyId AND dept_code=:deptCode ORDER BY id LIMIT 1',
+    { companyId, deptCode }
+  );
+  if (department) {
+    if (Number(department.status) !== 1) {
+      await connection.execute(
+        'UPDATE hr_department SET status=1,dept_name=:deptName,sort_no=9999 WHERE company_id=:companyId AND id=:deptId',
+        { companyId, deptId: department.id, deptName }
+      );
+    }
+    return Number(department.id);
+  }
+  const [created] = await connection.execute(
+    `INSERT INTO hr_department
+      (company_id,parent_id,dept_name,dept_code,sort_no,status)
+      VALUES (:companyId,0,:deptName,:deptCode,9999,1)`,
+    { companyId, deptName, deptCode }
+  );
+  return Number(created.insertId);
+}
+
 async function createEmployee(companyId, body, operatorId = 0, user = null, options = {}) {
   const requestedEmployeeStatus = body.employeeStatus === undefined || body.employeeStatus === null || body.employeeStatus === ''
     ? 1
@@ -1618,16 +1648,14 @@ async function createEmployee(companyId, body, operatorId = 0, user = null, opti
     throw createError('新增员工只能选择面试或直接入职');
   }
   return db.transaction(async connection => {
-    const [[defaultDept]] = await connection.execute(
-      'SELECT id FROM hr_department WHERE company_id=:companyId AND status=1 ORDER BY sort_no,id LIMIT 1', { companyId }
-    );
+    const internalDeptId = await ensureInternalDepartment(connection, companyId);
     // 所有客户端缺省均进入待入职；6 为面试简登状态。
     const employeeStatus = requestedEmployeeStatus;
     let normalizedBody = {
       ...normalizeRecruitmentChannel(body),
       employeeStatus,
       employeeNo: body.employeeNo || buildInternalEmployeeNo(),
-      deptId: body.deptId || defaultDept?.id
+      deptId: internalDeptId
     };
     normalizedBody = await resolveRecruitmentChannel(companyId, normalizedBody, operatorId, connection);
     await assertNewEmployeeScope(companyId, normalizedBody, user, connection);
@@ -1863,6 +1891,10 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
       { companyId, employeeId }
     );
     if (!employee) throw createError('员工不存在', 404);
+    const internalDeptId = [3, 5].includes(Number(employee.employee_status))
+      || Number(currentJobForDept?.job_status) !== 1
+      ? await ensureInternalDepartment(connection, companyId)
+      : null;
     const canViewSensitiveEmployee = user?.permissions?.includes('employee:sensitive:view');
     const sensitiveBody = resolveSensitiveEmployeeFields(employee, body, canViewSensitiveEmployee);
     let normalizedBody = {
@@ -1870,7 +1902,8 @@ async function updateEmployee(companyId, employeeId, body, operatorId = 0, user 
       ...sensitiveBody,
       employeeStatus: Number(employee.employee_status),
       employeeNo: employee.employee_no,
-      deptId: Number(body.deptId || currentJobForDept?.dept_id || 0) || null
+      // 离职/未入职员工重新派驻时不能沿用可能已停用的历史部门。
+      deptId: internalDeptId || Number(body.deptId || currentJobForDept?.dept_id || 0) || null
     };
     normalizedBody = await resolveRecruitmentChannel(companyId, normalizedBody, operatorId, connection);
     const ownsUnassignedLegacyEmployee = Number(user?.dataScope) === 5
@@ -3106,10 +3139,11 @@ module.exports = {
   resolveSensitiveEmployeeFields,
   linkExistingTalentToEmployee,
   syncEmployeeToTalent,
-  buildInternalEmployeeNo
-  ,precheckEmployee
-  ,validateRecruitmentSource
-  ,handleTransfer
-  ,updateResignationProgress
-  ,reactivateEmployee
+  buildInternalEmployeeNo,
+  ensureInternalDepartment,
+  precheckEmployee,
+  validateRecruitmentSource,
+  handleTransfer,
+  updateResignationProgress,
+  reactivateEmployee
 };

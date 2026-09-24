@@ -27,8 +27,8 @@ assert.match(app, /PayrollWorkbench\.countStatuses/, '工资条状态人数必�
 assert.match(app, /escapeHtml\(item\.employeeName\)/, '员工姓名必须转义后显示');
 assert.match(app, /item\.wechatBound\s*\?\s*'已绑定'/, '批次详情缺少微信绑定状态');
 assert.match(app, /item\.displayStatus/, '批次详情缺少员工工资条状态');
-assert.match(app, /item\.hasAmountWarning/, '批次详情缺少金额异常标识');
-assert.match(app, /item\.amountWarnings/, '批次详情缺少金额异常原因');
+assert.doesNotMatch(app, /item\.hasAmountWarning|item\.amountWarnings|金额异常/,
+  '批次详情不得保留金额异常提示或相关渲染逻辑');
 assert.match(app, /data-payroll-detail-page=/, '批次详情缺少分页操作');
 assert.match(app, /renderPayrollBatchEmployeeRows/, '批次员工明细必须支持重新筛选渲染');
 assert.match(app, /PayrollWorkbench\.filterRows/, '批次详情必须通过统一状态规则筛选员工');
@@ -39,7 +39,7 @@ assert.match(style, /\.payroll-detail-hero/);
 assert.match(style, /\.payroll-bind-state/);
 assert.match(style, /\.payroll-workbench-toolbar/);
 assert.match(style, /\.payroll-status-tabs/);
-assert.match(style, /\.payroll-amount-warning/);
+assert.doesNotMatch(style, /\.payroll-amount-warning/, '金额异常提示样式应一并移除');
 assert.match(
   style,
   /\.modal\.payroll-workbench-modal\s*\{[^}]*width:\s*min\(1480px,\s*calc\(100vw\s*-\s*24px\)\)/s,

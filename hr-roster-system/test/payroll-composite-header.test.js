@@ -12,10 +12,10 @@ function main() {
   assert.equal(composite.headerRowCount, 2, '应识别双层表头');
   assert.equal(composite.rows[0].employeeNo, 'YG001');
   assert.equal(composite.rows[0].employeeName, '张三');
-  assert.equal(composite.rows[0].baseSalary, 2180, '基本工资应识别为基本工资而非应发合计');
-  assert.equal(composite.rows[0].positionSalary, 1000);
-  assert.equal(composite.rows[0].socialDeduction, 500);
-  assert.equal(composite.rows[0].grossAmount, 3180, '应发合计由收入明细汇总');
+  assert.deepEqual(composite.rows[0].itemSnapshot.map(item => [item.label, item.value]), [
+    ['基本工资', '2180'], ['岗位工资', '1000'], ['社保', '500'], ['实发', '2680']
+  ]);
+  assert.equal(composite.rows[0].grossAmount, 0, '未上传明确应发工资时不得自动计算或补写');
   assert.equal(composite.rows[0].netAmount, 2680);
 
   // 2. 三层表头：叶子行是完整别名，上层分组名不干扰字段识别
@@ -27,12 +27,9 @@ function main() {
   ]);
   assert.equal(three.rows[0].employeeNo, 'YG002');
   assert.equal(three.rows[0].employeeName, '李四');
-  assert.equal(three.rows[0].baseSalary, 2180);
-  assert.equal(three.rows[0].positionSalary, 1000);
-  assert.equal(three.rows[0].performanceSalary, 820);
-  assert.equal(three.rows[0].allowanceAmount, 300);
-  assert.equal(three.rows[0].socialDeduction, 500);
-  assert.equal(three.rows[0].taxDeduction, 90);
+  assert.deepEqual(three.rows[0].itemSnapshot.map(item => item.label),
+    ['基本工资', '岗位工资', '绩效工资', '补贴', '社保', '个税', '预支']);
+  assert.ok(three.rows[0].itemSnapshot.every(item => item.category === 'display'));
 
   // 3. 底行单位行「元」应被跳过，不进入字段识别
   const unit = parser.parseFlexiblePayrollRows([
@@ -41,7 +38,7 @@ function main() {
     ['张三', '4000', '3700']
   ]);
   assert.equal(unit.rows[0].employeeName, '张三');
-  assert.equal(unit.rows[0].baseSalary, 4000);
+  assert.equal(unit.rows[0].itemSnapshot[0].value, '4000');
 
   console.log('payroll-composite-header-tests-ok');
 }

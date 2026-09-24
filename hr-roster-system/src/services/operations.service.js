@@ -629,8 +629,54 @@ async function payAdvance(companyId, advanceId, operatorId, user) {
   return { advanceId };
 }
 
-async function payrollOverview(companyId, user) {
-  const params = { companyId };
+async function payrollOverview(companyId, user, query = {}) {
+  const requested = paging(query, { defaultPageSize: 20, maxPageSize: 50 });
+  const salaryMonth = String(query.salaryMonth || '').trim();
+  if (salaryMonth && !/^\d{4}-(0[1-9]|1[0-2])$/.test(salaryMonth)) {
+    throw createError('工资月份格式不正确');
+  }
+  const status = String(query.status || 'all').trim().toLowerCase();
+  const allowedStatuses = new Set(['all', 'published', 'pending', 'failed', 'unsigned', 'unread']);
+  if (!allowedStatuses.has(status)) throw createError('工资批次筛选状态无效');
+  const params = {
+    companyId,
+    pageSize: requested.pageSize,
+    offset: requested.offset,
+    salaryMonth,
+    status
+  };
+  const batchFilters = [];
+  if (salaryMonth) batchFilters.push('b.salary_month = :salaryMonth');
+  if (status === 'published') batchFilters.push('b.batch_status=5');
+  if (status === 'pending') batchFilters.push('b.batch_status IN (1,2,3,4)');
+  if (status === 'failed') {
+    batchFilters.push(`b.batch_status=5 AND EXISTS(
+      SELECT 1 FROM salary_detail failed_detail
+      WHERE failed_detail.company_id=b.company_id AND failed_detail.batch_id=b.id
+        AND failed_detail.receipt_status=0
+    )`);
+  }
+  if (status === 'unsigned') {
+    batchFilters.push(`b.batch_status=5 AND EXISTS(
+      SELECT 1 FROM salary_detail unsigned_detail
+      WHERE unsigned_detail.company_id=b.company_id AND unsigned_detail.batch_id=b.id
+        AND unsigned_detail.receipt_status=1
+    )`);
+  }
+  if (status === 'unread') {
+    batchFilters.push(`b.batch_status=5 AND EXISTS(
+      SELECT 1 FROM salary_detail unread_detail
+      WHERE unread_detail.company_id=b.company_id AND unread_detail.batch_id=b.id
+        AND NOT EXISTS(
+          SELECT 1 FROM salary_receipt_log unread_view
+          WHERE unread_view.company_id=unread_detail.company_id
+            AND unread_view.salary_detail_id=unread_detail.id
+            AND unread_view.employee_id=unread_detail.employee_id
+            AND unread_view.action_type='VIEW'
+        )
+    )`);
+  }
+  const batchFilterSql = batchFilters.length ? ` AND ${batchFilters.join(' AND ')}` : '';
   const projectFilter = projectScope(user, params, 'b_project');
   const summary = await db.first(
     `SELECT COUNT(*) batchCount,
@@ -655,6 +701,17 @@ async function payrollOverview(companyId, user) {
      LEFT JOIN labor_project d_project ON d_project.id = db_batch.project_id AND d_project.company_id = db_batch.company_id
      WHERE d.company_id = :companyId AND db_batch.batch_status=5 ${projectScope(user, params, 'd_project')}`, params
   );
+  const filteredSummary = await db.first(
+    `SELECT COUNT(*) filteredBatchCount
+     FROM salary_batch b
+     LEFT JOIN labor_project b_project ON b_project.id=b.project_id AND b_project.company_id=b.company_id
+     WHERE b.company_id=:companyId ${projectScope(user, params, 'b_project')}${batchFilterSql}`,
+    params
+  );
+  const pageSize = requested.pageSize;
+  const total = Number(filteredSummary.filteredBatchCount || 0);
+  const page = Math.min(requested.page, Math.max(1, Math.ceil(total / pageSize)));
+  params.offset = (page - 1) * pageSize;
   const batches = await db.query(
     `SELECT b.id, b.batch_no batchNo, b.salary_month salaryMonth, b.payroll_type payrollType,
             b.batch_status batchStatus, b.total_gross grossTotal, b.total_net netTotal,
@@ -690,8 +747,9 @@ async function payrollOverview(companyId, user) {
      FROM salary_batch b
      LEFT JOIN labor_project p ON p.id = b.project_id AND p.company_id = b.company_id
      LEFT JOIN salary_detail d ON d.batch_id = b.id AND d.company_id = b.company_id
-     WHERE b.company_id = :companyId ${projectScope(user, params, 'p')}
-     GROUP BY b.id, p.project_name ORDER BY b.salary_month DESC, b.id DESC LIMIT 20`, params
+     WHERE b.company_id = :companyId ${projectScope(user, params, 'p')}${batchFilterSql}
+     GROUP BY b.id, p.project_name ORDER BY b.salary_month DESC, b.id DESC
+     LIMIT :pageSize OFFSET :offset`, params
   );
   const statusNames = { 1: '草稿', 2: '核算中', 3: '待复核', 4: '待发放', 5: '已发放', 6: '已归档' };
   function withdrawState(item) {
@@ -723,6 +781,9 @@ async function payrollOverview(companyId, user) {
     unsignedTotal: Number(publishedMetrics.unsignedTotal || 0),
     pendingReceiptCount: Number(publishedMetrics.unsignedTotal || 0),
     pendingBatchCount: Number(summary.pendingBatchCount || 0),
+    page,
+    pageSize,
+    total,
     batches: batches.map(item => {
       const withdrawal = withdrawState(item);
       return {
@@ -926,33 +987,6 @@ function parseItemsForManager(value) {
   }
 }
 
-function payrollAmountWarnings(grossAmount, netAmount, items = []) {
-  const gross = Number(grossAmount || 0);
-  const net = Number(netAmount || 0);
-  const warnings = [];
-  if (net - gross > 0.01) {
-    warnings.push(`实发工资${net.toFixed(2)}超过应发工资${gross.toFixed(2)}`);
-  }
-
-  const incomeItems = items.filter(item => item?.category === 'income' && Number.isFinite(Number(item.value)));
-  if (incomeItems.length) {
-    const incomeTotal = incomeItems.reduce((sum, item) => sum + Number(item.value), 0);
-    if (Math.abs(gross - incomeTotal) > 0.01) {
-      warnings.push(`应发工资${gross.toFixed(2)}与收入明细合计${incomeTotal.toFixed(2)}不一致`);
-    }
-  }
-
-  const deductionItems = items.filter(item => item?.category === 'deduction' && Number.isFinite(Number(item.value)));
-  if (deductionItems.length) {
-    const deductionTotal = deductionItems.reduce((sum, item) => sum + Number(item.value), 0);
-    const expectedNet = gross - deductionTotal;
-    if (Math.abs(net - expectedNet) > 0.01) {
-      warnings.push(`实发工资${net.toFixed(2)}与应发工资减扣款明细${expectedNet.toFixed(2)}不一致`);
-    }
-  }
-  return [...new Set(warnings)];
-}
-
 async function getPayrollBatchDetail(companyId, batchId, query = {}, user) {
   const { page, pageSize, offset } = paging(query, { defaultPageSize: 20, maxPageSize: 100 });
   const params = { companyId, batchId: Number(batchId), pageSize, offset };
@@ -1068,7 +1102,6 @@ async function getPayrollBatchDetail(companyId, batchId, query = {}, user) {
     list: rows.map(item => {
       const { itemSnapshot, ...rest } = item;
       const items = parseItemsForManager(itemSnapshot);
-      const amountWarnings = payrollAmountWarnings(item.grossAmount, item.netAmount, items);
       return {
         ...rest,
         id: Number(item.id),
@@ -1076,8 +1109,6 @@ async function getPayrollBatchDetail(companyId, batchId, query = {}, user) {
         deptName: item.deptName || '',
         phoneMasked: maskPhone(item.phone),
         items,
-        hasAmountWarning: amountWarnings.length > 0,
-        amountWarnings,
         grossAmount: Number(item.grossAmount || 0),
         netAmount: Number(item.netAmount || 0),
         receiptStatus: Number(item.receiptStatus || 0),
@@ -1425,63 +1456,30 @@ function payrollAmount(value, fieldName) {
 }
 
 function normalizePayrollAmounts(row = {}) {
-  const warnings = [];
   const amounts = {
-    baseSalary: payrollAmount(row.baseSalary, '基本工资'),
-    positionSalary: payrollAmount(row.positionSalary, '岗位工资'),
-    performanceSalary: payrollAmount(row.performanceSalary, '绩效工资'),
-    allowanceAmount: payrollAmount(row.allowanceAmount, '补贴'),
-    pieceAmount: payrollAmount(row.pieceAmount, '计件工资'),
-    overtime15Amount: payrollAmount(row.overtime15Amount, '1.5倍加班费'),
-    overtime20Amount: payrollAmount(row.overtime20Amount, '2倍加班费'),
-    overtime30Amount: payrollAmount(row.overtime30Amount, '3倍加班费'),
-    socialDeduction: payrollAmount(row.socialDeduction, '社保扣款'),
-    taxDeduction: payrollAmount(row.taxDeduction, '个税扣款'),
-    advanceDeduction: payrollAmount(row.advanceDeduction, '预支扣回'),
-    otherDeduction: payrollAmount(row.otherDeduction, '其他扣款')
+    baseSalary: 0,
+    positionSalary: 0,
+    performanceSalary: 0,
+    allowanceAmount: 0,
+    pieceAmount: 0,
+    overtime15Amount: 0,
+    overtime20Amount: 0,
+    overtime30Amount: 0,
+    socialDeduction: 0,
+    taxDeduction: 0,
+    advanceDeduction: 0,
+    otherDeduction: 0
   };
-  const incomeFields = [
-    'baseSalary', 'positionSalary', 'performanceSalary', 'allowanceAmount',
-    'pieceAmount', 'overtime15Amount', 'overtime20Amount', 'overtime30Amount'
-  ];
-  let gross = incomeFields.reduce((sum, field) => sum + amounts[field], 0);
-  const incomeTotal = gross;
-  const importedGross = payrollAmount(row.grossAmount, '应发工资');
   const hasImportedGross = row.grossAmount !== undefined && row.grossAmount !== null
     && String(row.grossAmount).trim() !== '';
-  if (hasImportedGross) {
-    if (gross === 0 && importedGross > 0) amounts.baseSalary = importedGross;
-    else if (Math.abs(importedGross - incomeTotal) > 0.01) {
-      warnings.push(`应发工资${importedGross.toFixed(2)}与收入明细合计${incomeTotal.toFixed(2)}不一致，保留原表应发工资`);
-    }
-    gross = importedGross;
-  }
-  const deductions = amounts.socialDeduction + amounts.taxDeduction
-    + amounts.advanceDeduction + amounts.otherDeduction;
   const hasImportedNet = row.netAmount !== undefined && row.netAmount !== null && String(row.netAmount).trim() !== '';
-  let netAmount = Math.round((gross - deductions) * 100) / 100;
-  if (hasImportedNet) {
-    const importedNet = payrollAmount(row.netAmount, '实发工资');
-    netAmount = importedNet;
-    if (importedNet > gross) warnings.push('实发工资不能超过应发工资，保留原表金额');
-    // 只有原表明确提供扣款明细时才核对“应发 - 扣款 = 实发”。
-    // 仅有应发/实发两列的项目可能把其他扣款、考勤或四舍五入合并在实发中，
-    // 不能因为缺少明细就把正确的原表金额标成异常。
-    if (deductions > 0) {
-      const missingDeduction = Math.round((gross - importedNet - deductions) * 100) / 100;
-      if (missingDeduction > 0) {
-        warnings.push(`应发与实发相差${missingDeduction.toFixed(2)}，原表未列明对应扣款，保留原表金额`);
-      } else if (missingDeduction < -0.01 && importedNet <= gross) {
-        warnings.push('实发工资与应发工资、扣款明细无法对应，保留原表金额');
-      }
-    }
-  }
-  if (deductions > gross) warnings.push('扣款合计不能超过应发工资，保留原表金额');
+  const grossAmount = hasImportedGross ? payrollAmount(row.grossAmount, '应发工资') : 0;
+  const netAmount = hasImportedNet ? payrollAmount(row.netAmount, '实发工资') : 0;
   return {
     amounts,
-    grossAmount: Math.round(gross * 100) / 100,
+    grossAmount,
     netAmount,
-    warnings: [...new Set(warnings)]
+    warnings: []
   };
 }
 
@@ -1495,10 +1493,11 @@ const payrollAdvisoryPatterns = [
 
 function classifyPayrollImportMessages(row = {}) {
   const errors = [];
-  const warnings = Array.isArray(row.warnings) ? row.warnings.map(String).filter(Boolean) : [];
+  const warnings = Array.isArray(row.warnings)
+    ? row.warnings.map(String).filter(message => message && !payrollAdvisoryPatterns.some(pattern => pattern.test(message)))
+    : [];
   for (const message of Array.isArray(row.errors) ? row.errors.map(String).filter(Boolean) : []) {
-    if (payrollAdvisoryPatterns.some(pattern => pattern.test(message))) warnings.push(message);
-    else errors.push(message);
+    if (!payrollAdvisoryPatterns.some(pattern => pattern.test(message))) errors.push(message);
   }
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
 }
@@ -1516,8 +1515,12 @@ function normalizePayrollImportMetadata(body = {}) {
 function assertDynamicNetMatches(itemSnapshot, mapping, netAmount) {
   const netMapping = (mapping || []).find(item => item.target === 'netAmount' && item.includeInPayslip === true);
   if (!netMapping) return;
-  const netItem = itemSnapshot.find(item => item.label === netMapping.sourceHeader && item.category === 'summary');
-  if (!netItem || Math.abs(Number(netItem.value) - Number(netAmount)) > 0.01) {
+  const netItem = itemSnapshot.slice().reverse().find(item => item.label === netMapping.sourceHeader);
+  const snapshotNet = Number(String(netItem?.value ?? '')
+    .replace(/^\s*(?:RMB|CNY)\s*/i, '')
+    .replace(/[￥¥,，\s]/g, '')
+    .replace(/(?:人民币|元|RMB|CNY)$/i, ''));
+  if (!netItem || !Number.isFinite(snapshotNet) || Math.abs(snapshotNet - Number(netAmount)) > 0.01) {
     throw createError('动态工资项目中的实发工资与系统核算结果不一致');
   }
 }
@@ -1655,13 +1658,6 @@ async function createPayrollBatch(companyId, body, operatorId, user) {
   if (!project) throw createError('项目不存在或无项目权限', 403);
 
   return db.transaction(async connection => {
-    const [[existing]] = await connection.execute(
-      `SELECT id FROM salary_batch
-       WHERE company_id=:companyId AND project_id=:projectId AND salary_month=:salaryMonth AND batch_status IN (1,2,3,4) LIMIT 1`,
-      { companyId, projectId: project.id, salaryMonth: body.salaryMonth }
-    );
-    if (existing) throw createError('该项目本月存在进行中的工资批次，请先完成发放或归档后再新增');
-
     const hasImportProfile = importMetadata !== null;
     let importProfileId = null;
     if (hasImportProfile) {
@@ -1683,7 +1679,7 @@ async function createPayrollBatch(companyId, body, operatorId, user) {
       `INSERT INTO salary_batch
        (company_id,project_id,batch_no,salary_month,payroll_type,batch_status,total_gross,total_net,
         import_profile_id,source_sheet_name,employee_view_enabled,view_once,view_expires_minutes,created_by)
-       VALUES (:companyId,:projectId,:batchNo,:salaryMonth,:payrollType,1,0,0,
+       VALUES (:companyId,:projectId,:batchNo,:salaryMonth,:payrollType,3,0,0,
         :importProfileId,:sourceSheetName,:employeeViewEnabled,:viewOnce,:viewExpiresMinutes,:operatorId)`,
       {
         companyId,
@@ -1764,7 +1760,7 @@ async function createPayrollBatch(companyId, body, operatorId, user) {
     await connection.execute(
       `INSERT INTO hr_operation_log
        (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'create',:afterData)`,
+       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'upload_submit_review',:afterData)`,
       {
         companyId,
         operatorId,
@@ -1779,7 +1775,13 @@ async function createPayrollBatch(companyId, body, operatorId, user) {
         })
       }
     );
-    return { batchId: batchResult.insertId, batchNo, employeeCount: seenEmployees.size };
+    return {
+      batchId: batchResult.insertId,
+      batchNo,
+      batchStatus: 3,
+      statusName: payrollBatchStatusName(3),
+      employeeCount: seenEmployees.size
+    };
   });
 }
 
@@ -1828,23 +1830,11 @@ async function updatePayrollViewPolicy(companyId, batchId, body = {}, operatorId
   });
 }
 
-async function publishPayrollBatch(companyId, batchId, operatorId, user) {
-  const params = { companyId, batchId };
-  const batch = await db.first(
-    `SELECT b.id,b.project_id,b.batch_status,b.total_net,b.salary_month
-     FROM salary_batch b JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
-     WHERE b.company_id=:companyId AND b.id=:batchId ${projectScope(user, params, 'p')}`,
-    params
-  );
-  if (!batch) throw createError('工资批次不存在或无项目权限', 403);
-  if (Number(batch.batch_status) !== 4) throw createError('工资批次必须复核通过并处于待发放状态后才能发布');
-  if (Number(batch.total_net) <= 0) throw createError('实发工资合计必须大于0');
-
-  return db.transaction(async connection => {
+async function finalizePayrollPublication(connection, { companyId, batchId, batch, operatorId, fromStatus, actionType }) {
     const [updateResult] = await connection.execute(
       `UPDATE salary_batch SET batch_status=5,paid_at=NOW(),updated_at=NOW()
-       WHERE company_id=:companyId AND id=:batchId AND batch_status=4`,
-      { companyId, batchId }
+       WHERE company_id=:companyId AND id=:batchId AND batch_status=:fromStatus`,
+      { companyId, batchId, fromStatus }
     );
     if (!updateResult.affectedRows) throw createError('工资批次状态已变化，请刷新后重试');
     await connection.execute(
@@ -1855,8 +1845,8 @@ async function publishPayrollBatch(companyId, batchId, operatorId, user) {
     await connection.execute(
       `INSERT INTO hr_operation_log
        (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'publish',JSON_OBJECT('status',5))`,
-      { companyId, operatorId, batchId }
+       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,:actionType,JSON_OBJECT('status',5))`,
+      { companyId, operatorId, batchId, actionType }
     );
     await noticeService.createNotice(connection, {
       companyId,
@@ -1888,6 +1878,29 @@ async function publishPayrollBatch(companyId, batchId, operatorId, user) {
       smsSkippedNoPhone: sms.skippedNoPhone,
       officialQueued: official.queued
     };
+}
+
+async function publishPayrollBatch(companyId, batchId, operatorId, user) {
+  const params = { companyId, batchId };
+  return db.transaction(async connection => {
+    const [[batch]] = await connection.execute(
+      `SELECT b.id,b.project_id,b.batch_status,b.total_net,b.salary_month
+       FROM salary_batch b JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+       WHERE b.company_id=:companyId AND b.id=:batchId ${projectScope(user, params, 'p')}
+       LIMIT 1 FOR UPDATE`,
+      params
+    );
+    if (!batch) throw createError('工资批次不存在或无项目权限', 403);
+    if (Number(batch.batch_status) !== 4) throw createError('仅历史待发放工资批次可以单独发布');
+    if (Number(batch.total_net) <= 0) throw createError('实发工资合计必须大于0');
+    return finalizePayrollPublication(connection, {
+      companyId,
+      batchId,
+      batch,
+      operatorId,
+      fromStatus: 4,
+      actionType: 'publish'
+    });
   });
 }
 
@@ -1964,6 +1977,16 @@ async function withdrawPayrollBatch(companyId, batchId, body = {}, operatorId, u
       params
     );
     await connection.execute(
+      `UPDATE wechat_official_notification_job
+       SET error_summary=LEFT(CONCAT('工资条已撤回；原状态：',delivery_status,
+             CASE WHEN error_summary IS NULL OR error_summary='' THEN '' ELSE CONCAT('；',error_summary) END),255),
+           dedupe_key=CONCAT(LEFT(dedupe_key,145),':WITHDRAWN:',id),
+           delivery_status='CANCELLED',updated_at=NOW()
+       WHERE company_id=:companyId AND batch_id=:batchId
+         AND delivery_status IN ('PENDING','SENDING')`,
+      params
+    );
+    await connection.execute(
       `INSERT INTO hr_operation_log
        (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
        VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'withdraw',
@@ -1972,6 +1995,117 @@ async function withdrawPayrollBatch(companyId, batchId, body = {}, operatorId, u
       { ...params, salaryMonth: batch.salaryMonth }
     );
     return { batchId: normalizedBatchId, batchStatus: 4, statusName: payrollBatchStatusName(4) };
+  });
+}
+
+async function deletePayrollBatch(companyId, batchId, body = {}, operatorId, user) {
+  if (body.confirmed !== true) throw createError('请确认删除工资批次');
+  const reason = String(body.reason || '').trim();
+  if (reason.length < 5 || reason.length > 200) throw createError('删除原因需填写5至200字');
+  const normalizedBatchId = Number(batchId);
+  if (!Number.isSafeInteger(normalizedBatchId) || normalizedBatchId <= 0) throw createError('工资批次参数无效');
+  const params = { companyId, batchId: normalizedBatchId, reason, operatorId };
+  const scope = projectScope(user, params, 'p');
+
+  return db.transaction(async connection => {
+    const [batchRows] = await connection.execute(
+      `SELECT b.id,b.batch_status batchStatus,b.batch_no batchNo,b.salary_month salaryMonth,b.project_id projectId,
+              b.source_type sourceType,b.calculation_run_id calculationRunId,
+              EXISTS(
+                SELECT 1 FROM wage_calculation_runs wage_run
+                WHERE wage_run.company_id=b.company_id AND wage_run.salary_batch_id=b.id
+              ) wageRunLinked
+       FROM salary_batch b
+       JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+       WHERE b.company_id=:companyId AND b.id=:batchId ${scope}
+       LIMIT 1 FOR UPDATE`,
+      params
+    );
+    const batch = batchRows[0];
+    if (!batch) throw createError('工资批次不存在或无项目权限', 404);
+    if (![1, 4].includes(Number(batch.batchStatus))) {
+      throw createError('仅已退回或已撤回的工资批次可以删除');
+    }
+    if (batch.sourceType === 'ATTENDANCE_AUTO'
+      || Number(batch.calculationRunId || 0) > 0
+      || Number(batch.wageRunLinked || 0) > 0) {
+      throw createError('考勤自动算薪生成的工资批次不能删除，请在工资计算记录中处理', 409);
+    }
+
+    const [evidenceRows] = await connection.execute(
+      `SELECT COUNT(d.id) detailCount,
+         SUM(EXISTS(
+           SELECT 1 FROM salary_receipt_log receipt_log
+           WHERE receipt_log.company_id=d.company_id AND receipt_log.salary_detail_id=d.id
+             AND receipt_log.employee_id=d.employee_id
+         )) viewCount,
+         SUM(EXISTS(
+           SELECT 1 FROM salary_signature signature
+           WHERE signature.company_id=d.company_id AND signature.salary_detail_id=d.id
+             AND signature.employee_id=d.employee_id
+         )) signatureCount,
+         SUM(d.receipt_status IN (1,2,3)) receiptCount,
+         SUM(EXISTS(
+           SELECT 1 FROM salary_dispute dispute
+           WHERE dispute.company_id=d.company_id AND dispute.salary_detail_id=d.id
+             AND dispute.employee_id=d.employee_id
+         )) disputeCount
+       FROM salary_detail d
+       WHERE d.company_id=:companyId AND d.batch_id=:batchId`,
+      params
+    );
+    const evidence = evidenceRows[0] || {};
+    if (Number(evidence.viewCount || 0) > 0
+      || Number(evidence.signatureCount || 0) > 0
+      || Number(evidence.receiptCount || 0) > 0
+      || Number(evidence.disputeCount || 0) > 0) {
+      throw createError('已有员工查看、签名、签收或提交异议，不能删除工资批次', 409);
+    }
+
+    await connection.execute(
+      `UPDATE sms_delivery_job
+       SET error_summary=CASE WHEN delivery_status IN ('PENDING','SENDING')
+             THEN LEFT(CONCAT('工资批次已删除；',COALESCE(error_summary,'')),255) ELSE error_summary END,
+           delivery_status=CASE WHEN delivery_status IN ('PENDING','SENDING') THEN 'CANCELLED' ELSE delivery_status END,
+           batch_id=NULL,payslip_id=NULL,updated_at=NOW()
+       WHERE company_id=:companyId AND batch_id=:batchId`,
+      params
+    );
+    await connection.execute(
+      `UPDATE wechat_official_notification_job
+       SET error_summary=CASE WHEN delivery_status IN ('PENDING','SENDING')
+             THEN LEFT(CONCAT('工资批次已删除；',COALESCE(error_summary,'')),255) ELSE error_summary END,
+           delivery_status=CASE WHEN delivery_status IN ('PENDING','SENDING') THEN 'CANCELLED' ELSE delivery_status END,
+           batch_id=NULL,payslip_id=NULL,updated_at=NOW()
+       WHERE company_id=:companyId AND batch_id=:batchId`,
+      params
+    );
+    await connection.execute(
+      'DELETE FROM salary_detail WHERE company_id=:companyId AND batch_id=:batchId',
+      params
+    );
+    const [batchDelete] = await connection.execute(
+      'DELETE FROM salary_batch WHERE company_id=:companyId AND id=:batchId AND batch_status IN (1,4)',
+      params
+    );
+    if (!batchDelete.affectedRows) throw createError('工资批次状态已变化，请刷新后重试', 409);
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,before_data,after_data)
+       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'delete',
+         JSON_OBJECT('batchNo',:batchNo,'salaryMonth',:salaryMonth,'projectId',:projectId,
+           'status',:batchStatus,'employeeCount',:employeeCount),
+         JSON_OBJECT('deleted',TRUE,'reason',:reason))`,
+      {
+        ...params,
+        batchNo: batch.batchNo,
+        salaryMonth: batch.salaryMonth,
+        projectId: batch.projectId,
+        batchStatus: Number(batch.batchStatus),
+        employeeCount: Number(evidence.detailCount || 0)
+      }
+    );
+    return { batchId: normalizedBatchId, deleted: true };
   });
 }
 
@@ -2017,35 +2151,50 @@ async function submitPayrollBatch(companyId, batchId, operatorId, user) {
 
 async function reviewPayrollBatch(companyId, batchId, body, operatorId, user) {
   const approved = Number(body.approved) === 1 || body.approved === true;
-  const targetStatus = approved ? 4 : 1;
   if (!approved && !String(body.remark || '').trim()) throw createError('退回工资批次时必须填写原因');
   const params = { companyId, batchId };
-  const batch = await db.first(
-    `SELECT b.id,b.batch_status FROM salary_batch b
-     JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
-     WHERE b.company_id=:companyId AND b.id=:batchId ${projectScope(user, params, 'p')}`,
-    params
-  );
-  if (!batch) throw createError('工资批次不存在或无项目权限', 403);
-  if (Number(batch.batch_status) !== 3) throw createError('仅待复核工资批次可执行复核');
-  const result = await db.query(
-    'UPDATE salary_batch SET batch_status=:targetStatus,updated_at=NOW() WHERE company_id=:companyId AND id=:batchId AND batch_status=3',
-    { companyId, batchId, targetStatus }
-  );
-  if (!result.affectedRows) throw createError('工资批次状态已变化，请刷新后重试');
-  await db.query(
-    `INSERT INTO hr_operation_log
-     (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-     VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,:actionType,:afterData)`,
-    {
+  return db.transaction(async connection => {
+    const [[batch]] = await connection.execute(
+      `SELECT b.id,b.project_id,b.batch_status,b.total_net,b.salary_month
+       FROM salary_batch b
+       JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+       WHERE b.company_id=:companyId AND b.id=:batchId ${projectScope(user, params, 'p')}
+       LIMIT 1 FOR UPDATE`,
+      params
+    );
+    if (!batch) throw createError('工资批次不存在或无项目权限', 403);
+    if (Number(batch.batch_status) !== 3) throw createError('仅待复核工资批次可执行复核');
+    if (approved) {
+      if (Number(batch.total_net) <= 0) throw createError('实发工资合计必须大于0');
+      const published = await finalizePayrollPublication(connection, {
+        companyId,
+        batchId,
+        batch,
+        operatorId,
+        fromStatus: 3,
+        actionType: 'review_publish'
+      });
+      return { ...published, batchStatus: 5, statusName: payrollBatchStatusName(5) };
+    }
+
+    const [result] = await connection.execute(
+      'UPDATE salary_batch SET batch_status=1,updated_at=NOW() WHERE company_id=:companyId AND id=:batchId AND batch_status=3',
+      { companyId, batchId }
+    );
+    if (!result.affectedRows) throw createError('工资批次状态已变化，请刷新后重试');
+    await connection.execute(
+      `INSERT INTO hr_operation_log
+       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+       VALUES (:companyId,:operatorId,'工资管理','salary_batch',:batchId,'review_rejected',:afterData)`,
+      {
       companyId,
       operatorId,
       batchId,
-      actionType: approved ? 'review_approved' : 'review_rejected',
-      afterData: JSON.stringify({ status: targetStatus, remark: String(body.remark || '').trim() })
-    }
-  );
-  return { batchId, batchStatus: targetStatus };
+        afterData: JSON.stringify({ status: 1, remark: String(body.remark || '').trim() })
+      }
+    );
+    return { batchId, batchStatus: 1, statusName: payrollBatchStatusName(1) };
+  });
 }
 
 async function operationsHome(companyId, user) {
@@ -2219,8 +2368,8 @@ module.exports = {
   listCustomers, createCustomer, getCustomerDetail, updateCustomerPortfolio,
   listProjects, createProject, listFactoryStaff, createFactoryStaff,
   listBlacklist, createBlacklist, createBlacklistBatch, listAdvances, createAdvance, approveAdvance, payAdvance,
-  payrollOverview, listPayrollDisputes, handlePayrollDispute, getPayrollBatchDetail, exportPayrollBatchCsv, exportPayrollReceiptPdf, previewPayrollBatch, payrollAmountWarnings,
-  createPayrollBatch, updatePayrollViewPolicy, normalizePayslipViewPolicy, submitPayrollBatch, reviewPayrollBatch, publishPayrollBatch, withdrawPayrollBatch,
+  payrollOverview, listPayrollDisputes, handlePayrollDispute, getPayrollBatchDetail, exportPayrollBatchCsv, exportPayrollReceiptPdf, previewPayrollBatch,
+  createPayrollBatch, updatePayrollViewPolicy, normalizePayslipViewPolicy, submitPayrollBatch, reviewPayrollBatch, publishPayrollBatch, withdrawPayrollBatch, deletePayrollBatch,
   getPayrollSmsSummary, createPayrollSmsReminders, retryPayrollSms,
   operationsHome, listNotices, permissionOverview, createSystemUser
 };

@@ -28,6 +28,15 @@ WHERE e.employee_status=2 AND e.deleted_at IS NULL
       AND existing.source_id=e.id
       AND existing.task_status IN (0,1)
   )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM hr_work_task archived
+    WHERE archived.company_id=e.company_id
+      AND archived.employee_id=e.id
+      AND archived.task_type='ONBOARDING_COMPLIANCE'
+      AND archived.source_type='LEGACY_CLOSED'
+      AND archived.task_status=3
+  )
 GROUP BY e.company_id,e.id,j.project_id,e.name,e.created_by
 ON DUPLICATE KEY UPDATE
   project_id=VALUES(project_id),task_title=VALUES(task_title),task_content=VALUES(task_content),

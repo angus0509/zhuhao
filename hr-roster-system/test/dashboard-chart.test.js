@@ -8,7 +8,9 @@ const index = read('public/index.html');
 const dashboard = read('public/js/views/dashboard.js');
 const css = read('public/styles.css');
 
-assert(index.includes('Chart.js/4.4.1/chart.umd.min.js'), '页面未加载 Chart.js 4');
+assert(!index.includes('<script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"'), '首屏不得预加载 Chart.js');
+assert(index.includes('/js/core/resource-loader.js'), '页面缺少按需资源加载器');
+assert(dashboard.includes('ensureChartJs()'), '驾驶舱未按需加载 Chart.js');
 assert(dashboard.includes("typeof Chart === 'undefined'"), 'Chart.js 加载失败时缺少降级判断');
 assert(dashboard.includes("type: 'doughnut'"), '用工结构或合规环形图未升级');
 assert(dashboard.includes("type: 'line'"), '入离职趋势未升级为折线图');

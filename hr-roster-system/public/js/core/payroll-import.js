@@ -176,19 +176,19 @@
   }
 
   function categoryForField(field) {
-    if (incomeFields.includes(field)) return 'income';
-    if (deductionFields.includes(field)) return 'deduction';
-    if (field === 'grossAmount' || field === 'netAmount') return 'summary';
-    return '';
+    return identityFields.has(field) ? '' : 'display';
   }
 
   function sensitiveHeader(header) {
-    return /姓名|工号|员工编号|人员编号|身份证|证件号|手机号|手机号码|联系电话|银行卡|卡号|bank|card|account|iban/i.test(String(header || ''));
+    const label = String(header || '').trim();
+    const chineseSensitive = /姓名|工号|员工编号|人员编号|身份证|证件号|手机号|手机号码|联系电话|银行卡|银行账号|卡号/;
+    const englishSensitive = /(?:^|[^a-z])(?:(?:employee|staff|worker)\s*(?:name|no|number|id)|full\s*name|id\s*(?:card|number)|national\s*id|phone|mobile|telephone|tel|contact\s*(?:phone|number)|bank\s*(?:account|card)|account\s*(?:no|number)|card\s*(?:no|number)|iban)(?:$|[^a-z])/i;
+    return chineseSensitive.test(label) || /^name$/i.test(label) || englishSensitive.test(label);
   }
 
   function buildSuggestedMapping(headers, sampleRows = []) {
     if (!Array.isArray(headers) || headers.length > 100) throw new Error('工资表最多支持100列');
-    return headers.map((header, columnIndex) => {
+    const mapping = headers.map((header, columnIndex) => {
       const sourceHeader = String(header == null ? '' : header).trim();
       if (sourceHeader.length > 50) throw new Error(`工资项目名称最多50个字符：第${columnIndex + 1}列`);
       const field = aliasMap.get(normalizeHeader(sourceHeader));
@@ -204,10 +204,21 @@
       if (!sourceHeader || sensitiveHeader(sourceHeader)) {
         return { columnIndex, sourceHeader, target: 'ignore', category: '', includeInPayslip: false };
       }
-      const values = sampleRows.map(row => row?.[columnIndex]).filter(value => String(value ?? '').trim() !== '');
-      const category = customCategory(sourceHeader, values);
-      return { columnIndex, sourceHeader, target: 'custom', category, includeInPayslip: true };
+      return { columnIndex, sourceHeader, target: 'custom', category: 'display', includeInPayslip: true };
     });
+    const netColumns = mapping.filter(item => item.target === 'netAmount');
+    netColumns.slice(0, -1).forEach(item => {
+      item.target = 'custom';
+      item.category = 'display';
+      item.includeInPayslip = true;
+    });
+    const grossColumns = mapping.filter(item => item.target === 'grossAmount');
+    grossColumns.slice(1).forEach(item => {
+      item.target = 'custom';
+      item.category = 'display';
+      item.includeInPayslip = true;
+    });
+    return mapping;
   }
 
   function validateColumnMapping(mapping, options = {}) {
@@ -238,9 +249,8 @@
     const result = {};
     mapping.forEach(item => {
       let field = item.target;
-      if (field === 'custom' && item.category === 'income') field = 'allowanceAmount';
-      else if (field === 'custom' && item.category === 'deduction') field = 'otherDeduction';
-      else if (field === 'custom') return;
+      if (field === 'custom') return;
+      if (!identityFields.has(field) && field !== 'grossAmount' && field !== 'netAmount') return;
       if (!definitions[field]) return;
       if (!result[field]) result[field] = [];
       result[field].push(item.columnIndex);
@@ -255,17 +265,14 @@
       const raw = String(row[item.columnIndex] == null ? '' : row[item.columnIndex]).trim();
       if (!raw) return;
       if (sensitiveHeader(item.sourceHeader)) return;
-      let value = raw;
-      if (['income', 'deduction', 'summary'].includes(item.category)) {
-        value = amountValue(raw, item.sourceHeader || '工资项目', errors);
-      } else if (raw.startsWith('=')) {
+      if (raw.startsWith('=')) {
         errors.push(`${item.sourceHeader || '工资项目'}不能使用公式，请将单元格转换为固定值`);
         return;
       }
       items.push({
         label: item.sourceHeader,
-        value,
-        category: item.category,
+        value: raw,
+        category: 'display',
         sortOrder: items.length + 1
       });
     });
@@ -343,34 +350,6 @@
       item[field] = amountFieldValue(row, mapping, field, errors);
     }
 
-    let incomeTotal = incomeFields.reduce((sum, field) => sum + item[field], 0);
-    const providedGross = mapping.grossAmount !== undefined && textValue(row, mapping, 'grossAmount') !== '';
-    const hasIncomeBreakdown = incomeFields.some(field => mapping[field] !== undefined && textValue(row, mapping, field) !== '');
-    if (providedGross && !hasIncomeBreakdown) {
-      item.baseSalary = item.grossAmount;
-      incomeTotal = item.grossAmount;
-    } else if (providedGross && Math.abs(item.grossAmount - incomeTotal) > 0.01) {
-      warnings.push(`应发工资${item.grossAmount.toFixed(2)}与收入明细合计${incomeTotal.toFixed(2)}不一致，保留原表应发工资`);
-    }
-    if (!providedGross) item.grossAmount = Math.round(incomeTotal * 100) / 100;
-
-    let deductionTotal = deductionFields.reduce((sum, field) => sum + item[field], 0);
-    const providedNet = mapping.netAmount !== undefined && textValue(row, mapping, 'netAmount') !== '';
-    if (providedNet) {
-      if (item.netAmount > item.grossAmount) {
-        warnings.push('实发工资不能超过应发工资，保留原表金额');
-      } else if (deductionTotal > 0) {
-        const missingDeduction = Math.round((item.grossAmount - item.netAmount - deductionTotal) * 100) / 100;
-        if (missingDeduction > 0) {
-          warnings.push(`应发与实发相差${missingDeduction.toFixed(2)}，原表未列明对应扣款，保留原表金额`);
-        } else if (missingDeduction < -0.01) {
-          warnings.push('实发工资与应发工资、扣款明细无法对应，保留原表金额');
-        }
-      }
-    } else {
-      item.netAmount = Math.round((item.grossAmount - deductionTotal) * 100) / 100;
-    }
-    if (deductionTotal > item.grossAmount) warnings.push('扣款合计不能超过应发工资，保留原表金额');
     item.itemSnapshot = buildItemSnapshot(row, columnMapping, errors);
     item.errors = [...new Set(errors)];
     return item;
@@ -399,7 +378,7 @@
     const dataStartIndex = header.index + header.rowCount;
     const sampleRows = rows.slice(dataStartIndex, dataStartIndex + 20);
     const columnMapping = buildSuggestedMapping(header.headers, sampleRows);
-    const hasAmount = columnMapping.some(item => ['income', 'deduction', 'summary'].includes(item.category));
+    const hasAmount = columnMapping.some(item => [...incomeFields, ...deductionFields, 'grossAmount', 'netAmount'].includes(item.target));
     if (!hasAmount) throw new Error('未识别到工资金额列，请至少包含基本工资、应发工资、实发工资等金额列');
     const parsed = parseMappedPayrollRows(rows, header, columnMapping, { requireNet: false });
     return {

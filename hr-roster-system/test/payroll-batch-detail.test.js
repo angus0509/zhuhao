@@ -107,10 +107,8 @@ async function main() {
       signedRate: 40
     });
     assert.equal(result.list[0].displayStatus, '待签字');
-    assert.equal(result.list[0].hasAmountWarning, true);
-    assert.match(result.list[0].amountWarnings.join('；'), /实发工资.*超过应发工资/);
-    assert.match(result.list[0].amountWarnings.join('；'), /收入明细合计/);
-    assert.match(result.list[0].amountWarnings.join('；'), /扣款明细/);
+    assert.equal('hasAmountWarning' in result.list[0], false, '工资条详情不得返回金额异常标识');
+    assert.equal('amountWarnings' in result.list[0], false, '工资条详情不得返回金额异常内容');
     assert.equal(result.list[0].wechatBound, true);
     assert.equal(result.list[0].smsErrorSummary, '同一手机号一小时发送次数已达上限，请稍后重试');
     assert.equal(result.list[1].displayStatus, '已签收');

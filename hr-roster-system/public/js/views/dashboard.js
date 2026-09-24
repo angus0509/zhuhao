@@ -148,12 +148,23 @@ function renderTrend(rows) {
 async function loadDashboard() {
   setPanelLoading('#dashboardView');
   try {
+    const chartWasReady = typeof Chart !== 'undefined';
+    const chartPromise = chartWasReady ? Promise.resolve(Chart) : ensureChartJs().catch(() => null);
     const data = await cachedApi('/api/analytics/dashboard', 30000);
     renderDashboardKpis(data.kpis);
     renderDepartmentChart(data.customerDistribution);
     renderRecruitmentChannelChart(data.recruitmentChannelDistribution || data.supplierDistribution || []);
     renderEmploymentDonut(data.employmentDistribution);
     renderTrend(data.trend);
+    if (!chartWasReady && typeof Chart === 'undefined') {
+      chartPromise.then(chart => {
+        if (!chart) return;
+        renderDepartmentChart(data.customerDistribution);
+        renderRecruitmentChannelChart(data.recruitmentChannelDistribution || data.supplierDistribution || []);
+        renderEmploymentDonut(data.employmentDistribution);
+        renderTrend(data.trend);
+      });
+    }
     $('#dashboardUpdatedAt').textContent = new Date(data.generatedAt).toLocaleString('zh-CN', { hour12: false });
   } finally {
     setPanelLoaded('#dashboardView');

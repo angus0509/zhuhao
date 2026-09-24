@@ -1,9 +1,13 @@
 node_modules/
+__pycache__/
+*.pyc
 .env
 .env.production
 logs/
 *.log
 .runtime/
+.playwright-cli/
+output/
 .DS_Store
 data/*.json
 uploads/*

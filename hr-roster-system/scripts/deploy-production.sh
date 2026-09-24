@@ -184,6 +184,7 @@ run_migration "$STAGE_DIR/sql/migrate-hr-manager-onsite-assign-20260908.mysql.sq
 run_migration "$STAGE_DIR/sql/migrate-attendance-timekeeping-20260909.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-geofence-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -290,6 +291,15 @@ test "$PROJECT_ATTENDANCE_INDEX_COUNT" = "4" || { echo "项目考勤关键索引
 PROJECT_ATTENDANCE_RULE_CONSTRAINT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='hr_roster' AND TABLE_NAME='attendance_schedules' AND CONSTRAINT_NAME='chk_attendance_schedule_rule_source' AND CONSTRAINT_TYPE='CHECK'")"
 test "$PROJECT_ATTENDANCE_RULE_CONSTRAINT" = "1" || { echo "项目考勤规则来源约束迁移不完整" >&2; exit 1; }
 
+HOURLY_WAGE_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_project_shift_rules','attendance_allowance_rules','employee_pay_profiles','wage_calculation_runs','wage_calculation_daily_lines','wage_daily_payments')")"
+test "$HOURLY_WAGE_TABLE_COUNT" = "6" || { echo "小时工资核心表迁移不完整: $HOURLY_WAGE_TABLE_COUNT/6" >&2; exit 1; }
+
+HOURLY_WAGE_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND ((TABLE_NAME='attendance_schedules' AND COLUMN_NAME IN ('shift_type','project_shift_rule_id')) OR (TABLE_NAME='salary_batch' AND COLUMN_NAME IN ('source_type','calculation_run_id')))")"
+test "$HOURLY_WAGE_COLUMN_COUNT" = "4" || { echo "小时工资扩展字段迁移不完整: $HOURLY_WAGE_COLUMN_COUNT/4" >&2; exit 1; }
+
+HOURLY_WAGE_INDEX_COUNT="$(mysql_scalar "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_batch' AND INDEX_NAME='uk_salary_batch_calculation_run'")"
+test "$HOURLY_WAGE_INDEX_COUNT" = "1" || { echo "自动工资批次唯一索引迁移不完整" >&2; exit 1; }
+
 UNASSIGNED_ATTENDANCE_GEOFENCE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM attendance_geofences WHERE customer_id IS NULL")"
 echo "未归属客户的历史围栏数量: $UNASSIGNED_ATTENDANCE_GEOFENCE_COUNT"
 
@@ -298,6 +308,7 @@ test "$BROKEN_ROLE_COUNT" = "0" || { echo "有 $BROKEN_ROLE_COUNT 个角色权�
 
 # 覆盖代码前再次确认生产配置，发布包本身不包含该文件。
 cp -R "$STAGE_DIR"/. "$PROJECT_DIR"/
+bash "$PROJECT_DIR/scripts/normalize-public-permissions.sh" "$PROJECT_DIR/public"
 ENV_SHA_AFTER="$(sha256sum "$ENV_FILE" | awk '{print $1}')"
 test "$ENV_SHA_BEFORE" = "$ENV_SHA_AFTER" || { echo ".env.production被修改，停止部署" >&2; exit 1; }
 
