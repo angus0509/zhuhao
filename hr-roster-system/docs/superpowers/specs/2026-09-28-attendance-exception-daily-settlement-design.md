@@ -52,6 +52,8 @@
 
 前端隐藏不是权限依据。所有接口必须先校验 `company_id`，再应用 `projectScope`；服务端不得以客户端传入的 `customerId` 作为授权依据。
 
+现有项目考勤设置接口也必须执行薪资字段裁剪：无 `payroll:view` 时移除 `hourlyRate`、补贴单价和补贴列表；提交时薪或补贴字段时，除 `attendance:manage` 外还必须校验 `payroll:manage`。
+
 ## 5. 核心流程
 
 ```text
@@ -69,7 +71,9 @@
 
 - 确认维度为 `company_id + project_id + shift_date`。
 - 夜班归属班次开始日；只有跨夜下班卡完成并生成每日结果后才可确认。
-- 存在待审核补卡、围栏异常或仍在有效打卡时间窗内的班次时，禁止确认。
+- 存在待审核补卡、尚未核实的缺卡/围栏异常或仍在有效打卡时间窗内的班次时，禁止确认。
+- 缺卡或围栏异常可由考勤审核人员执行“确认异常”，将对应每日结果 `review_status` 记为 `APPROVED`；该动作只确认考勤事实，不把异常改成正常。
+- 新打卡、补卡通过或其他考勤重算必须把旧 `review_status` 重置为 `NONE`，防止旧审核结果沿用到新数据。
 - 迟到、早退、旷工可以作为最终考勤结果确认，不要求改成正常状态。
 - 确认后记录当前版本号，后续工资快照必须引用该版本。
 
@@ -128,7 +132,7 @@
 - 迟到、早退、缺卡、旷工、围栏异常。
 - 待审核数量和考勤日状态。
 
-默认打开“待处理”视图，另设“全部员工”和“日报明细”。支持按异常类型、员工姓名筛选。待处理行提供查看打卡、查看定位状态、审核补卡等现有操作。页面底部提供“确认当日考勤”；已确认状态下提供“重新打开”，并要求原因。
+默认打开“待处理”视图，另设“全部员工”和“日报明细”。支持按异常类型、员工姓名筛选。待处理行提供查看打卡、查看定位状态、审核补卡和“确认异常”等操作。页面底部提供“确认当日考勤”；已确认状态下提供“重新打开”，并要求原因。
 
 无 `payroll:view` 权限时，只显示“未确认 / 可结算 / 已完成”等非金额状态。具备薪资权限时可点击“进入日结薪资”。
 
@@ -192,7 +196,29 @@
 
 唯一索引：`(company_id, client_request_id)`；查询索引：`(company_id, project_id, shift_date, operated_at)`。重复请求先按唯一索引读取首次结果，不重复递增版本或写操作日志。
 
-### 7.3 `wage_daily_payment_events`
+### 7.3 `attendance_daily_review_events`
+
+以追加方式保存缺卡/围栏异常的核实记录和幂等请求证据。每日结果重算只重置当前 `review_status`，不删除本表历史。
+
+| 字段 | 类型 | 约束与说明 |
+| --- | --- | --- |
+| `id` | `BIGINT` | 主键，自增 |
+| `company_id` | `BIGINT NOT NULL` | 企业 ID |
+| `daily_result_id` | `BIGINT NOT NULL` | 考勤每日结果 ID |
+| `project_id` | `BIGINT NOT NULL` | 项目 ID |
+| `employee_id` | `BIGINT NOT NULL` | 员工 ID |
+| `shift_date` | `DATE NOT NULL` | 班次归属日期 |
+| `action_type` | `VARCHAR(30) NOT NULL` | `CONFIRM_EXCEPTION` |
+| `result_status` | `VARCHAR(30) NOT NULL` | 审核时考勤结果快照 |
+| `client_request_id` | `VARCHAR(64) NOT NULL` | 幂等请求编号 |
+| `review_comment` | `VARCHAR(255) NOT NULL` | 核实说明 |
+| `operated_by` | `BIGINT NOT NULL` | 操作人 |
+| `operated_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP` | 操作时间 |
+| `created_at` | `DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP` | 创建时间 |
+
+唯一索引：`(company_id, client_request_id)`；查询索引：`(company_id, project_id, shift_date, daily_result_id, operated_at)`。
+
+### 7.4 `wage_daily_payment_events`
 
 支付状态仍由现有 `wage_daily_payments` 保存；本表以追加方式保存完整历史。
 
@@ -216,7 +242,7 @@
 
 唯一索引：`(company_id, client_request_id, employee_id)`；查询索引：`(company_id, project_id, shift_date, employee_id, operated_at)`。
 
-### 7.4 工资快照补列
+### 7.5 工资快照补列
 
 `wage_calculation_daily_lines` 增加：
 
@@ -267,7 +293,19 @@
 {"code":0,"message":"考勤日已确认","data":{"projectId":12,"shiftDate":"2026-09-28","status":"CONFIRMED","versionNo":3}}
 ```
 
-### 8.3 重新打开考勤日
+### 8.3 确认单条考勤异常
+
+`PUT /api/attendance/daily-results/:id/review`
+
+权限：`attendance:review`。
+
+```json
+{"action":"CONFIRM_EXCEPTION","reviewComment":"已与驻厂人员核实","clientRequestId":"attendance-result-review-8801-v1"}
+```
+
+只允许核实当前项目范围内的 `MISSING_PUNCH` 或存在异常围栏打卡的每日结果。响应保留原 `resultStatus`，仅更新 `reviewStatus`。考勤重算后旧确认自动失效。
+
+### 8.4 重新打开考勤日
 
 `POST /api/attendance/daily-reopen`
 
@@ -279,7 +317,7 @@
 
 当日仍有已支付日结记录时返回 `409 DAILY_PAYMENT_ACTIVE`。
 
-### 8.4 生成日结预览
+### 8.5 生成日结预览
 
 `POST /api/wage-daily-settlements/preview`
 
@@ -291,7 +329,7 @@
 
 内部复用现有月份工资预览和日工资计算器，只返回所选日期的结果；不创建工资批次、不发布工资条。
 
-### 8.5 查询日结列表
+### 8.6 查询日结列表
 
 `GET /api/wage-daily-settlements?projectId=12&shiftDate=2026-09-28&status=READY&keyword=`
 
@@ -312,7 +350,7 @@
 }
 ```
 
-### 8.6 批量确认支付
+### 8.7 批量确认支付
 
 `POST /api/wage-daily-settlements/batch-confirm`
 
@@ -338,7 +376,7 @@
 
 单人确认使用相同接口并只传一个员工 ID。
 
-### 8.7 撤销日结
+### 8.8 撤销日结
 
 `POST /api/wage-daily-settlements/:paymentId/revoke`
 
@@ -348,7 +386,7 @@
 {"reason":"员工补卡后需重新计算","clientRequestId":"daily-revoke-9001-v1"}
 ```
 
-### 8.8 日结历史
+### 8.9 日结历史
 
 `GET /api/wage-daily-settlements/:paymentId/events`
 
