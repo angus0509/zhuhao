@@ -227,7 +227,7 @@
 
 ## 8. API 设计
 
-统一成功响应：`{"success":true,"message":"操作成功","data":{...}}`。失败响应：`{"success":false,"message":"...","code":"..."}`。
+沿用项目现有响应封装。成功响应：`{"code":0,"message":"操作成功","data":{...}}`。失败响应：`{"code":409,"message":"...","data":null,"businessCode":"..."}`。
 
 ### 8.1 考勤异常工作台
 
@@ -239,7 +239,8 @@
 
 ```json
 {
-  "success": true,
+  "code": 0,
+  "message": "success",
   "data": {
     "closure": {"status": "OPEN", "versionNo": 2},
     "summary": {"scheduled": 28, "present": 25, "late": 2, "missingPunch": 1, "absent": 2, "pendingReview": 1},
@@ -263,7 +264,7 @@
 响应：
 
 ```json
-{"success":true,"data":{"projectId":12,"shiftDate":"2026-09-28","status":"CONFIRMED","versionNo":3}}
+{"code":0,"message":"考勤日已确认","data":{"projectId":12,"shiftDate":"2026-09-28","status":"CONFIRMED","versionNo":3}}
 ```
 
 ### 8.3 重新打开考勤日
@@ -300,7 +301,8 @@
 
 ```json
 {
-  "success": true,
+  "code": 0,
+  "message": "success",
   "data": {
     "runId": 81,
     "closureVersion": 3,
@@ -331,7 +333,7 @@
 成功响应：
 
 ```json
-{"success":true,"data":{"status":"PAID","paidCount":2,"totalAmount":"360.00"}}
+{"code":0,"message":"日结已确认","data":{"status":"PAID","paidCount":2,"totalAmount":"360.00"}}
 ```
 
 单人确认使用相同接口并只传一个员工 ID。
