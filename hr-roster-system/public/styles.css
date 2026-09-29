@@ -112,6 +112,34 @@
 .attendance-summary-strip strong { display: block; margin-top: 3px; font-size: 20px; }
 .attendance-review-panel { margin-top: 14px; }
 .attendance-empty { padding: 28px 16px !important; text-align: center; color: var(--muted); }
+.attendance-closure-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  background: var(--card);
+}
+.attendance-closure-bar > div:first-child { display: grid; gap: 4px; }
+.attendance-closure-bar span { color: var(--muted); font-size: 12px; }
+.attendance-closure-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.attendance-exception-summary { grid-template-columns: repeat(9, minmax(76px, 1fr)); }
+.attendance-exception-filters {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+}
+.attendance-exception-filters label { display: grid; gap: 6px; min-width: 180px; }
+.attendance-exception-filters label > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.attendance-exception-table table { min-width: 1040px; }
+.attendance-daily-detail-head { margin-top: 20px; }
 
 .attendance-settings-form,
 .attendance-form-section {
@@ -131,6 +159,15 @@
   .attendance-context-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendance-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .attendance-summary-strip { grid-template-columns: repeat(4, minmax(80px, 1fr)); }
+}
+
+@media (max-width: 760px) {
+  .attendance-closure-bar { align-items: stretch; flex-direction: column; }
+  .attendance-closure-actions { display: grid; grid-template-columns: 1fr; }
+  .attendance-exception-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .attendance-exception-filters { align-items: stretch; flex-direction: column; }
+  .attendance-exception-filters label { min-width: 0; }
+  .attendance-exception-table { overflow-x: auto; }
 }
 
 @media (max-width: 640px) {

@@ -382,6 +382,22 @@
             <button type="button" role="tab" aria-selected="false" data-attendance-tab="geofences">客户围栏库</button>
           </nav>
           <section class="attendance-workspace-panel" data-attendance-panel="daily">
+            <div class="attendance-closure-bar">
+              <div><span>当日考勤状态</span><strong id="attendanceClosureStatus">未确认</strong></div>
+              <div class="attendance-closure-actions">
+                <button class="primary-button" id="attendanceConfirmDay" type="button" data-action-perm="attendance:review">确认当日考勤</button>
+                <button class="secondary-button hidden" id="attendanceReopenDay" type="button" data-action-perm="attendance:review">重新打开</button>
+                <button class="secondary-button" id="attendanceDailySettlementLink" type="button" data-action-perm="payroll:view" disabled>日结薪资待考勤确认</button>
+              </div>
+            </div>
+            <div class="attendance-summary-strip attendance-exception-summary" id="attendanceExceptionSummary"></div>
+            <div class="attendance-exception-filters">
+              <label><span>异常状态</span><select id="attendanceExceptionStatusFilter"><option value="PENDING" selected>待处理</option><option value="ALL">全部员工</option><option value="LATE">迟到</option><option value="EARLY_LEAVE">早退</option><option value="MISSING_PUNCH">缺卡</option><option value="ABSENT">旷工</option><option value="GEOFENCE">围栏异常</option><option value="NORMAL">正常</option></select></label>
+              <label><span>员工姓名</span><input id="attendanceEmployeeKeyword" type="search" maxlength="50" placeholder="输入姓名筛选"></label>
+              <button class="secondary-button" id="attendanceExceptionSearch" type="button">查询</button>
+            </div>
+            <div class="table-wrap attendance-exception-table"><table class="data-table"><thead><tr><th>员工</th><th>上班</th><th>下班</th><th>实际工时</th><th>核准工时</th><th>结果</th><th>围栏</th><th>待处理原因</th><th>操作</th></tr></thead><tbody id="attendanceExceptionBody"></tbody></table></div>
+            <div class="panel-head attendance-daily-detail-head"><div><h3>日报明细</h3><p>保留完整考勤结果，便于复核</p></div></div>
             <div class="attendance-summary-strip" id="attendanceDailySummary"></div>
             <div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>上班</th><th>下班</th><th>实际工时</th><th>正常工时</th><th>迟到</th><th>早退</th><th>结果</th><th>围栏</th></tr></thead><tbody id="attendanceDailyBody"></tbody></table></div>
             <div class="business-panel attendance-review-panel" data-action-perm="attendance:review"><div class="panel-head"><div><h3>围栏异常审核</h3><p>仅显示当前项目待审核记录</p></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>员工</th><th>日期</th><th>定位状态</th><th>距离</th><th>原因</th><th>操作</th></tr></thead><tbody id="attendanceCorrectionBody"></tbody></table></div></div>
