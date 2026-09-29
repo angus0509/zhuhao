@@ -1,6 +1,9 @@
 const service = require('../services/daily-settlement.service');
 const { asyncHandler, success } = require('../utils/response');
 
+exports.projects = asyncHandler(async (req, res) =>
+  success(res, await service.listProjects(req.companyId, req.user)));
+
 exports.createPreview = asyncHandler(async (req, res) =>
   success(res, await service.createDailyPreview(req.companyId, req.user, req.operatorId, req.body), '日结预览已生成'));
 exports.list = asyncHandler(async (req, res) =>

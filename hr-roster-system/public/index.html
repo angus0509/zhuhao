@@ -420,6 +420,22 @@
             <div class="table-wrap"><table class="data-table"><thead><tr><th>围栏</th><th data-action-perm="attendance:manage">中心坐标</th><th>半径</th><th>精度要求</th><th>状态</th><th data-action-perm="attendance:manage">操作</th></tr></thead><tbody id="attendanceGeofenceBody"></tbody></table></div>
           </section>
         </section>
+        <section class="module-view hidden" id="dailySettlementView">
+          <div class="module-hero payroll-hero"><div><p class="eyebrow">DAILY SETTLEMENT</p><h2>日结薪资</h2><p>按已确认考勤生成当日预览，逐人或批量记录已支付状态。</p></div></div>
+          <div class="business-panel daily-settlement-filters">
+            <label><span>客户</span><select id="dailySettlementCustomer"></select></label>
+            <label><span>项目</span><select id="dailySettlementProject"></select></label>
+            <label><span>日期</span><input id="dailySettlementDate" type="date"></label>
+            <label><span>状态</span><select id="dailySettlementStatus"><option value="ALL">全部</option><option value="READY">待支付</option><option value="PAID">已支付</option><option value="BLOCKED">待处理</option><option value="NO_PAYMENT">无需支付</option></select></label>
+            <label><span>员工</span><input id="dailySettlementKeyword" type="search" maxlength="50" placeholder="搜索姓名"></label>
+            <button class="secondary-button" id="dailySettlementRefresh" type="button">刷新预览</button>
+          </div>
+          <p class="attendance-workspace-status hidden" id="dailySettlementMessage" role="status"></p>
+          <div class="daily-settlement-summary" id="dailySettlementSummary"></div>
+          <div class="business-panel daily-settlement-table"><div class="table-wrap"><table class="data-table"><thead><tr><th>选择</th><th>员工</th><th>班次</th><th>实际工时</th><th>核准工时</th><th>时薪</th><th>基础工资</th><th>补贴</th><th>应得工资</th><th>状态</th><th>操作</th></tr></thead><tbody id="dailySettlementBody"></tbody></table></div></div>
+          <div class="daily-settlement-actions" data-action-perm="payroll:manage"><span id="dailySettlementSelection">已选 0 人</span><button class="primary-button" id="dailySettlementBatchConfirm" type="button" disabled>批量确认已支付</button></div>
+          <dialog class="modal compact" id="dailySettlementDetailDialog" aria-labelledby="dailySettlementDetailTitle"><div class="modal-panel compact"><div class="modal-head"><h2 id="dailySettlementDetailTitle">日结明细</h2><button class="icon-button" type="button" id="dailySettlementDetailClose" aria-label="关闭">×</button></div><div id="dailySettlementDetailContent"></div></div></dialog>
+        </section>
         <section class="module-view hidden" id="payrollView">
           <div class="module-hero payroll-hero"><div><p class="eyebrow">PAYSLIP DELIVERY</p><h2>工资条发放管理</h2><p>上传后直接进入复核，复核通过立即发放。</p></div><button class="primary-button" type="button" data-office-action="payroll-create" data-action-perm="payroll:manage">导入工资条表格</button></div>
           <div class="payroll-flow-strip" aria-label="工资条发放流程">
@@ -1179,6 +1195,7 @@
     <script src="/js/views/dashboard.js?v=20260923-1" defer></script>
     <script src="/js/core/request-gate.js" defer></script>
     <script src="/js/views/attendance.js" defer></script>
+    <script src="/js/views/daily-settlement.js" defer></script>
     <script src="/js/views/roster-table.js" defer></script>
     <script src="/js/views/roster.js" defer></script>
     <script src="/js/core/router.js" defer></script>

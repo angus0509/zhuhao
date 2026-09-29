@@ -26,8 +26,9 @@ fi
 
 HOME_HTML="$(mktemp)"
 ROSTER_JS="$(mktemp)"
+DAILY_SETTLEMENT_JS="$(mktemp)"
 cleanup() {
-  rm -f "$HOME_HTML" "$ROSTER_JS"
+  rm -f "$HOME_HTML" "$ROSTER_JS" "$DAILY_SETTLEMENT_JS"
 }
 trap cleanup EXIT
 
@@ -53,6 +54,10 @@ for candidate in "$BASE_URL" "$SECONDARY_BASE_URL"; do
 done
 UNAUTHORIZED_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$BASE_URL/api/employees")"
 test "$UNAUTHORIZED_STATUS" = "401" || { echo "未授权拦截异常: HTTP $UNAUTHORIZED_STATUS" >&2; exit 1; }
+for endpoint in /api/attendance/workbench /api/wage-daily-settlements; do
+  ENDPOINT_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{http_code}' "$BASE_URL$endpoint")"
+  test "$ENDPOINT_STATUS" = "401" || { echo "未授权拦截异常: $endpoint HTTP $ENDPOINT_STATUS" >&2; exit 1; }
+done
 echo "  主域名 HTTP 200，备用域名 HTTP ${SECONDARY_STATUS}，双域名 HSTS 正常，未授权接口 HTTP 401"
 
 echo "[3/6] 当前品牌与构建资源..."
@@ -69,6 +74,9 @@ ROSTER_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o "$ROSTER_JS" -w 
 test "$ROSTER_STATUS" = "200" || { echo "花名册资源状态异常: HTTP $ROSTER_STATUS" >&2; exit 1; }
 grep -Fq "'activeRoster'" "$ROSTER_JS" || { echo "线上花名册未声明 activeRoster 在职视图" >&2; exit 1; }
 grep -Fq 'view ? `view=${view}`' "$ROSTER_JS" || { echo "线上花名册未将 activeRoster 写入请求参数" >&2; exit 1; }
+DAILY_SETTLEMENT_STATUS="$(curl -sS --connect-timeout 15 --max-time 30 -o "$DAILY_SETTLEMENT_JS" -w '%{http_code}' "$BASE_URL/js/views/daily-settlement.js")"
+test "$DAILY_SETTLEMENT_STATUS" = "200" || { echo "日结页面资源状态异常: HTTP $DAILY_SETTLEMENT_STATUS" >&2; exit 1; }
+grep -Fq 'loadDailySettlement' "$DAILY_SETTLEMENT_JS" || { echo "线上日结页面入口缺失" >&2; exit 1; }
 echo "  通过"
 
 if [ -z "$SSH_TARGET" ]; then

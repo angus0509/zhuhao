@@ -32,7 +32,8 @@ assert.match(js, /\/api\/attendance\/daily-results\/\$\{resultId\}\/review/);
 assert.match(js, /withSubmitLock/);
 assert.match(js, /confirmDialog/);
 assert.match(js, /clientRequestId/);
-assert.doesNotMatch(html, /attendanceExceptionBody[^]*(?:时薪|应结金额)/);
+const attendanceMarkup = html.slice(html.indexOf('id="attendanceView"'), html.indexOf('id="dailySettlementView"'));
+assert.doesNotMatch(attendanceMarkup, /(?:时薪|应结金额)/);
 assert.match(css, /\.attendance-exception-filters/);
 assert.match(css, /@media \(max-width: 760px\)/);
 

@@ -141,6 +141,17 @@
 .attendance-exception-table table { min-width: 1040px; }
 .attendance-daily-detail-head { margin-top: 20px; }
 
+.daily-settlement-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 14px; margin: 14px 0; }
+.daily-settlement-filters label { display: grid; gap: 6px; min-width: 145px; flex: 1; }
+.daily-settlement-filters label span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.daily-settlement-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.daily-settlement-summary article { padding: 14px; border: 1px solid var(--line); background: var(--card); }
+.daily-settlement-summary small { display: block; color: var(--muted); }
+.daily-settlement-summary strong { display: block; margin-top: 5px; font-size: 20px; }
+.daily-settlement-table table { min-width: 1100px; }
+.daily-settlement-actions { position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding: 12px; border: 1px solid var(--line); background: var(--card); z-index: 2; }
+.daily-settlement-detail-list { display: grid; gap: 8px; margin: 12px 0; }
+
 .attendance-settings-form,
 .attendance-form-section {
   border-bottom: 1px solid var(--line);
@@ -162,6 +173,10 @@
 }
 
 @media (max-width: 760px) {
+  .daily-settlement-filters { display: grid; grid-template-columns: 1fr; }
+  .daily-settlement-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .daily-settlement-table { overflow-x: auto; }
+  .daily-settlement-actions { justify-content: space-between; }
   .attendance-closure-bar { align-items: stretch; flex-direction: column; }
   .attendance-closure-actions { display: grid; grid-template-columns: 1fr; }
   .attendance-exception-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

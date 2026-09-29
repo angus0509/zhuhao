@@ -42,6 +42,17 @@ async function assertProject(client, companyId, user, projectId) {
   if (!rows[0]) throw createError('项目不存在或无权访问', 403, 'PROJECT_FORBIDDEN');
 }
 
+async function listProjects(companyId, user) {
+  const params = { companyId };
+  const scope = projectScope(user, params, 'p');
+  const list = await db.query(`SELECT p.id AS projectId,p.project_name AS projectName,
+      p.customer_id AS customerId,c.customer_name AS customerName
+    FROM labor_project p JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
+    WHERE p.company_id=:companyId${scope}
+    ORDER BY c.customer_name,p.project_name,p.id`, params);
+  return { list };
+}
+
 function paymentStatus(line, payment) {
   if (payment?.status === 'PAID') return 'PAID';
   if (line.calculationStatus === 'BLOCKED') return 'BLOCKED';
@@ -97,7 +108,7 @@ async function listDailySettlements(companyId, user, queryParams = {}) {
         line.earned_amount AS earnedAmount,line.allowance_snapshot AS allowanceItems,
         line.calculation_status AS calculationStatus,line.blocked_reason AS blockedReason,
         line.attendance_closure_version AS attendanceClosureVersion,
-        pay.id AS paymentId,pay.status AS paymentStatus
+        pay.id AS paymentId,pay.status AS paymentStatus,pay.amount AS paidAmount
       FROM wage_calculation_daily_lines line
       JOIN hr_employee e ON e.id=line.employee_id AND e.company_id=line.company_id
       LEFT JOIN wage_daily_payments pay ON pay.company_id=line.company_id
@@ -123,10 +134,11 @@ async function listDailySettlements(companyId, user, queryParams = {}) {
     readyAmount: formatCents(all.filter(row => row.status === 'READY')
       .reduce((total, row) => total + parseMoneyToCents(row.earnedAmount), 0)),
     paidAmount: formatCents(all.filter(row => row.status === 'PAID')
-      .reduce((total, row) => total + parseMoneyToCents(row.earnedAmount), 0))
+      .reduce((total, row) => total + parseMoneyToCents(row.paidAmount), 0))
   };
   return {
     runId: positiveId(run.runId) || null,
+    runStatus: run.runStatus || null,
     closureVersion: Number(run.closureVersion || 0),
     closureStatus: run.closureStatus || 'OPEN',
     summary,
@@ -350,5 +362,6 @@ async function listPaymentEvents(companyId, user, paymentIdValue) {
 }
 
 module.exports = {
+  listProjects,
   createDailyPreview, listDailySettlements, confirmBatch, revokePayment, listPaymentEvents
 };

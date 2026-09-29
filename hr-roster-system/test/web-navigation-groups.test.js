@@ -54,7 +54,7 @@ assert.equal(viewWithoutMenuNavigation.some(group => group.items.some(item => it
   '只有查看权限、没有菜单权限时不应绕过菜单配置显示页面');
 assert.deepEqual(
   payrollNavigation[1].items.map(item => item.view),
-  ['payroll'],
+  ['payroll', 'dailySettlement'],
   '没有预支权限时薪资结算不得展示预支记录'
 );
 

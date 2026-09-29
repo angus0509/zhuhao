@@ -443,9 +443,10 @@ function bindAttendanceEvents() {
   $('#attendanceConfirmDay')?.addEventListener('click', confirmAttendanceDay);
   $('#attendanceReopenDay')?.addEventListener('click', reopenAttendanceDay);
   $('#attendanceDailySettlementLink')?.addEventListener('click', () => {
-    if (attendanceState.closureStatus !== 'CONFIRMED') return;
-    if (typeof viewElements !== 'undefined' && viewElements.dailySettlement) switchView('dailySettlement');
-    else toast('日结薪资模块将在下一阶段启用');
+    if (attendanceState.closureStatus !== 'CONFIRMED' || !attendanceCan('payroll:view')) return;
+    dailySettlementState.projectId = attendanceState.projectId;
+    dailySettlementState.shiftDate = $('#attendanceDate').value;
+    switchView('dailySettlement');
   });
   $('#attendanceExceptionBody')?.addEventListener('click', event => {
     const button = event.target.closest('[data-review-daily-exception]');
