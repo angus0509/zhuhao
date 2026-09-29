@@ -92,7 +92,8 @@ for (const attendanceMigrationPath of [
   'sql/migrate-attendance-geofence-20260915.mysql.sql',
   'sql/migrate-web-project-attendance-20260915.mysql.sql',
   'sql/migrate-attendance-hourly-wage-20260916.mysql.sql',
-  'sql/migrate-attendance-daily-closure-20260929.mysql.sql'
+  'sql/migrate-attendance-daily-closure-20260929.mysql.sql',
+  'sql/migrate-wage-daily-settlement-events-20260929.mysql.sql'
 ]) {
   const attendanceMigration = read(attendanceMigrationPath);
   assert.ok(verify.includes(`"${attendanceMigrationPath}"`), `发布包必须包含 ${attendanceMigrationPath}`);

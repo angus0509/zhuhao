@@ -18,6 +18,7 @@ async function run() {
             attendanceResultId: 501, employeeId: 101, name: '甲', shiftDate: '2026-10-08',
             workedMinutes: 465, approvedNormalMinutes: 465, approvedOvertimeMinutes: 0,
             resultStatus: 'NORMAL', reviewStatus: 'NONE', projectRuleId: 25,
+            attendanceClosureId: 91, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             projectShiftRuleId: 252, shiftType: 'NIGHT', hourlyRate: '23.00',
             settlementMode: 'DAILY_ACCRUAL', pendingExceptionCount: 0
           },
@@ -25,6 +26,7 @@ async function run() {
             attendanceResultId: 502, employeeId: 102, name: '乙', shiftDate: '2026-10-08',
             workedMinutes: 0, approvedNormalMinutes: 0, approvedOvertimeMinutes: 0,
             resultStatus: 'MISSING_PUNCH', reviewStatus: 'NONE', projectRuleId: 25,
+            attendanceClosureId: 91, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             projectShiftRuleId: 251, shiftType: 'DAY', hourlyRate: '20.00',
             settlementMode: 'MONTHLY', pendingExceptionCount: 0
           }
@@ -72,21 +74,25 @@ async function runBlockerCoverage() {
         if (/FROM attendance_daily_results d/.test(sql)) return [[
           {
             attendanceResultId: 601, employeeId: 201, shiftDate: '2026-10-09', resultStatus: 'NORMAL',
+            attendanceClosureId: 92, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             approvedNormalMinutes: 480, approvedOvertimeMinutes: 0, projectRuleId: 25,
             projectShiftRuleId: 251, shiftType: 'DAY', hourlyRate: '20.00', settlementMode: null
           },
           {
             attendanceResultId: 602, employeeId: 202, shiftDate: '2026-10-09', resultStatus: 'NORMAL',
+            attendanceClosureId: 92, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             approvedNormalMinutes: 480, approvedOvertimeMinutes: 0, projectRuleId: 25,
             projectShiftRuleId: null, shiftType: null, hourlyRate: null, settlementMode: 'MONTHLY'
           },
           {
             attendanceResultId: 603, employeeId: 203, shiftDate: '2026-10-09', resultStatus: 'NORMAL',
+            attendanceClosureId: 92, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             approvedNormalMinutes: 480, approvedOvertimeMinutes: 0, projectRuleId: 25,
             projectShiftRuleId: 251, shiftType: 'DAY', hourlyRate: null, settlementMode: 'MONTHLY'
           },
           {
             attendanceResultId: 604, employeeId: 204, shiftDate: '2026-10-09', resultStatus: 'NORMAL',
+            attendanceClosureId: 92, attendanceClosureStatus: 'CONFIRMED', attendanceClosureVersion: 1,
             approvedNormalMinutes: 480, approvedOvertimeMinutes: 0, projectRuleId: 25,
             projectShiftRuleId: 251, shiftType: 'DAY', hourlyRate: '20.00', settlementMode: 'MONTHLY',
             pendingExceptionCount: 1

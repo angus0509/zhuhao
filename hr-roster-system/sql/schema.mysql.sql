@@ -1159,6 +1159,8 @@ CREATE TABLE wage_calculation_daily_lines (
   employee_id BIGINT NOT NULL,
   shift_date DATE NOT NULL,
   attendance_result_id BIGINT DEFAULT NULL,
+  attendance_closure_id BIGINT DEFAULT NULL,
+  attendance_closure_version INT UNSIGNED DEFAULT NULL,
   project_rule_id BIGINT DEFAULT NULL,
   project_shift_rule_id BIGINT DEFAULT NULL,
   shift_type VARCHAR(10) DEFAULT NULL,
@@ -1251,3 +1253,23 @@ CREATE TABLE attendance_daily_review_events (
   UNIQUE KEY uk_attendance_daily_review_request (company_id, client_request_id),
   KEY idx_attendance_daily_review_lookup (company_id, project_id, shift_date, daily_result_id, operated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤每日异常核实事件';
+
+CREATE TABLE wage_daily_payment_events (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  company_id BIGINT NOT NULL,
+  payment_id BIGINT NOT NULL,
+  project_id BIGINT NOT NULL,
+  employee_id BIGINT NOT NULL,
+  shift_date DATE NOT NULL,
+  action_type VARCHAR(20) NOT NULL,
+  amount DECIMAL(12,2) NOT NULL,
+  run_id BIGINT DEFAULT NULL,
+  closure_version INT UNSIGNED NOT NULL,
+  client_request_id VARCHAR(64) NOT NULL,
+  remark VARCHAR(255) DEFAULT NULL,
+  operated_by BIGINT NOT NULL,
+  operated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_wage_daily_payment_event_request (company_id, client_request_id, employee_id),
+  KEY idx_wage_daily_payment_event_lookup (company_id, project_id, shift_date, employee_id, operated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工日结状态变更事件';
