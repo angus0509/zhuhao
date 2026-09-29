@@ -95,7 +95,8 @@ async function recalculateDaily(client, companyId, employeeId, shiftDate, schedu
       :overtimeCandidateMinutes,0,:lateMinutes,:earlyLeaveMinutes,:resultStatus,'NONE','v1',CURRENT_TIMESTAMP)
     ON DUPLICATE KEY UPDATE project_id=COALESCE(project_id,VALUES(project_id)),schedule_id=VALUES(schedule_id), first_in_at=VALUES(first_in_at), last_out_at=VALUES(last_out_at),
       worked_minutes=VALUES(worked_minutes), approved_normal_minutes=VALUES(approved_normal_minutes), overtime_candidate_minutes=VALUES(overtime_candidate_minutes),
-      late_minutes=VALUES(late_minutes), early_leave_minutes=VALUES(early_leave_minutes), result_status=VALUES(result_status), calculated_at=CURRENT_TIMESTAMP`,
+      late_minutes=VALUES(late_minutes), early_leave_minutes=VALUES(early_leave_minutes), result_status=VALUES(result_status),
+      review_status='NONE',reviewed_by=NULL,reviewed_at=NULL,calculated_at=CURRENT_TIMESTAMP`,
   { companyId, employeeId, projectId: schedule?.projectId || null, shiftDate, scheduleId: schedule?.id || null, ...result });
   return result;
 }
