@@ -145,6 +145,7 @@ REQUIRED=(
   "sql/migrate-attendance-geofence-20260915.mysql.sql"
   "sql/migrate-web-project-attendance-20260915.mysql.sql"
   "sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
+  "sql/migrate-attendance-daily-closure-20260929.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -286,8 +287,9 @@ M31="sql/migrate-attendance-timekeeping-20260909.mysql.sql"
 M32="sql/migrate-attendance-geofence-20260915.mysql.sql"
 M33="sql/migrate-web-project-attendance-20260915.mysql.sql"
 M34="sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
+M35="sql/migrate-attendance-daily-closure-20260929.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19" "$M20" "$M21" "$M22" "$M23" "$M24" "$M25" "$M26" "$M27" "$M28" "$M29" "$M30" "$M31" "$M32" "$M33" "$M34"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19" "$M20" "$M21" "$M22" "$M23" "$M24" "$M25" "$M26" "$M27" "$M28" "$M29" "$M30" "$M31" "$M32" "$M33" "$M34" "$M35"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 
