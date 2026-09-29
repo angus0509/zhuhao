@@ -114,7 +114,7 @@ async function getWorkbench(companyId, user, query = {}) {
     detailParams.keyword = `%${keywordText}%`;
     keywordCondition = ' AND e.name LIKE :keyword';
   }
-  const list = await database.query(`SELECT d.employee_id AS employeeId,e.name,
+  const list = await database.query(`SELECT d.id AS resultId,d.employee_id AS employeeId,e.name,
       d.first_in_at AS firstInAt,d.last_out_at AS lastOutAt,d.worked_minutes AS workedMinutes,
       (d.approved_normal_minutes+d.approved_overtime_minutes) AS approvedMinutes,d.result_status AS resultStatus,
       (SELECT punch.geofence_status FROM attendance_punches punch
