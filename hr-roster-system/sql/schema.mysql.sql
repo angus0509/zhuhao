@@ -1144,10 +1144,12 @@ CREATE TABLE wage_calculation_runs (
   total_payable DECIMAL(14,2) NOT NULL DEFAULT 0,
   blocked_count INT UNSIGNED NOT NULL DEFAULT 0,
   created_by BIGINT NOT NULL,
+  client_request_id VARCHAR(64) DEFAULT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   confirmed_by BIGINT DEFAULT NULL,
   confirmed_at DATETIME DEFAULT NULL,
   UNIQUE KEY uk_wage_run_revision (company_id, project_id, salary_month, revision_no),
+  UNIQUE KEY uk_wage_preview_request (company_id, client_request_id),
   KEY idx_wage_run_lookup (company_id, project_id, salary_month, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='考勤工资计算批次';
 

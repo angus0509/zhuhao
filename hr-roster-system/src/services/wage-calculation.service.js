@@ -190,11 +190,30 @@ async function createPreview(companyIdValue, user, operatorIdValue, body = {}) {
   const operatorId = positiveId(operatorIdValue);
   const projectId = positiveId(body.projectId);
   const salaryMonth = String(body.salaryMonth || '');
+  const clientRequestId = body.clientRequestId == null ? null : String(body.clientRequestId);
   if (!companyId || !operatorId || !projectId || !validMonth(salaryMonth)) {
     throw createError('工资计算参数无效', 400, 'INVALID_WAGE_CALCULATION');
   }
+  if (clientRequestId !== null && !/^[A-Za-z0-9:_-]{8,64}$/.test(clientRequestId)) {
+    throw createError('预览请求编号无效', 400, 'INVALID_REQUEST_ID');
+  }
   return db.transaction(async client => {
     await assertProject(client, companyId, user, projectId);
+    if (clientRequestId) {
+      const existing = await query(client, `SELECT id,project_id AS projectId,
+          salary_month AS salaryMonth,revision_no AS revisionNo
+        FROM wage_calculation_runs
+        WHERE company_id=:companyId AND client_request_id=:clientRequestId LIMIT 1`, {
+        companyId, clientRequestId
+      });
+      if (existing[0]) {
+        if (Number(existing[0].projectId) !== projectId || existing[0].salaryMonth !== salaryMonth) {
+          throw createError('请求编号已用于其他工资预览', 409, 'WAGE_PREVIEW_REQUEST_CONFLICT');
+        }
+        return { runId: Number(existing[0].id), projectId, salaryMonth,
+          revisionNo: Number(existing[0].revisionNo), replayed: true };
+      }
+    }
     const runs = await query(client, `SELECT id,revision_no AS revisionNo,status
       FROM wage_calculation_runs
       WHERE company_id=:companyId AND project_id=:projectId AND salary_month=:salaryMonth
@@ -234,10 +253,10 @@ async function createPreview(companyIdValue, user, operatorIdValue, body = {}) {
     };
     const inserted = await query(client, `INSERT INTO wage_calculation_runs
       (company_id,project_id,salary_month,revision_no,status,total_earned,total_daily_paid,total_payable,
-       blocked_count,created_by)
+       blocked_count,created_by,client_request_id)
       VALUES (:companyId,:projectId,:salaryMonth,:revisionNo,'PREVIEW',:totalEarned,:totalDailyPaid,
-        :totalPayable,:blockedCount,:operatorId)`, {
-      companyId, projectId, salaryMonth, revisionNo, blockedCount, operatorId, ...totals
+        :totalPayable,:blockedCount,:operatorId,:clientRequestId)`, {
+      companyId, projectId, salaryMonth, revisionNo, blockedCount, operatorId, clientRequestId, ...totals
     });
     const runId = Number(inserted.insertId);
     for (const line of lines) await insertDailyLine(client, companyId, runId, projectId, line.row, line.result);

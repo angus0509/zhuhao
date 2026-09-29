@@ -30,6 +30,20 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='wage_calculation_runs'
+    AND COLUMN_NAME='client_request_id')=0,
+  'ALTER TABLE wage_calculation_runs ADD COLUMN client_request_id VARCHAR(64) DEFAULT NULL AFTER created_by',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='wage_calculation_runs'
+    AND INDEX_NAME='uk_wage_preview_request')=0,
+  'ALTER TABLE wage_calculation_runs ADD UNIQUE KEY uk_wage_preview_request (company_id, client_request_id)',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='wage_calculation_daily_lines'
     AND COLUMN_NAME='attendance_closure_version')=0,
   'ALTER TABLE wage_calculation_daily_lines ADD COLUMN attendance_closure_version INT UNSIGNED DEFAULT NULL AFTER attendance_closure_id',
