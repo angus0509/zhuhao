@@ -64,6 +64,7 @@ async function run() {
   const replayWrites = [];
   const replayed = await withTransaction(async (sql, params) => {
     if (!/^\s*SELECT\b/i.test(sql)) replayWrites.push({ sql, params });
+    if (/FROM labor_project p/.test(sql)) return [[{ projectId: 12 }]];
     if (/FROM attendance_daily_closure_events/.test(sql)) {
       return [[{
         actionType: 'CONFIRM', projectId: 12, shiftDate: '2026-09-29', versionNo: 1
@@ -77,6 +78,44 @@ async function run() {
   }));
   assert.deepEqual(replayed, confirmed);
   assert.equal(replayWrites.length, 0, '重复请求不得再次写入或记录操作日志');
+
+  const replayEvent = { actionType: 'CONFIRM', projectId: 12, shiftDate: '2026-09-29', versionNo: 1 };
+  const closureReplayResponder = (event, authorized) => async sql => {
+    if (/FROM labor_project p/.test(sql)) return [authorized || !sql.includes('sys_user_project')
+      ? [{ projectId: 12 }] : []];
+    if (/FROM attendance_daily_closure_events/.test(sql)) return [[event]];
+    throw new Error(`重放请求不应继续：${sql}`);
+  };
+  const scopedUser = { ...user, dataScope: 5 };
+  await assert.rejects(
+    withTransaction(closureReplayResponder(replayEvent, false), () =>
+      closureService.confirmDailyClosure(3, scopedUser, 9, {
+        projectId: 12, shiftDate: '2026-09-29', clientRequestId: 'closure-confirm-12-20260929-v1'
+      })),
+    error => error.businessCode === 'PROJECT_FORBIDDEN'
+  );
+  await assert.rejects(
+    withTransaction(closureReplayResponder(replayEvent, true), () =>
+      closureService.confirmDailyClosure(3, user, 9, {
+        projectId: 12, shiftDate: '2026-09-30', clientRequestId: 'closure-confirm-12-20260929-v1'
+      })),
+    error => error.businessCode === 'ATTENDANCE_REQUEST_CONFLICT'
+  );
+  await assert.rejects(
+    withTransaction(closureReplayResponder(replayEvent, true), () =>
+      closureService.confirmDailyClosure(3, user, 9, {
+        projectId: 13, shiftDate: '2026-09-29', clientRequestId: 'closure-confirm-12-20260929-v1'
+      })),
+    error => error.businessCode === 'ATTENDANCE_REQUEST_CONFLICT'
+  );
+  await assert.rejects(
+    withTransaction(closureReplayResponder(replayEvent, true), () =>
+      closureService.reopenDailyClosure(3, user, 9, {
+        projectId: 12, shiftDate: '2026-09-29', reason: '测试重开',
+        clientRequestId: 'closure-confirm-12-20260929-v1'
+      })),
+    error => error.businessCode === 'ATTENDANCE_REQUEST_CONFLICT'
+  );
 
   await assert.rejects(
     withTransaction(baseResponder([], {
@@ -115,6 +154,35 @@ async function run() {
   assert.match(reviewUpdate.sql, /review_status='APPROVED'/);
   assert.doesNotMatch(reviewUpdate.sql, /result_status\s*=/);
   assert.ok(reviewWrites.some(item => /INSERT INTO attendance_daily_review_events/.test(item.sql)));
+
+  const reviewReplayEvent = {
+    dailyResultId: 55, projectId: 12, actionType: 'CONFIRM_EXCEPTION', resultStatus: 'MISSING_PUNCH'
+  };
+  const reviewReplayResponder = (event, authorized) => async sql => {
+    if (/FROM attendance_daily_review_events/.test(sql)) return [[event]];
+    if (/FROM labor_project p/.test(sql)) return [authorized || !sql.includes('sys_user_project')
+      ? [{ projectId: 12 }] : []];
+    throw new Error(`核实重放请求不应继续：${sql}`);
+  };
+  const reviewReplay = await withTransaction(reviewReplayResponder(reviewReplayEvent, true), () =>
+    closureService.reviewDailyException(3, user, 9, 55, {
+      action: 'CONFIRM_EXCEPTION', reviewComment: '重复核实', clientRequestId: 'daily-review-55-20260929'
+    }));
+  assert.deepEqual(reviewReplay, reviewed);
+  await assert.rejects(
+    withTransaction(reviewReplayResponder(reviewReplayEvent, false), () =>
+      closureService.reviewDailyException(3, scopedUser, 9, 55, {
+        action: 'CONFIRM_EXCEPTION', reviewComment: '重复核实', clientRequestId: 'daily-review-55-20260929'
+      })),
+    error => error.businessCode === 'PROJECT_FORBIDDEN'
+  );
+  await assert.rejects(
+    withTransaction(reviewReplayResponder(reviewReplayEvent, true), () =>
+      closureService.reviewDailyException(3, user, 9, 56, {
+        action: 'CONFIRM_EXCEPTION', reviewComment: '另一条核实', clientRequestId: 'daily-review-55-20260929'
+      })),
+    error => error.businessCode === 'ATTENDANCE_REQUEST_CONFLICT'
+  );
 
   await assert.rejects(
     withTransaction(async sql => {

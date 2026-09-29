@@ -44,7 +44,7 @@ async function getClosure(client, companyId, projectId, shiftDate, options = {})
   return rows[0] || null;
 }
 
-async function replayClosureEvent(client, companyId, clientRequestId) {
+async function replayClosureEvent(client, companyId, clientRequestId, expected) {
   const rows = await query(client, `SELECT action_type AS actionType,project_id AS projectId,
       shift_date AS shiftDate,version_no AS versionNo
     FROM attendance_daily_closure_events
@@ -53,6 +53,11 @@ async function replayClosureEvent(client, companyId, clientRequestId) {
     clientRequestId
   });
   if (!rows[0]) return null;
+  if (Number(rows[0].projectId) !== expected.projectId
+    || String(rows[0].shiftDate).slice(0, 10) !== expected.shiftDate
+    || rows[0].actionType !== expected.actionType) {
+    throw createError('请求编号已用于其他考勤操作', 409, 'ATTENDANCE_REQUEST_CONFLICT');
+  }
   return {
     projectId: Number(rows[0].projectId),
     shiftDate: String(rows[0].shiftDate).slice(0, 10),
@@ -136,9 +141,11 @@ function closureInput(body) {
 async function confirmDailyClosure(companyId, user, operatorId, body = {}) {
   const values = closureInput(body);
   return database.transaction(async client => {
-    const replay = await replayClosureEvent(client, companyId, values.clientRequestId);
-    if (replay) return replay;
     await assertProject(client, companyId, user, values.projectId);
+    const replay = await replayClosureEvent(client, companyId, values.clientRequestId, {
+      ...values, actionType: 'CONFIRM'
+    });
+    if (replay) return replay;
     const closure = await ensureClosure(client, companyId, values.projectId, values.shiftDate);
     if (await pendingAttendanceCount(client, companyId, values.projectId, values.shiftDate)) {
       throw createError('仍有考勤异常、待审核申请或未结束班次', 409, 'ATTENDANCE_PENDING');
@@ -163,9 +170,11 @@ async function reopenDailyClosure(companyId, user, operatorId, body = {}) {
   const reason = String(body.reason || '').trim().slice(0, 255);
   if (!reason) throw createError('重新打开考勤必须填写原因', 400, 'REOPEN_REASON_REQUIRED');
   return database.transaction(async client => {
-    const replay = await replayClosureEvent(client, companyId, values.clientRequestId);
-    if (replay) return replay;
     await assertProject(client, companyId, user, values.projectId);
+    const replay = await replayClosureEvent(client, companyId, values.clientRequestId, {
+      ...values, actionType: 'REOPEN'
+    });
+    if (replay) return replay;
     const closure = await ensureClosure(client, companyId, values.projectId, values.shiftDate);
     if (closure.status !== 'CONFIRMED') {
       throw createError('该考勤日尚未确认', 409, 'ATTENDANCE_NOT_CONFIRMED');
@@ -204,13 +213,19 @@ async function reviewDailyException(companyId, user, operatorId, resultIdValue, 
     throw createError('缺少有效的请求编号', 400, 'INVALID_REQUEST_ID');
   }
   return database.transaction(async client => {
-    const replayRows = await query(client, `SELECT daily_result_id AS dailyResultId,result_status AS resultStatus
+    const replayRows = await query(client, `SELECT daily_result_id AS dailyResultId,
+        project_id AS projectId,action_type AS actionType,result_status AS resultStatus
       FROM attendance_daily_review_events
       WHERE company_id=:companyId AND client_request_id=:clientRequestId LIMIT 1`, {
       companyId,
       clientRequestId
     });
     if (replayRows[0]) {
+      await assertProject(client, companyId, user, Number(replayRows[0].projectId));
+      if (Number(replayRows[0].dailyResultId) !== resultId
+        || replayRows[0].actionType !== 'CONFIRM_EXCEPTION') {
+        throw createError('请求编号已用于其他考勤操作', 409, 'ATTENDANCE_REQUEST_CONFLICT');
+      }
       return {
         id: Number(replayRows[0].dailyResultId),
         resultStatus: replayRows[0].resultStatus,
