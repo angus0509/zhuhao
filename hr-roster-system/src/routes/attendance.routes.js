@@ -1,6 +1,7 @@
 const express = require('express');
 const controller = require('../controllers/attendance.controller');
 const { requireAuth, requireEmployeeAccount, requirePermission } = require('../middlewares/auth.middleware');
+const { sensitiveLimiter } = require('../middlewares/rate-limit.middleware');
 
 const router = express.Router();
 router.get('/attendance/projects', requireAuth, requirePermission('attendance:view'), controller.projects);
@@ -8,6 +9,10 @@ router.get('/attendance/projects/:projectId/settings', requireAuth, requirePermi
 router.put('/attendance/projects/:projectId/settings', requireAuth, requirePermission('attendance:manage'), controller.saveProjectSettings);
 router.get('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:view'), controller.projectExceptions);
 router.put('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:manage'), controller.saveProjectException);
+router.get('/attendance/workbench', requireAuth, requirePermission('attendance:view'), controller.workbench);
+router.post('/attendance/daily-close', sensitiveLimiter, requireAuth, requirePermission('attendance:review'), controller.confirmDailyClosure);
+router.put('/attendance/daily-results/:id/review', sensitiveLimiter, requireAuth, requirePermission('attendance:review'), controller.reviewDailyException);
+router.post('/attendance/daily-reopen', sensitiveLimiter, requireAuth, requirePermission('attendance:review'), controller.reopenDailyClosure);
 router.get('/employee/attendance/month', requireAuth, requireEmployeeAccount, controller.employeeMonth);
 router.get('/employee/attendance/today', requireAuth, requireEmployeeAccount, controller.employeeToday);
 router.post('/employee/attendance/punch', requireAuth, requireEmployeeAccount, controller.punch);

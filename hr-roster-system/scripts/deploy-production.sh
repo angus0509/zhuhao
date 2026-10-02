@@ -185,6 +185,8 @@ run_migration "$STAGE_DIR/sql/migrate-attendance-timekeeping-20260909.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-geofence-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-attendance-daily-closure-20260929.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-wage-daily-settlement-events-20260929.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -293,6 +295,16 @@ test "$PROJECT_ATTENDANCE_RULE_CONSTRAINT" = "1" || { echo "项目考勤规则�
 
 HOURLY_WAGE_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_project_shift_rules','attendance_allowance_rules','employee_pay_profiles','wage_calculation_runs','wage_calculation_daily_lines','wage_daily_payments')")"
 test "$HOURLY_WAGE_TABLE_COUNT" = "6" || { echo "小时工资核心表迁移不完整: $HOURLY_WAGE_TABLE_COUNT/6" >&2; exit 1; }
+
+ATTENDANCE_CLOSURE_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME IN ('attendance_daily_closures','attendance_daily_closure_events','attendance_daily_review_events')")"
+test "$ATTENDANCE_CLOSURE_TABLE_COUNT" = "3" || { echo "考勤日确认表迁移不完整: $ATTENDANCE_CLOSURE_TABLE_COUNT/3" >&2; exit 1; }
+
+DAILY_PAYMENT_EVENT_TABLE_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='wage_daily_payment_events'")"
+test "$DAILY_PAYMENT_EVENT_TABLE_COUNT" = "1" || { echo "日结事件表迁移不完整" >&2; exit 1; }
+DAILY_PAYMENT_SNAPSHOT_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='wage_calculation_daily_lines' AND COLUMN_NAME IN ('attendance_closure_id','attendance_closure_version')")"
+test "$DAILY_PAYMENT_SNAPSHOT_COLUMN_COUNT" = "2" || { echo "日结考勤版本字段迁移不完整" >&2; exit 1; }
+DAILY_PREVIEW_REQUEST_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='wage_calculation_runs' AND COLUMN_NAME='client_request_id'")"
+test "$DAILY_PREVIEW_REQUEST_COLUMN_COUNT" = "1" || { echo "日结预览幂等字段迁移不完整" >&2; exit 1; }
 
 HOURLY_WAGE_COLUMN_COUNT="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND ((TABLE_NAME='attendance_schedules' AND COLUMN_NAME IN ('shift_type','project_shift_rule_id')) OR (TABLE_NAME='salary_batch' AND COLUMN_NAME IN ('source_type','calculation_run_id')))")"
 test "$HOURLY_WAGE_COLUMN_COUNT" = "4" || { echo "小时工资扩展字段迁移不完整: $HOURLY_WAGE_COLUMN_COUNT/4" >&2; exit 1; }

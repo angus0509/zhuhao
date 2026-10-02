@@ -20,7 +20,8 @@ for (const id of [
   'attendanceCustomerFilter', 'attendanceProjectFilter', 'attendanceDate', 'attendanceMonth',
   'attendanceProjectSettingsForm', 'attendanceCalendarForm', 'attendanceGeofenceForm',
   'attendanceProjectContext', 'attendanceDailyBody', 'attendanceMonthlyBody',
-  'attendanceCalendarBody', 'attendanceGeofenceBody', 'attendanceProjectGeofenceOptions'
+  'attendanceCalendarBody', 'attendanceGeofenceBody', 'attendanceProjectGeofenceOptions',
+  'attendanceExceptionSummary', 'attendanceExceptionBody', 'attendanceClosureStatus'
 ]) assert.match(html, new RegExp(`id="${id}"`), `${id} missing`);
 
 for (const tab of ['daily', 'monthly', 'settings', 'geofences']) {
@@ -30,6 +31,7 @@ for (const tab of ['daily', 'monthly', 'settings', 'geofences']) {
 
 for (const name of [
   'loadAttendanceProjects', 'selectAttendanceProject', 'loadAttendanceDaily',
+  'loadAttendanceWorkbench',
   'loadAttendanceMonthly', 'loadAttendanceProjectSettings',
   'saveAttendanceProjectSettings', 'loadAttendanceCustomerGeofences'
 ]) assert.match(js, new RegExp(`(?:async )?function ${name}\\(`), `${name} missing`);

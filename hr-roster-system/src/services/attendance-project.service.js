@@ -179,6 +179,7 @@ async function listProjects(companyId, user) {
 }
 
 async function getProjectSettings(companyId, user, projectId) {
+  const canViewPayroll = Array.isArray(user?.permissions) && user.permissions.includes('payroll:view');
   return db.transaction(async client => {
     const project = await assertProject(client, companyId, user, projectId);
     const rules = await query(client, `SELECT id AS ruleId,rule_name AS ruleName,work_start_time AS workStartTime,
@@ -195,20 +196,23 @@ async function getProjectSettings(companyId, user, projectId) {
       ORDER BY geofence_id`, { companyId, projectId: positiveId(projectId) });
     const shifts = await query(client, `SELECT project_rule_id AS projectRuleId,shift_type AS shiftType,
         work_start_time AS workStartTime,work_end_time AS workEndTime,rest_start_time AS restStartTime,
-        rest_end_time AS restEndTime,standard_minutes AS standardMinutes,hourly_rate AS hourlyRate,status
+        rest_end_time AS restEndTime,standard_minutes AS standardMinutes,
+        ${canViewPayroll ? 'hourly_rate AS hourlyRate,' : ''}status
       FROM attendance_project_shift_rules
       WHERE company_id=:companyId AND project_id=:projectId
       ORDER BY project_rule_id,FIELD(shift_type,'DAY','NIGHT')`, { companyId, projectId: positiveId(projectId) });
-    const allowances = await query(client, `SELECT project_rule_id AS projectRuleId,allowance_name AS allowanceName,
+    const allowances = canViewPayroll ? await query(client, `SELECT project_rule_id AS projectRuleId,allowance_name AS allowanceName,
         shift_scope AS shiftScope,calculation_type AS calculationType,unit_amount AS unitAmount,sort_order AS sortOrder,status
       FROM attendance_allowance_rules
       WHERE company_id=:companyId AND project_id=:projectId
-      ORDER BY project_rule_id,sort_order,id`, { companyId, projectId: positiveId(projectId) });
+      ORDER BY project_rule_id,sort_order,id`, { companyId, projectId: positiveId(projectId) }) : [];
     const shiftsByRule = new Map();
     for (const shift of shifts) {
       const key = Number(shift.projectRuleId);
       if (!shiftsByRule.has(key)) shiftsByRule.set(key, []);
-      shiftsByRule.get(key).push({ ...shift, standardHours: Number(shift.standardMinutes) / 60 });
+      const { hourlyRate, ...nonMonetaryShift } = shift;
+      shiftsByRule.get(key).push({ ...nonMonetaryShift,
+        ...(canViewPayroll ? { hourlyRate } : {}), standardHours: Number(shift.standardMinutes) / 60 });
     }
     const allowancesByRule = new Map();
     for (const allowance of allowances) {
@@ -223,13 +227,13 @@ async function getProjectSettings(companyId, user, projectId) {
           projectRuleId: Number(rule.ruleId), shiftType: 'DAY', workStartTime: rule.workStartTime,
           workEndTime: rule.workEndTime, restStartTime: rule.restStartTime, restEndTime: rule.restEndTime,
           standardMinutes: Number(rule.standardMinutes), standardHours: Number(rule.standardMinutes) / 60,
-          hourlyRate: null, status: rule.status
+          ...(canViewPayroll ? { hourlyRate: null } : {}), status: rule.status
         }];
         return {
           ...rule,
           workWeekdays: String(rule.workWeekdays).split(',').map(Number),
           shifts: configuredShifts,
-          allowances: allowancesByRule.get(Number(rule.ruleId)) || []
+          ...(canViewPayroll ? { allowances: allowancesByRule.get(Number(rule.ruleId)) || [] } : {})
         };
       }),
       geofenceIds: geofences.map(item => Number(item.geofenceId))
@@ -238,6 +242,10 @@ async function getProjectSettings(companyId, user, projectId) {
 }
 
 async function saveProjectSettings(companyId, user, operatorId, projectId, body = {}) {
+  if ((body.shifts != null || body.allowances != null)
+    && !(Array.isArray(user?.permissions) && user.permissions.includes('payroll:manage'))) {
+    throw createError('无薪资配置权限', 403, 'PAYROLL_PERMISSION_REQUIRED');
+  }
   const shifts = body.shifts == null ? null : validateShiftRules(body.shifts);
   const allowances = body.allowances == null ? [] : validateAllowances(body.allowances);
   const dayShift = shifts?.find(item => item.shiftType === 'DAY');

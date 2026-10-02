@@ -39,6 +39,14 @@ async function run() {
   const originalTransaction = db.transaction;
   const writes = [];
   try {
+    await assert.rejects(
+      () => service.saveProjectSettings(3, { id: 9, companyId: 3, dataScope: 1,
+        permissions: ['attendance:manage'] }, 9, 12, {
+        ruleName: '双班计薪规则', effectiveFrom: '2099-10-01', workWeekdays: [1, 2, 3, 4, 5, 6],
+        shifts: validShifts, allowances: validAllowances
+      }),
+      error => error.businessCode === 'PAYROLL_PERMISSION_REQUIRED'
+    );
     db.transaction = async handler => handler({
       execute: async (sql, params) => {
         writes.push({ sql, params });
@@ -48,7 +56,8 @@ async function run() {
         return [{ insertId: 100 }];
       }
     });
-    const saved = await service.saveProjectSettings(3, { id: 9, companyId: 3, dataScope: 1 }, 9, 12, {
+    const saved = await service.saveProjectSettings(3, { id: 9, companyId: 3, dataScope: 1,
+      permissions: ['payroll:manage'] }, 9, 12, {
       ruleName: '双班计薪规则', effectiveFrom: '2099-10-01', workWeekdays: [1, 2, 3, 4, 5, 6],
       lateGraceMinutes: 5, earlyGraceMinutes: 5, overtimeMinMinutes: 30,
       shifts: validShifts, allowances: validAllowances
@@ -85,10 +94,16 @@ async function run() {
         return [[]];
       }
     });
-    const settings = await service.getProjectSettings(3, { id: 9, companyId: 3, dataScope: 1 }, 12);
+    const settings = await service.getProjectSettings(3, { id: 9, companyId: 3, dataScope: 1,
+      permissions: ['payroll:view'] }, 12);
     assert.deepEqual(settings.rules[0].shifts.map(item => item.shiftType), ['DAY', 'NIGHT']);
     assert.equal(settings.rules[0].shifts[1].standardHours, 8);
     assert.equal(settings.rules[0].allowances[0].allowanceName, '夜班补贴');
+    const attendanceOnly = await service.getProjectSettings(3, { id: 9, companyId: 3, dataScope: 1,
+      permissions: ['attendance:view'] }, 12);
+    assert.equal(JSON.stringify(attendanceOnly).includes('hourlyRate'), false);
+    assert.equal(JSON.stringify(attendanceOnly).includes('unitAmount'), false);
+    assert.equal(attendanceOnly.rules[0].shifts[1].standardHours, 8);
   } finally {
     db.transaction = originalTransaction;
   }

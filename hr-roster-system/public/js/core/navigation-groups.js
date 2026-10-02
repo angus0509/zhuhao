@@ -33,6 +33,7 @@
       shortLabel: '薪资',
       items: [
         { view: 'payroll', label: '工资条发放', permissions: ['payroll:menu', 'payroll:view'] },
+        { view: 'dailySettlement', label: '日结薪资', permissions: ['payroll:view'] },
         { view: 'advances', label: '预支记录', permissions: ['advance:menu', 'advance:view'] }
       ]
     },

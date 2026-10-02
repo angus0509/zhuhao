@@ -1,6 +1,8 @@
 const service = require('../services/attendance.service');
 const geofenceService = require('../services/attendance-geofence-management.service');
 const projectService = require('../services/attendance-project.service');
+const workbenchService = require('../services/attendance-workbench.service');
+const closureService = require('../services/attendance-closure.service');
 const { success, asyncHandler } = require('../utils/response');
 
 exports.employeeMonth = asyncHandler(async (req, res) => success(res, await service.getEmployeeMonth(req.companyId, req.user.employeeId, req.query.month)));
@@ -22,3 +24,7 @@ exports.projectSettings = asyncHandler(async (req, res) => success(res, await pr
 exports.saveProjectSettings = asyncHandler(async (req, res) => success(res, await projectService.saveProjectSettings(req.companyId, req.user, req.operatorId, Number(req.params.projectId), req.body), '项目考勤规则已保存'));
 exports.projectExceptions = asyncHandler(async (req, res) => success(res, { list: await projectService.listCalendar(req.companyId, req.user, Number(req.params.projectId), req.query.month) }));
 exports.saveProjectException = asyncHandler(async (req, res) => success(res, await projectService.saveCalendarDay(req.companyId, req.user, req.operatorId, Number(req.params.projectId), req.body), '特殊日期已保存'));
+exports.workbench = asyncHandler(async (req, res) => success(res, await workbenchService.getWorkbench(req.companyId, req.user, req.query)));
+exports.confirmDailyClosure = asyncHandler(async (req, res) => success(res, await closureService.confirmDailyClosure(req.companyId, req.user, req.operatorId, req.body), '考勤日已确认'));
+exports.reviewDailyException = asyncHandler(async (req, res) => success(res, await closureService.reviewDailyException(req.companyId, req.user, req.operatorId, Number(req.params.id), req.body), '考勤异常已确认'));
+exports.reopenDailyClosure = asyncHandler(async (req, res) => success(res, await closureService.reopenDailyClosure(req.companyId, req.user, req.operatorId, req.body), '考勤日已重新打开'));

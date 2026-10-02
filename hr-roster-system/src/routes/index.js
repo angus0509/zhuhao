@@ -14,6 +14,7 @@ const payslipRoutes = require('./payslip.routes');
 const smsRoutes = require('./sms.routes');
 const wechatOfficialRoutes = require('./wechat-official.routes');
 const attendanceRoutes = require('./attendance.routes');
+const dailySettlementRoutes = require('./daily-settlement.routes');
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.use(employeeAuthRoutes);
 router.use(smsRoutes);
 router.use(wechatOfficialRoutes);
 router.use(attendanceRoutes);
+router.use(dailySettlementRoutes);
 router.use(employeeRoutes);
 router.use(riskRoutes);
 router.use(operationsRoutes);

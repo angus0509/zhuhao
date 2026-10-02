@@ -40,6 +40,7 @@ function blockedResult(reason, dailyPaidAmount = '0.00') {
 }
 
 function calculateLine(row, allowances, dailyPaidAmount) {
+  if (row.attendanceClosureStatus !== 'CONFIRMED') return blockedResult('考勤日未确认', dailyPaidAmount);
   if (Number(row.pendingExceptionCount || 0) > 0) return blockedResult('考勤异常待处理', dailyPaidAmount);
   if (!row.settlementMode) return blockedResult('未设置员工计薪方式', dailyPaidAmount);
   if (!row.shiftType || !row.projectShiftRuleId) return blockedResult('未设置员工班次', dailyPaidAmount);
@@ -73,6 +74,8 @@ async function loadAttendanceRows(client, companyId, projectId, salaryMonth) {
       d.approved_normal_minutes AS approvedNormalMinutes,
       d.approved_overtime_minutes AS approvedOvertimeMinutes,
       d.result_status AS resultStatus,d.review_status AS reviewStatus,
+      closure.id AS attendanceClosureId,closure.status AS attendanceClosureStatus,
+      closure.version_no AS attendanceClosureVersion,
       COALESCE(s.project_rule_id,
         (SELECT pr.id FROM attendance_project_rules pr
           WHERE pr.company_id=d.company_id AND pr.project_id=d.project_id AND pr.status=1
@@ -86,6 +89,8 @@ async function loadAttendanceRows(client, companyId, projectId, salaryMonth) {
           AND correction.shift_date=d.shift_date AND correction.status='PENDING') AS pendingExceptionCount
     FROM attendance_daily_results d
     JOIN hr_employee e ON e.id=d.employee_id AND e.company_id=d.company_id
+    LEFT JOIN attendance_daily_closures closure ON closure.company_id=d.company_id
+      AND closure.project_id=d.project_id AND closure.shift_date=d.shift_date
     LEFT JOIN attendance_schedules s ON s.id=d.schedule_id AND s.company_id=d.company_id
     LEFT JOIN employee_pay_profiles profile ON profile.id=(
       SELECT profile_lookup.id FROM employee_pay_profiles profile_lookup
@@ -141,11 +146,13 @@ async function loadDailyPayments(client, companyId, projectId, salaryMonth) {
 
 async function insertDailyLine(client, companyId, runId, projectId, row, result) {
   return query(client, `INSERT INTO wage_calculation_daily_lines
-    (company_id,run_id,project_id,employee_id,shift_date,attendance_result_id,project_rule_id,
+    (company_id,run_id,project_id,employee_id,shift_date,attendance_result_id,
+     attendance_closure_id,attendance_closure_version,project_rule_id,
      project_shift_rule_id,shift_type,settlement_mode,worked_minutes,approved_minutes,payable_minutes,
      hourly_rate,base_amount,allowance_amount,earned_amount,daily_paid_amount,payable_amount,
      allowance_snapshot,calculation_status,blocked_reason)
-    VALUES (:companyId,:runId,:projectId,:employeeId,:shiftDate,:attendanceResultId,:projectRuleId,
+    VALUES (:companyId,:runId,:projectId,:employeeId,:shiftDate,:attendanceResultId,
+      :attendanceClosureId,:attendanceClosureVersion,:projectRuleId,
       :projectShiftRuleId,:shiftType,:settlementMode,:workedMinutes,:approvedMinutes,:payableMinutes,
       :hourlyRate,:baseAmount,:allowanceAmount,:earnedAmount,:dailyPaidAmount,:payableAmount,
       :allowanceSnapshot,:calculationStatus,:blockedReason)`, {
@@ -155,6 +162,10 @@ async function insertDailyLine(client, companyId, runId, projectId, row, result)
     employeeId: Number(row.employeeId),
     shiftDate: String(row.shiftDate).slice(0, 10),
     attendanceResultId: positiveId(row.attendanceResultId) || null,
+    attendanceClosureId: row.attendanceClosureStatus === 'CONFIRMED'
+      ? positiveId(row.attendanceClosureId) || null : null,
+    attendanceClosureVersion: row.attendanceClosureStatus === 'CONFIRMED'
+      ? Number(row.attendanceClosureVersion || 0) : null,
     projectRuleId: positiveId(row.projectRuleId) || null,
     projectShiftRuleId: positiveId(row.projectShiftRuleId) || null,
     shiftType: row.shiftType || null,
@@ -179,11 +190,30 @@ async function createPreview(companyIdValue, user, operatorIdValue, body = {}) {
   const operatorId = positiveId(operatorIdValue);
   const projectId = positiveId(body.projectId);
   const salaryMonth = String(body.salaryMonth || '');
+  const clientRequestId = body.clientRequestId == null ? null : String(body.clientRequestId);
   if (!companyId || !operatorId || !projectId || !validMonth(salaryMonth)) {
     throw createError('工资计算参数无效', 400, 'INVALID_WAGE_CALCULATION');
   }
+  if (clientRequestId !== null && !/^[A-Za-z0-9:_-]{8,64}$/.test(clientRequestId)) {
+    throw createError('预览请求编号无效', 400, 'INVALID_REQUEST_ID');
+  }
   return db.transaction(async client => {
     await assertProject(client, companyId, user, projectId);
+    if (clientRequestId) {
+      const existing = await query(client, `SELECT id,project_id AS projectId,
+          salary_month AS salaryMonth,revision_no AS revisionNo
+        FROM wage_calculation_runs
+        WHERE company_id=:companyId AND client_request_id=:clientRequestId LIMIT 1`, {
+        companyId, clientRequestId
+      });
+      if (existing[0]) {
+        if (Number(existing[0].projectId) !== projectId || existing[0].salaryMonth !== salaryMonth) {
+          throw createError('请求编号已用于其他工资预览', 409, 'WAGE_PREVIEW_REQUEST_CONFLICT');
+        }
+        return { runId: Number(existing[0].id), projectId, salaryMonth,
+          revisionNo: Number(existing[0].revisionNo), replayed: true };
+      }
+    }
     const runs = await query(client, `SELECT id,revision_no AS revisionNo,status
       FROM wage_calculation_runs
       WHERE company_id=:companyId AND project_id=:projectId AND salary_month=:salaryMonth
@@ -223,10 +253,10 @@ async function createPreview(companyIdValue, user, operatorIdValue, body = {}) {
     };
     const inserted = await query(client, `INSERT INTO wage_calculation_runs
       (company_id,project_id,salary_month,revision_no,status,total_earned,total_daily_paid,total_payable,
-       blocked_count,created_by)
+       blocked_count,created_by,client_request_id)
       VALUES (:companyId,:projectId,:salaryMonth,:revisionNo,'PREVIEW',:totalEarned,:totalDailyPaid,
-        :totalPayable,:blockedCount,:operatorId)`, {
-      companyId, projectId, salaryMonth, revisionNo, blockedCount, operatorId, ...totals
+        :totalPayable,:blockedCount,:operatorId,:clientRequestId)`, {
+      companyId, projectId, salaryMonth, revisionNo, blockedCount, operatorId, clientRequestId, ...totals
     });
     const runId = Number(inserted.insertId);
     for (const line of lines) await insertDailyLine(client, companyId, runId, projectId, line.row, line.result);

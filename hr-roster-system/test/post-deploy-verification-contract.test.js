@@ -13,6 +13,10 @@ assert.match(source, /HEALTH_STATUS[^\n]*200/, '健康接口必须返回 HTTP 20
 assert.doesNotMatch(source, /"database"[^\n]*"connected"|database.*connected/, '上线检查不得依赖公网健康接口的数据库详情');
 assert.match(source, /Strict-Transport-Security/i, '上线后验证必须检查 HSTS 响应头');
 assert.match(source, /\/js\/views\/roster\.js/, '上线后验证必须读取实际花名册资源');
+assert.match(source, /\/js\/views\/daily-settlement\.js/, '上线后验证必须读取日结页面资源');
+assert.match(source, /loadDailySettlement/, '上线后验证必须确认日结页面入口');
+assert.match(source, /\/api\/attendance\/workbench/, '上线后验证必须检查考勤工作台未登录拦截');
+assert.match(source, /\/api\/wage-daily-settlements/, '上线后验证必须检查日结未登录拦截');
 assert.match(source, /grep -Fq ['"]'activeRoster'['"]/, '上线后验证必须确认网页花名册声明在职视图');
 assert.match(source, /view \? `view=\$\{view\}`/, '上线后验证必须确认在职视图参数会写入请求');
 assert.doesNotMatch(source, /grep -Fq ['"]view=activeRoster['"]/, '上线后验证不得依赖源码中不存在的固定查询字符串');
