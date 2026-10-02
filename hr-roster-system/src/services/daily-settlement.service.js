@@ -167,7 +167,8 @@ function batchInput(body) {
 
 async function replayBatch(client, companyId, input) {
   const events = await query(client, `SELECT employee_id AS employeeId,amount,
-      action_type AS actionType,project_id AS projectId,shift_date AS shiftDate
+      action_type AS actionType,project_id AS projectId,shift_date AS shiftDate,
+      run_id AS runId,closure_version AS closureVersion
     FROM wage_daily_payment_events
     WHERE company_id=:companyId AND client_request_id=:clientRequestId
     ORDER BY employee_id`, { companyId, clientRequestId: input.clientRequestId });
@@ -176,6 +177,8 @@ async function replayBatch(client, companyId, input) {
     Number(event.employeeId) === input.employeeIds[index]
     && Number(event.projectId) === input.projectId
     && String(event.shiftDate).slice(0, 10) === input.shiftDate
+    && Number(event.runId) === input.runId
+    && Number(event.closureVersion) === input.closureVersion
     && ['MARK_PAID', 'REPAID'].includes(event.actionType));
   if (!same) throw createError('请求编号已用于其他日结操作', 409, 'DAILY_REQUEST_CONFLICT');
   return { status: 'PAID', paidCount: events.length,

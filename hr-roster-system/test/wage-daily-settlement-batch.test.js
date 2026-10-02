@@ -18,7 +18,11 @@ async function withTransaction(execute, callback) {
 function responder(writes, overrides = {}) {
   return async (sql, params) => {
     if (!/^\s*SELECT\b/i.test(sql)) writes.push({ sql, params });
-    if (/FROM wage_daily_payment_events/.test(sql)) return [overrides.events || []];
+    if (/FROM wage_daily_payment_events/.test(sql)) {
+      assert.match(sql, /run_id AS runId/);
+      assert.match(sql, /closure_version AS closureVersion/);
+      return [overrides.events || []];
+    }
     if (/FROM labor_project p/.test(sql)) return [[{ projectId: 12 }]];
     if (/FROM attendance_daily_closures/.test(sql)) {
       return [[{ id: 91, status: overrides.closureStatus || 'CONFIRMED', versionNo: overrides.closureVersion || 3 }]];
@@ -43,18 +47,32 @@ async function run() {
   assert.equal(writes.filter(item => /INSERT INTO hr_operation_log/.test(item.sql)).length, 1);
 
   const replayWrites = [];
-  const replay = await withTransaction(responder(replayWrites, { events: [
-    { employeeId: 101, amount: '180.00', actionType: 'MARK_PAID', projectId: 12, shiftDate: '2026-09-29' },
-    { employeeId: 102, amount: '180.00', actionType: 'MARK_PAID', projectId: 12, shiftDate: '2026-09-29' }
-  ] }), () => service.confirmBatch(3, user, 9, request));
+  const originalEvents = [
+    { employeeId: 101, amount: '180.00', actionType: 'MARK_PAID', projectId: 12,
+      shiftDate: '2026-09-29', runId: 81, closureVersion: 3 },
+    { employeeId: 102, amount: '180.00', actionType: 'MARK_PAID', projectId: 12,
+      shiftDate: '2026-09-29', runId: 81, closureVersion: 3 }
+  ];
+  const replay = await withTransaction(responder(replayWrites, { events: originalEvents }), () =>
+    service.confirmBatch(3, user, 9, request));
   assert.deepEqual(replay, paid);
   assert.equal(replayWrites.length, 0);
 
   await assert.rejects(
+    withTransaction(responder([], { events: originalEvents }), () =>
+      service.confirmBatch(3, user, 9, { ...request, runId: 82 })),
+    error => error.businessCode === 'DAILY_REQUEST_CONFLICT'
+  );
+  await assert.rejects(
+    withTransaction(responder([], { events: originalEvents }), () =>
+      service.confirmBatch(3, user, 9, { ...request, closureVersion: 4 })),
+    error => error.businessCode === 'DAILY_REQUEST_CONFLICT'
+  );
+
+  await assert.rejects(
     withTransaction(async sql => {
       if (/FROM wage_daily_payment_events/.test(sql)) return [[
-        { employeeId: 101, amount: '180.00', actionType: 'MARK_PAID', projectId: 12, shiftDate: '2026-09-29' },
-        { employeeId: 102, amount: '180.00', actionType: 'MARK_PAID', projectId: 12, shiftDate: '2026-09-29' }
+        ...originalEvents
       ]];
       if (/FROM labor_project p/.test(sql)) return [[]];
       throw new Error('未授权请求不可继续');
