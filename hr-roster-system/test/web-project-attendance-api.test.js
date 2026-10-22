@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const routes = fs.readFileSync('src/routes/attendance.routes.js', 'utf8');
 const controller = fs.readFileSync('src/controllers/attendance.controller.js', 'utf8');
 
-assert.match(routes, /get\('\/attendance\/projects', requireAuth, requirePermission\('attendance:view'\), controller\.projects\)/);
+assert.match(routes,
+  /get\('\/attendance\/projects', requireAuth,\s*requireAnyPermission\(\['attendance:view', 'attendance:review'\]\),\s*controller\.projects\)/);
 assert.match(routes, /get\('\/attendance\/projects\/:projectId\/settings', requireAuth, requirePermission\('attendance:view'\), controller\.projectSettings\)/);
 assert.match(routes, /put\('\/attendance\/projects\/:projectId\/settings', requireAuth, requirePermission\('attendance:manage'\), controller\.saveProjectSettings\)/);
 assert.match(routes, /get\('\/attendance\/projects\/:projectId\/exceptions', requireAuth, requirePermission\('attendance:view'\), controller\.projectExceptions\)/);

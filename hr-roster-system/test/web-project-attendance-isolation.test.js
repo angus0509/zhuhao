@@ -185,7 +185,9 @@ async function run() {
       if (/FROM labor_project p/.test(sql)) return [[]];
       return [[]];
     } });
-    await assert.rejects(service.reviewCorrection(3, onsite, 5, { action: 'REJECT' }),
+    await assert.rejects(service.reviewCorrection(3, onsite, 5, {
+      action: 'REJECT', reviewComment: '项目权限核查'
+    }),
       error => error.businessCode === 'PROJECT_FORBIDDEN');
     assert.match(reviewQueries[0].sql, /COALESCE\(p\.project_id,d\.project_id\) AS projectId/);
 
@@ -195,7 +197,9 @@ async function run() {
       }]];
       throw new Error('无项目快照时不应继续查询当前任职');
     } });
-    await assert.rejects(service.reviewCorrection(3, onsite, 6, { action: 'REJECT' }),
+    await assert.rejects(service.reviewCorrection(3, onsite, 6, {
+      action: 'REJECT', reviewComment: '历史项目核查'
+    }),
       error => error.businessCode === 'PROJECT_HISTORY_UNRESOLVED');
 
     const futureWrites = [];

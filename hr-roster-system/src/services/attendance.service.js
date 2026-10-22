@@ -165,7 +165,7 @@ async function listCorrections(companyId, user, params = {}) {
   await assertProjectAccess(database, companyId, user, projectId);
   const queryParams = { companyId, projectId, status: params.status || 'PENDING' };
   return database.query(`SELECT c.id,c.employee_id AS employeeId,e.name,c.shift_date AS shiftDate,c.request_type AS requestType,
-    c.reason,c.status,c.created_at AS createdAt,
+    c.requested_time AS requestedTime,c.reason,c.status,c.created_at AS createdAt,
     p.geofence_status AS geofenceStatus,p.distance_meters AS distanceMeters
     FROM attendance_correction_requests c JOIN hr_employee e ON e.id=c.employee_id AND e.company_id=c.company_id
     LEFT JOIN attendance_punches p ON c.punch_id=p.id AND p.company_id=c.company_id
@@ -176,6 +176,18 @@ async function listCorrections(companyId, user, params = {}) {
 
 async function reviewCorrection(companyId, user, id, body = {}) {
   if (!['APPROVE', 'REJECT'].includes(body.action)) throw createError('审核动作无效', 400, 'INVALID_REVIEW_ACTION');
+  const suppliedRequestId = String(body.clientRequestId || '').trim();
+  const clientRequestId = suppliedRequestId || `legacy-review:${id}:${Number(user.id)}`;
+  if (suppliedRequestId && !/^[A-Za-z0-9:_-]{8,64}$/.test(suppliedRequestId)) {
+    throw createError('请求编号无效', 400, 'INVALID_CLIENT_REQUEST_ID');
+  }
+  const reviewComment = String(body.reviewComment || '').trim();
+  if (body.action === 'REJECT' && !reviewComment) {
+    throw createError('请填写驳回原因', 400, 'REVIEW_COMMENT_REQUIRED');
+  }
+  if (reviewComment.length > 500) {
+    throw createError('审核意见不能超过500字', 400, 'REVIEW_COMMENT_TOO_LONG');
+  }
   return database.transaction(async client => {
     const rows = await query(client, `SELECT c.*,COALESCE(p.project_id,d.project_id) AS projectId
       FROM attendance_correction_requests c
@@ -187,7 +199,18 @@ async function reviewCorrection(companyId, user, id, body = {}) {
     if (!request.projectId) throw createError('历史项目归属待核查', 409, 'PROJECT_HISTORY_UNRESOLVED');
     await assertProjectAccess(client, companyId, user, Number(request.projectId));
     const status = body.action === 'APPROVE' ? 'APPROVED' : 'REJECTED';
-    await query(client, 'UPDATE attendance_correction_requests SET status=:status, reviewed_by=:reviewedBy, review_comment=:comment, reviewed_at=CURRENT_TIMESTAMP WHERE id=:id AND company_id=:companyId', { status, reviewedBy: user.id, comment: String(body.reviewComment || '').slice(0, 500), id, companyId });
+    const updateResult = await query(client, `UPDATE attendance_correction_requests
+      SET status=:status, reviewed_by=:reviewedBy, review_comment=:comment, reviewed_at=CURRENT_TIMESTAMP
+      WHERE id=:id AND company_id=:companyId AND status='PENDING'`, {
+      status,
+      reviewedBy: user.id,
+      comment: reviewComment || null,
+      id,
+      companyId
+    });
+    if (!updateResult.affectedRows) {
+      throw createError('补卡申请不存在或已处理', 404, 'CORRECTION_NOT_FOUND');
+    }
     if (status === 'APPROVED' && request.requested_time) {
       const type = request.request_type === 'MISSING_OUT' ? 'OUT' : 'IN';
       await query(client, `INSERT IGNORE INTO attendance_punches (company_id,employee_id,project_id,shift_date,punch_type,punch_time,source,client_request_id)
@@ -195,6 +218,14 @@ async function reviewCorrection(companyId, user, id, body = {}) {
       const schedule = await loadSchedule(client, companyId, request.employee_id, request.shift_date);
       if (schedule) await recalculateDaily(client, companyId, request.employee_id, request.shift_date, schedule);
     }
+    await query(client, `INSERT INTO hr_operation_log
+      (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
+      VALUES (:companyId,:operatorId,'考勤审核','attendance_correction',:correctionId,'review',:afterData)`, {
+      companyId,
+      operatorId: Number(user.id),
+      correctionId: id,
+      afterData: JSON.stringify({ clientRequestId, correctionId: id, action: body.action, result: status })
+    });
     return { id, status };
   });
 }

@@ -1,9 +1,16 @@
 const express = require('express');
 const controller = require('../controllers/attendance.controller');
-const { requireAuth, requireEmployeeAccount, requirePermission } = require('../middlewares/auth.middleware');
+const {
+  requireAuth,
+  requireEmployeeAccount,
+  requirePermission,
+  requireAnyPermission
+} = require('../middlewares/auth.middleware');
 
 const router = express.Router();
-router.get('/attendance/projects', requireAuth, requirePermission('attendance:view'), controller.projects);
+router.get('/attendance/projects', requireAuth,
+  requireAnyPermission(['attendance:view', 'attendance:review']),
+  controller.projects);
 router.get('/attendance/projects/:projectId/settings', requireAuth, requirePermission('attendance:view'), controller.projectSettings);
 router.put('/attendance/projects/:projectId/settings', requireAuth, requirePermission('attendance:manage'), controller.saveProjectSettings);
 router.get('/attendance/projects/:projectId/exceptions', requireAuth, requirePermission('attendance:view'), controller.projectExceptions);

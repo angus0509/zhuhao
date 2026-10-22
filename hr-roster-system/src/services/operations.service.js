@@ -199,9 +199,31 @@ async function updateCustomerPortfolio(companyId, customerId, body, operatorId, 
 
 async function listProjects(companyId, query, user) {
   const { page, pageSize, offset } = paging(query);
-  const params = { companyId, scopeUserId: user.id, pageSize, offset };
+  const keyword = String(query.keyword || '').trim();
+  const status = query.status === undefined || query.status === ''
+    ? null : Number(query.status);
+  if (status !== null && ![1, 2].includes(status)) {
+    throw createError('项目状态无效', 400, 'INVALID_PROJECT_STATUS');
+  }
+  const params = {
+    companyId,
+    scopeUserId: user.id,
+    pageSize,
+    offset,
+    keyword: `%${keyword}%`,
+    status
+  };
   const scope = projectScope(user, params, 'p');
-  const total = await db.first(`SELECT COUNT(*) total FROM labor_project p WHERE p.company_id = :companyId ${scope}`, params);
+  const filters = `${scope}
+    AND (:status IS NULL OR p.status=:status)
+    AND (:keyword='%%' OR p.project_name LIKE :keyword OR c.customer_name LIKE :keyword)`;
+  const total = await db.first(
+    `SELECT COUNT(*) total
+     FROM labor_project p
+     JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
+     WHERE p.company_id=:companyId ${filters}`,
+    params
+  );
   const list = await db.query(
     `SELECT p.id, p.customer_id customerId, p.project_code projectCode, p.project_name projectName, p.service_type serviceType,
             p.factory_name factoryName, p.factory_address factoryAddress, p.start_date startDate,
@@ -243,7 +265,7 @@ async function listProjects(companyId, query, user) {
             (SELECT COALESCE(SUM(sb.total_net),0) FROM salary_batch sb WHERE sb.company_id=p.company_id AND sb.project_id=p.id AND sb.batch_status=5) payrollNet
      FROM labor_project p JOIN crm_customer c ON c.id = p.customer_id AND c.company_id = p.company_id
      LEFT JOIN sys_user u ON u.id = p.manager_user_id
-     WHERE p.company_id = :companyId ${scope} ORDER BY p.id DESC LIMIT :pageSize OFFSET :offset`, params
+     WHERE p.company_id = :companyId ${filters} ORDER BY p.id DESC LIMIT :pageSize OFFSET :offset`, params
   );
   return {
     page, pageSize, total: Number(total.total),
