@@ -803,6 +803,217 @@ async function payrollOverview(companyId, user, query = {}) {
   };
 }
 
+async function countScopedActiveProjects(companyId, user) {
+  const params = { companyId };
+  const scope = projectScope(user, params, 'p');
+  const row = await db.first(
+    `SELECT COUNT(*) total
+     FROM labor_project p
+     WHERE p.company_id=:companyId AND p.status=2 ${scope}`,
+    params
+  );
+  return Number(row?.total || 0);
+}
+
+async function countScopedActiveEmployees(companyId, user) {
+  const params = { companyId };
+  const scope = employeeScope(user, params, 'e', 'j');
+  const row = await db.first(
+    `SELECT COUNT(DISTINCT e.id) total
+     FROM hr_employee e
+     JOIN hr_employee_job j ON j.employee_id=e.id
+       AND j.company_id=e.company_id AND j.job_status=1
+     WHERE e.company_id=:companyId AND e.employee_status=2
+       AND e.deleted_at IS NULL ${scope}`,
+    params
+  );
+  return Number(row?.total || 0);
+}
+
+async function countScopedPendingCorrections(companyId, user) {
+  const params = { companyId };
+  const scope = projectScope(user, params, 'correction_project');
+  const row = await db.first(
+    `SELECT COUNT(DISTINCT c.id) total
+     FROM attendance_correction_requests c
+     LEFT JOIN attendance_punches punch
+       ON punch.id=c.punch_id AND punch.company_id=c.company_id
+     LEFT JOIN attendance_daily_results daily
+       ON daily.company_id=c.company_id AND daily.employee_id=c.employee_id
+       AND daily.shift_date=c.shift_date
+     LEFT JOIN labor_project correction_project
+       ON correction_project.id=COALESCE(punch.project_id,daily.project_id)
+       AND correction_project.company_id=c.company_id
+     WHERE c.company_id=:companyId AND c.status='PENDING'
+       AND correction_project.id IS NOT NULL ${scope}`,
+    params
+  );
+  return Number(row?.total || 0);
+}
+
+async function readScopedPayslipReceiptCounts(companyId, user) {
+  const params = { companyId };
+  const scope = projectScope(user, params, 'p');
+  const row = await db.first(
+    `SELECT COUNT(d.id) employeeTotal,
+            COALESCE(SUM(d.receipt_status=1),0) unsignedTotal,
+            COALESCE(SUM(d.receipt_status=2),0) signedTotal,
+            COALESCE(SUM(d.receipt_status NOT IN (1,2)),0) otherStatusTotal
+     FROM salary_detail d
+     JOIN salary_batch b ON b.id=d.batch_id AND b.company_id=d.company_id
+     JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+     WHERE d.company_id=:companyId AND b.batch_status=5 ${scope}`,
+    params
+  );
+  return {
+    employeeTotal: Number(row?.employeeTotal || 0),
+    unsignedTotal: Number(row?.unsignedTotal || 0),
+    signedTotal: Number(row?.signedTotal || 0),
+    otherStatusTotal: Number(row?.otherStatusTotal || 0)
+  };
+}
+
+async function managerMobileOverview(companyId, user) {
+  const permissions = new Set(user?.permissions || []);
+  return {
+    activeProjectCount: permissions.has('project:view')
+      ? await countScopedActiveProjects(companyId, user) : null,
+    activeEmployeeCount: permissions.has('employee:view')
+      ? await countScopedActiveEmployees(companyId, user) : null,
+    pendingAttendanceReviewCount: permissions.has('attendance:review')
+      ? await countScopedPendingCorrections(companyId, user) : null,
+    payslipStatus: permissions.has('payroll:view')
+      ? await readScopedPayslipReceiptCounts(companyId, user) : null
+  };
+}
+
+async function queryManagerPayslipStatus({
+  companyId, user, page, pageSize, month, customerId, projectId, receiptStatus
+}) {
+  const params = { companyId, pageSize, offset: 0 };
+  const filters = ['b.company_id=:companyId', 'b.batch_status=5'];
+  if (month) {
+    params.month = month;
+    filters.push('b.salary_month=:month');
+  }
+  if (customerId !== null) {
+    params.customerId = customerId;
+    filters.push('p.customer_id=:customerId');
+  }
+  if (projectId !== null) {
+    params.projectId = projectId;
+    filters.push('p.id=:projectId');
+  }
+  const scope = projectScope(user, params, 'p');
+
+  if (projectId !== null) {
+    const projectMatch = await db.first(
+      `SELECT 1 projectCustomerMatch
+       FROM labor_project p
+       WHERE p.company_id=:companyId AND p.id=:projectId
+         ${customerId !== null ? 'AND p.customer_id=:customerId' : ''}
+         ${scope}
+       LIMIT 1`,
+      params
+    );
+    if (!projectMatch) {
+      throw createError('项目不存在、与客户不匹配或无权访问', 403, 'PROJECT_SCOPE_DENIED');
+    }
+  }
+
+  const havingByStatus = {
+    UNSIGNED: 'HAVING unsignedTotal > 0',
+    SIGNED: 'HAVING signedTotal > 0',
+    OTHER: 'HAVING otherStatusTotal > 0'
+  };
+  const having = havingByStatus[receiptStatus] || '';
+  const where = filters.join(' AND ');
+  const totalRow = await db.first(
+    `SELECT COUNT(*) filteredBatchCount
+     FROM (
+       SELECT b.id,
+              SUM(d.receipt_status=1) unsignedTotal,
+              SUM(d.receipt_status=2) signedTotal,
+              SUM(d.receipt_status NOT IN (1,2)) otherStatusTotal
+       FROM salary_batch b
+       JOIN salary_detail d ON d.batch_id=b.id AND d.company_id=b.company_id
+       JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+       WHERE ${where} ${scope}
+       GROUP BY b.id
+       ${having}
+     ) filtered_batches`,
+    params
+  );
+  const total = Number(totalRow?.filteredBatchCount || 0);
+  const safePage = Math.min(page, Math.max(1, Math.ceil(total / pageSize)));
+  params.offset = (safePage - 1) * pageSize;
+  const rows = await db.query(
+    `SELECT b.id batchId, b.batch_no batchNo, b.salary_month salaryMonth,
+            c.customer_name customerName, p.id projectId, p.project_name projectName,
+            b.paid_at publishedAt, COUNT(d.id) employeeTotal,
+            SUM(d.receipt_status=1) unsignedTotal,
+            SUM(d.receipt_status=2) signedTotal,
+            SUM(d.receipt_status NOT IN (1,2)) otherStatusTotal
+     FROM salary_batch b
+     JOIN salary_detail d ON d.batch_id=b.id AND d.company_id=b.company_id
+     JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+     JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
+     WHERE ${where} ${scope}
+     GROUP BY b.id, b.batch_no, b.salary_month, c.customer_name,
+              p.id, p.project_name, b.paid_at
+     ${having}
+     ORDER BY b.salary_month DESC, b.id DESC
+     LIMIT :pageSize OFFSET :offset`,
+    params
+  );
+  const list = rows.map(row => ({
+    batchId: Number(row.batchId),
+    batchNo: row.batchNo,
+    salaryMonth: row.salaryMonth,
+    customerName: row.customerName,
+    projectId: Number(row.projectId),
+    projectName: row.projectName,
+    publishedAt: row.publishedAt,
+    employeeTotal: Number(row.employeeTotal || 0),
+    unsignedTotal: Number(row.unsignedTotal || 0),
+    signedTotal: Number(row.signedTotal || 0),
+    otherStatusTotal: Number(row.otherStatusTotal || 0)
+  }));
+  return { page: safePage, pageSize, total, list };
+}
+
+async function managerMobilePayslipStatus(companyId, user, query = {}) {
+  const requested = paging(query, { defaultPageSize: 20, maxPageSize: 50 });
+  const month = String(query.month || '').trim();
+  const customerId = query.customerId === undefined || query.customerId === ''
+    ? null : Number(query.customerId);
+  const projectId = query.projectId === undefined || query.projectId === ''
+    ? null : Number(query.projectId);
+  const receiptStatus = String(query.receiptStatus || '').trim().toUpperCase();
+  if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw createError('工资月份格式无效', 400, 'INVALID_SALARY_MONTH');
+  }
+  if (projectId !== null && (!Number.isInteger(projectId) || projectId <= 0)) {
+    throw createError('项目编号无效', 400, 'INVALID_PROJECT_ID');
+  }
+  if (customerId !== null && (!Number.isInteger(customerId) || customerId <= 0)) {
+    throw createError('客户编号无效', 400, 'INVALID_CUSTOMER_ID');
+  }
+  if (receiptStatus && !['UNSIGNED', 'SIGNED', 'OTHER'].includes(receiptStatus)) {
+    throw createError('签收状态无效', 400, 'INVALID_RECEIPT_STATUS');
+  }
+  return queryManagerPayslipStatus({
+    companyId,
+    user,
+    page: requested.page,
+    pageSize: requested.pageSize,
+    month,
+    customerId,
+    projectId,
+    receiptStatus
+  });
+}
+
 function payrollDisputeStatusName(status) {
   return { 0: '待处理', 1: '处理中', 2: '已解决', 3: '已驳回' }[Number(status)] || '未知';
 }
@@ -2371,5 +2582,6 @@ module.exports = {
   payrollOverview, listPayrollDisputes, handlePayrollDispute, getPayrollBatchDetail, exportPayrollBatchCsv, exportPayrollReceiptPdf, previewPayrollBatch,
   createPayrollBatch, updatePayrollViewPolicy, normalizePayslipViewPolicy, submitPayrollBatch, reviewPayrollBatch, publishPayrollBatch, withdrawPayrollBatch, deletePayrollBatch,
   getPayrollSmsSummary, createPayrollSmsReminders, retryPayrollSms,
-  operationsHome, listNotices, permissionOverview, createSystemUser
+  operationsHome, listNotices, permissionOverview, createSystemUser,
+  managerMobileOverview, managerMobilePayslipStatus
 };
