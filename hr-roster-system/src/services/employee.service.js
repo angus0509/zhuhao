@@ -154,6 +154,7 @@ function formatEmployeeRow(row, options = {}) {
     customerId: row.customer_id || '',
     customerName: row.customer_name || '未分配客户单位',
     projectId: row.project_id || '',
+    projectName: row.project_name || '',
     positionId: row.position_id || '',
     positionName: row.position_name || '',
     employmentType: row.employment_type || '',
@@ -670,6 +671,7 @@ async function listEmployees(companyId, query, user = null, options = {}) {
     )
     LEFT JOIN hr_department d ON d.id = j.dept_id AND d.company_id = e.company_id
     LEFT JOIN crm_customer cu ON cu.id = j.customer_id AND cu.company_id = e.company_id
+    LEFT JOIN labor_project lp ON lp.id = j.project_id AND lp.company_id = e.company_id
     LEFT JOIN hr_position p ON p.id = j.position_id AND p.company_id = e.company_id
     LEFT JOIN hr_recruiter rec ON rec.id=e.recruiter_id AND rec.company_id=e.company_id
     LEFT JOIN hr_recruitment_supplier rs ON rs.id=e.supplier_id AND rs.company_id=e.company_id
@@ -700,7 +702,7 @@ async function listEmployees(companyId, query, user = null, options = {}) {
     `
     SELECT
       e.*, j.dept_id, j.customer_id, j.project_id, j.position_id, j.employment_type, j.fee_mode, j.work_type, j.hire_date,
-      d.dept_name, cu.customer_name, p.position_name,
+      d.dept_name, cu.customer_name, lp.project_name, p.position_name,
       rec.recruiter_name, rs.supplier_name AS recruitment_supplier_name,
       s.social_status, s.employer_insurance_status, s.employer_end_date,
       c.contract_no, c.sign_status, c.start_date AS contract_start_date, c.end_date AS contract_end_date,
