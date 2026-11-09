@@ -15,11 +15,21 @@
       flowTitle: '保存后进入待到岗',
       flowDescription: '驻厂专员确认到岗后，员工才会进入在职花名册。',
       showPlacement: true
+    },
+    historicalActive: {
+      mode: 'historical-active',
+      requiredFields: ['name', 'idCardNo', 'customerId', 'positionId', 'employmentType', 'workType', 'hireDate'],
+      primaryAction: '补录并进入在职花名册',
+      flowTitle: '保存后直接进入在职花名册',
+      flowDescription: '仅用于已到岗员工补录；会跳过待到岗确认。',
+      showPlacement: true
     }
   };
 
   function getEmployeeEntryPresentation(employeeStatus) {
-    return Number(employeeStatus) === 6 ? presentations.interview : presentations.direct;
+    if (Number(employeeStatus) === 6) return presentations.interview;
+    if (Number(employeeStatus) === 2) return presentations.historicalActive;
+    return presentations.direct;
   }
 
   function calculateEmployeeEntryCompletion(values = {}, presentation = presentations.interview) {

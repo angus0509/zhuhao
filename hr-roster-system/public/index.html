@@ -512,6 +512,7 @@
             <select name="employeeStatus" aria-label="录入状态">
               <option value="6" selected>面试（先简单登记）</option>
               <option value="1">待到岗</option>
+              <option value="2">在职（已到岗员工补录）</option>
             </select>
           </label>
           <div class="entry-mode-switch" id="employeeEntryModeSwitch" role="group" aria-label="选择录入方式">
@@ -521,7 +522,11 @@
             <button type="button" data-entry-mode="1">
               <strong>待到岗</strong><span>到岗后确认入职或标记未入职</span>
             </button>
+            <button type="button" data-entry-mode="2">
+              <strong>在职（已到岗员工补录）</strong><span>直接进入在职花名册</span>
+            </button>
           </div>
+          <p id="employeeBackfillNotice" class="muted hidden" role="note">仅用于已到岗员工补录：保存后直接进入在职花名册，会跳过待到岗确认。</p>
           <div class="entry-flow-status">
             <div><span>当前流转</span><strong id="employeeEntryFlowTitle">保存后进入面试名单</strong></div>
             <p id="employeeEntryFlowDescription">到岗意向明确后，再补齐客户、岗位和身份证等资料。</p>
@@ -568,13 +573,13 @@
                 <span>岗位 <em>必填</em></span>
                 <select name="positionId" id="formPositionSelect" required></select>
               </label>
-              <label><span>预计入职日期</span><input name="hireDate" type="date" /></label>
+              <label><span>入职日期</span><input name="hireDate" type="date" /></label>
             </div>
           </section>
 
           <section class="onboarding-section" data-entry-direct>
             <div class="onboarding-section-head">
-              <span>03</span><div><h3>用工与计费</h3><p>均为选填项，不阻断现场快速录入。</p></div>
+              <span>03</span><div><h3>用工与计费</h3><p id="employeeEmploymentHint">均为选填项，不阻断现场快速录入。</p></div>
             </div>
             <div class="form-grid onboarding-grid">
               <label>

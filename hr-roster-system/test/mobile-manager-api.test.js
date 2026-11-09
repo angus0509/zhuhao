@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -74,12 +75,38 @@ async function withDbStubs(stubs, run) {
 test('manager mobile routes require manager authentication and payroll permission', () => {
   assert.equal(fs.existsSync(routePath), true, 'mobile manager route must exist');
   const routeSource = fs.readFileSync(routePath, 'utf8');
-  assert.match(routeSource, /router\.use\(requireAuth, requireManagerAccount\)/);
+  assert.match(
+    routeSource,
+    /router\.use\('\/mobile\/manager',\s*requireAuth,\s*requireManagerAccount\)/
+  );
   assert.match(routeSource, /router\.get\('\/mobile\/manager\/overview', controller\.overview\)/);
   assert.match(
     routeSource,
     /router\.get\('\/mobile\/manager\/payslip-status',\s*requirePermission\('payroll:view'\), controller\.payslipStatus\)/
   );
+});
+
+test('manager mobile router does not intercept employee self-service routes', async () => {
+  const app = express();
+  app.use(require(routePath));
+  app.get('/me/payslips', (_req, res) => res.status(200).json({ code: 0 }));
+
+  const server = await new Promise((resolve, reject) => {
+    const value = app.listen(0, '127.0.0.1', () => resolve(value));
+    value.on('error', reject);
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address === 'object');
+    const response = await fetch(`http://127.0.0.1:${address.port}/me/payslips`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { code: 0 });
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close(error => (error ? reject(error) : resolve()));
+    });
+  }
 });
 
 test('manager mobile controllers pass only authenticated request context to services', async () => {

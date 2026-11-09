@@ -17,6 +17,7 @@ router.get('/employees', requirePermission('employee:view'), controller.list);
 router.get('/employees/mine', requirePermission('employee:view'), controller.listMine);
 router.post('/employees/precheck', sensitiveLimiter, requirePermission('employee:create'), controller.precheck);
 router.post('/employees', sensitiveLimiter, requirePermission('employee:create'), controller.create);
+router.post('/employees/historical-active', sensitiveLimiter, requirePermission('employee:create'), controller.createHistoricalActive);
 router.post('/employees/batch', batchLimiter, requirePermission('employee:batch'), controller.batchCreate);
 router.get('/employees/:id', requirePermission('employee:view'), controller.detail);
 router.put('/employees/:id', requirePermission('employee:update'), controller.update);

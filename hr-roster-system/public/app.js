@@ -1115,6 +1115,12 @@ function syncEmployeeEntryPresentation(form, statusValue = '') {
       ? '保存后更新现有档案，不改变员工当前生命周期状态。'
       : presentation.flowDescription;
   }
+  $('#employeeBackfillNotice')?.classList.toggle('hidden', editing || employeeStatus !== 2);
+  if ($('#employeeEmploymentHint')) {
+    $('#employeeEmploymentHint').textContent = !editing && employeeStatus === 2
+      ? '补录在职员工必须填写用工模式和工资类型。'
+      : '均为选填项，不阻断现场快速录入。';
+  }
   const values = Object.fromEntries(new FormData(form));
   const completion = calculateEmployeeEntryCompletion(values, presentation);
   if ($('#employeeEntryCompletionLabel')) $('#employeeEntryCompletionLabel').textContent = `${completion}%`;
@@ -1126,12 +1132,16 @@ function syncEmployeeFormRequirements(form, statusValue = '') {
   if (!form) return;
   const employeeStatus = Number(statusValue || form.elements.employeeStatus?.value || form.dataset.employeeStatus || 1);
   const interview = employeeStatus === 6;
+  const backfill = form.id === 'employeeForm' && form.dataset.editing !== '1' && employeeStatus === 2;
   for (const name of ['idCardNo', 'customerId', 'positionId']) {
     if (form.elements[name]) form.elements[name].required = !interview;
   }
   // 用工与计费、招聘渠道和备注均允许后续补齐。
   for (const name of ['employmentType', 'feeMode', 'workType', 'hireDate', 'channelSource', 'remark']) {
     if (form.elements[name]) form.elements[name].required = false;
+  }
+  for (const name of ['employmentType', 'workType', 'hireDate']) {
+    if (backfill && form.elements[name]) form.elements[name].required = true;
   }
   updateEmployeeProjectOptions(form);
   if (interview && form.elements.projectId) form.elements.projectId.required = false;
@@ -1254,7 +1264,16 @@ async function saveEmployee(event) {
   const body = removeUnavailableSensitiveFields(form, formToObject(form), Boolean(id));
   if (id) delete body.employeeStatus;
   if (!id && !(await checkWebTalentCandidates(form, body))) return;
-  const path = id ? `/api/employees/${id}` : '/api/employees';
+  const backfill = !id && Number(body.employeeStatus) === 2;
+  if (backfill) {
+    const confirmed = await confirmDialog({
+      title: '确认补录已到岗员工',
+      message: '保存后直接进入在职花名册，会跳过待到岗确认。请核对身份证、客户、岗位及入职日期。',
+      confirmText: '确认补录为在职'
+    });
+    if (!confirmed) return;
+  }
+  const path = id ? `/api/employees/${id}` : backfill ? '/api/employees/historical-active' : '/api/employees';
   const method = id ? 'PUT' : 'POST';
   const submitButton = $('#employeeEntrySubmit');
   if (submitButton) submitButton.disabled = true;
@@ -1265,8 +1284,13 @@ async function saveEmployee(event) {
       ? '员工信息已保存'
       : Number(body.employeeStatus) === 6
         ? '已保存到面试名单'
-        : '已保存并进入待到岗';
+        : backfill ? '已补录并进入在职花名册' : '已保存并进入待到岗';
     toast(successMessage);
+    if (backfill) {
+      $('#filterForm').reset();
+      $('#statusSelect').value = '2';
+      switchView('roster');
+    }
     await refreshEmployeeWorkspace();
     await selectEmployee(result.employeeId);
   } finally {

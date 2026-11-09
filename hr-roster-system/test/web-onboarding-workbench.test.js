@@ -1,4 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const layout = fs.readFileSync(path.join(__dirname, '../public/layout-refine.css'), 'utf8');
 
 const {
   getEmployeeEntryPresentation,
@@ -20,6 +23,14 @@ assert.deepEqual(
 );
 assert.equal(direct.primaryAction, '保存并进入待到岗', '直接入职不得暗示直接变为在职');
 assert.equal(direct.showPlacement, true, '直接入职必须展示派驻与用工信息');
+
+const backfill = getEmployeeEntryPresentation(2);
+assert.equal(backfill.mode, 'historical-active');
+assert.deepEqual(backfill.requiredFields, ['name', 'idCardNo', 'customerId', 'positionId', 'employmentType', 'workType', 'hireDate']);
+assert.match(backfill.flowDescription, /跳过.*待到岗确认/);
+assert.equal(backfill.showPlacement, true);
+assert.equal(calculateEmployeeEntryCompletion({ name: '张三' }, backfill), 14);
+assert.match(layout, /\.entry-mode-switch\s*\{[^}]*grid-template-columns:\s*repeat\(3,/, '三种录入方式应在桌面端并列展示');
 
 assert.equal(
   calculateEmployeeEntryCompletion({ name: '张三' }, interview),

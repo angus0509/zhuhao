@@ -6,7 +6,7 @@ const {
   requirePermission
 } = require('../middlewares/auth.middleware');
 
-router.use(requireAuth, requireManagerAccount);
+router.use('/mobile/manager', requireAuth, requireManagerAccount);
 router.get('/mobile/manager/overview', controller.overview);
 router.get('/mobile/manager/payslip-status',
   requirePermission('payroll:view'), controller.payslipStatus);

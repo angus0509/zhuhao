@@ -63,6 +63,15 @@ exports.create = asyncHandler(async (req, res) => {
   success(res, data, '新增成功');
 });
 
+// 仅独立补录接口允许已到岗员工直接进入在职，普通新增仍需待到岗确认。
+exports.createHistoricalActive = asyncHandler(async (req, res) => {
+  if (Number(req.body.employeeStatus) !== 2) throw createError('请明确选择在职（已到岗员工补录）');
+  const data = await employeeService.createEmployee(
+    req.companyId, req.body, req.operatorId, req.user, { allowHistoricalActive: true }
+  );
+  success(res, data, '已补录至在职花名册');
+});
+
 exports.batchCreate = asyncHandler(async (req, res) => {
   const data = await employeeService.createEmployeesBatch(req.companyId, req.body.rows, req.operatorId, req.user);
   success(res, data, `批量录入完成：成功${data.successCount}人，失败${data.failureCount}人`);
