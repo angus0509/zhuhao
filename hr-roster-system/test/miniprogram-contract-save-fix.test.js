@@ -20,7 +20,7 @@ assert.match(wxml, /wx:elif="\{\{loadError\}\}"/, '合同读取错误未独立�
 assert.match(wxml, /wx:if="\{\{submitError\}\}"/, '合同保存错误会导致表单消失');
 assert.ok(wxml.includes('class="sign-status-options"'), '合同签署状态仍需要打开下拉框');
 assert.ok(wxss.includes('.sign-option.active'), '合同签署状态缺少明确选中反馈');
-assert.match(js, /wx\.redirectTo\(\{ url: `\/pages\/employees\/insurance\/index\?id=\$\{this\.data\.employeeId\}&action=ADD` \}\)/, '合同登记后不能连续办理雇主险');
+assert.doesNotMatch(js, /employees\/insurance|social:manage|employerInsurance|雇主险/, '合同页仍可进入已停用业务');
 assert.ok(onboardJs.includes('onboardingChecked: false'), '入职页未合并重复核验操作');
 assert.ok(onboardJs.includes('toggleOnboardingCheck()'), '入职资料缺少一次确认入口');
 assert.ok(!onboardJs.includes('toggleIdentity()') && !onboardJs.includes('toggleJob()'), '入职页仍要求两次重复核验');

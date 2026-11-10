@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const db = require('../src/db');
 const controller = require('../src/controllers/employee.controller');
 const router = require('../src/routes/employee.routes');
@@ -6,6 +8,21 @@ const operationsService = require('../src/services/operations.service');
 const portalService = require('../src/services/portal.service');
 const riskService = require('../src/services/risk.service');
 const workTaskService = require('../src/services/work-task.service');
+const root = path.resolve(__dirname, '..');
+const miniRoot = path.join(root, 'wechat-miniprogram/miniprogram');
+const miniSources = [
+  'pages/employees/index.js',
+  'pages/employees/index.wxml',
+  'pages/employees/detail/index.js',
+  'pages/employees/detail/index.wxml',
+  'pages/employees/contract/index.js',
+  'pages/employees/compliance/index.js',
+  'pages/employees/compliance/index.json',
+  'pages/employees/compliance/index.wxml'
+].map(file => fs.readFileSync(path.join(miniRoot, file), 'utf8')).join('\n');
+
+assert.equal(fs.existsSync(path.join(miniRoot, 'pages/employees/insurance/index.js')), false, '小程序雇主险页面仍存在');
+assert.doesNotMatch(miniSources, /employees\/insurance|employerInsurance|insuranceComplete|insuranceGapCount|social:manage|雇主险/, '小程序仍保留雇主险字段、权限或入口');
 
 const disabledRoutes = [
   '/employees/:id/onboarding-compliance/confirm',

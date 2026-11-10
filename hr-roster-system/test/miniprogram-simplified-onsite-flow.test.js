@@ -6,6 +6,8 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const listJs = read('wechat-miniprogram/miniprogram/pages/employees/index.js');
 const listWxml = read('wechat-miniprogram/miniprogram/pages/employees/index.wxml');
+const detailJs = read('wechat-miniprogram/miniprogram/pages/employees/detail/index.js');
+const detailWxml = read('wechat-miniprogram/miniprogram/pages/employees/detail/index.wxml');
 const homeJs = read('wechat-miniprogram/miniprogram/pages/home/index.js');
 
 for (const stage of ['全部人员', '待到岗', '在职员工', '已离职']) {
@@ -22,5 +24,6 @@ assert.match(listJs, /handleArrivalResult[\s\S]*\/arrival-result/, '小程序未
 assert.match(listJs, /UNJOINED/, '小程序未处理待到岗未入职');
 assert.match(listJs, /markDirty\('employees', 'home', 'tasks', 'advances'\)/, '状态操作后未同步刷新相关页面');
 assert.doesNotMatch(homeJs, /ONBOARDING_COMPLIANCE|\/work-tasks/, '工作台仍加载合规待办');
+assert.doesNotMatch(listJs + listWxml + detailJs + detailWxml, /employerInsurance|insuranceComplete|insuranceGapCount|goInsurance|social:manage|雇主险/, '员工列表或详情仍保留已停用业务');
 
 console.log('miniprogram-simplified-onsite-flow-tests-ok');

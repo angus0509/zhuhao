@@ -40,7 +40,7 @@ assert.match(listWxml, /isActive[\s\S]*一键办理离职/, '在职员工缺少�
 
 assert.doesNotMatch(addWxml, /录入状态|employeeStatusNames|面试简登/, '新增员工仍允许选择面试或其他状态');
 assert.match(addWxml, /保存后进入待到岗/, '新增员工页未说明快速流转结果');
-assert.match(addJs, /employeeStatus: 1/, '新增员工未固定提交待到岗状态');
+assert.match(addJs, /employeeStatus: this\.data\.entryMode === 'interview' \? 6 : 1/, '新增员工未按面试或直接入职模式提交正确状态');
 assert.doesNotMatch(addJs, /EMPLOYEE_STATUSES|EMPLOYEE_STATUS_VALUES|onEmployeeStatusChange/, '新增员工仍保留多状态选择逻辑');
 
 assert.doesNotMatch(detailWxml, /登记合同|办理雇主险|合同和雇主险|办理增保/, '员工详情仍显示合同或雇主险办理入口');
@@ -57,11 +57,10 @@ assert.doesNotMatch(onboardBlock, /createOnboardingCompliance|ONBOARDING_COMPLIA
 assert.match(onboardBlock, /lifecycle_status='ACTIVE'/, '确认入职未直接进入在职状态');
 
 const completionStart = service.indexOf('async function syncResignationCompletion');
-const completionEnd = service.indexOf('async function terminateEmployerInsuranceForResignation', completionStart);
+const completionEnd = service.indexOf('async function ensureInternalDepartment', completionStart);
 const completionBlock = service.slice(completionStart, completionEnd);
 assert.ok(completionStart >= 0 && completionEnd > completionStart, '无法定位离职完成服务');
-assert.match(completionBlock, /const insuranceDone = true/, '快速离职仍被雇主险状态阻塞');
-assert.doesNotMatch(completionBlock, /insurance_status='TERMINATED'/, '快速离职不应伪造雇主险已减保状态');
+assert.doesNotMatch(completionBlock, /insuranceDone|INSURANCE_TERMINATION|employer_insurance/, '快速离职仍依赖已停用业务状态');
 assert.match(service, /handleArrivalResult[\s\S]*!\[1, 6\]\.includes/, '历史面试人员无法按待到岗标记未入职');
 assert.match(migration, /UPDATE hr_work_task[\s\S]*task_type IN \('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE'\)[\s\S]*task_status IN \(0,1\)/, '迁移未关闭全部开放旧合规待办');
 assert.doesNotMatch(migration, /completed\.company_id IS NULL/, '迁移会因历史完成记录而漏掉仍开放的重复待办');
