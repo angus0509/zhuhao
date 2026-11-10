@@ -142,7 +142,6 @@ function formatEmployeeRow(row, options = {}) {
     sourceLocked: Number(row.source_locked || 0) === 1,
     lifecycleStatus: row.lifecycle_status || '',
     arrivalStatus: row.arrival_status || '',
-    insuranceStatus: row.insurance_status || '',
     contractStatus: row.contract_status || '',
     documentStatus: row.document_status || '',
     riskLevel: Number(row.risk_level || 1),
@@ -166,11 +165,6 @@ function formatEmployeeRow(row, options = {}) {
     hireDate: row.hire_date || '',
     socialStatus: row.social_status ?? 0,
     socialStatusName: label('socialStatus', row.social_status ?? 0, '未参保'),
-    employerInsuranceStatus: row.employer_insurance_status ?? 0,
-    employerInsuranceStatusName: Number(row.employer_insurance_status) === 1
-      ? '保障中'
-      : Number(row.employer_insurance_status) === 2 ? '已终止' : '未投保',
-    employerInsuranceEndDate: row.employer_end_date || '',
     contractStatusName: row.contract_no ? contractStatusName(row) : '未签',
     contractPeriod: formatContractPeriod(row.contract_start_date, row.contract_end_date),
     leaveDate: row.leave_date || '',
@@ -587,9 +581,7 @@ async function getOnsiteOverview(companyId, user = null) {
        SUM(CASE WHEN e.employee_status=5 THEN 1 ELSE 0 END) unjoinedCount,
        SUM(CASE WHEN e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING' THEN 1 ELSE 0 END) activeCount,
        SUM(CASE WHEN e.lifecycle_status='OFFBOARDING' THEN 1 ELSE 0 END) offboardingCount,
-       SUM(CASE WHEN e.employee_status=3 THEN 1 ELSE 0 END) leftCount,
-       SUM(CASE WHEN e.employee_status=2 AND e.lifecycle_status<>'OFFBOARDING'
-         AND COALESCE(s.employer_insurance_status,0)<>1 THEN 1 ELSE 0 END) insuranceGapCount
+       SUM(CASE WHEN e.employee_status=3 THEN 1 ELSE 0 END) leftCount
      FROM hr_employee e
      LEFT JOIN hr_employee_job j ON j.id=(
        SELECT j2.id FROM hr_employee_job j2
@@ -597,11 +589,6 @@ async function getOnsiteOverview(companyId, user = null) {
        ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
      )
      LEFT JOIN crm_customer cu ON cu.id=j.customer_id AND cu.company_id=e.company_id
-     LEFT JOIN hr_social_security s ON s.id=(
-       SELECT s2.id FROM hr_social_security s2
-       WHERE s2.company_id=e.company_id AND s2.employee_id=e.id
-       ORDER BY s2.id DESC LIMIT 1
-     )
      WHERE ${where.join(' AND ')}
      GROUP BY j.customer_id,cu.customer_name
      ORDER BY cu.customer_name,j.customer_id`,
@@ -616,16 +603,15 @@ async function getOnsiteOverview(companyId, user = null) {
     unjoinedCount: Number(row.unjoinedCount || 0),
     activeCount: Number(row.activeCount || 0),
     offboardingCount: Number(row.offboardingCount || 0),
-    leftCount: Number(row.leftCount || 0),
-    insuranceGapCount: Number(row.insuranceGapCount || 0)
+    leftCount: Number(row.leftCount || 0)
   });
   const customerStats = rows.map(normalize);
   const overall = customerStats.reduce((total, item) => {
-    for (const key of ['employeeCount', 'pendingCount', 'interviewCount', 'unjoinedCount', 'activeCount', 'offboardingCount', 'leftCount', 'insuranceGapCount']) {
+    for (const key of ['employeeCount', 'pendingCount', 'interviewCount', 'unjoinedCount', 'activeCount', 'offboardingCount', 'leftCount']) {
       total[key] += item[key];
     }
     return total;
-  }, { employeeCount: 0, pendingCount: 0, interviewCount: 0, unjoinedCount: 0, activeCount: 0, offboardingCount: 0, leftCount: 0, insuranceGapCount: 0 });
+  }, { employeeCount: 0, pendingCount: 0, interviewCount: 0, unjoinedCount: 0, activeCount: 0, offboardingCount: 0, leftCount: 0 });
   return { overall, customerStats };
 }
 
@@ -698,13 +684,25 @@ async function listEmployees(companyId, query, user = null, options = {}) {
   `;
 
   const totalRow = await db.first(`SELECT COUNT(*) AS total ${baseFrom}`, params);
+  const customerStatsRows = query.includeRosterStats === '1' ? await db.query(
+    `SELECT
+       j.customer_id customerId,
+       cu.customer_name customerName,
+       COUNT(*) employeeCount,
+       SUM(CASE WHEN e.employee_status=2 AND COALESCE(e.lifecycle_status,'')<>'OFFBOARDING' THEN 1 ELSE 0 END) activeCount,
+       SUM(COALESCE(r.risk_count,0)) riskCount
+     ${baseFrom}
+     GROUP BY j.customer_id,cu.customer_name
+     ORDER BY cu.customer_name,j.customer_id`,
+    params
+  ) : [];
   const rows = await db.query(
     `
     SELECT
       e.*, j.dept_id, j.customer_id, j.project_id, j.position_id, j.employment_type, j.fee_mode, j.work_type, j.hire_date,
       d.dept_name, cu.customer_name, lp.project_name, p.position_name,
       rec.recruiter_name, rs.supplier_name AS recruitment_supplier_name,
-      s.social_status, s.employer_insurance_status, s.employer_end_date,
+      s.social_status,
       c.contract_no, c.sign_status, c.start_date AS contract_start_date, c.end_date AS contract_end_date,
       res.leave_date,
       COALESCE(r.risk_count, 0) AS risk_count
@@ -719,6 +717,13 @@ async function listEmployees(companyId, query, user = null, options = {}) {
     page,
     pageSize,
     total: Number(totalRow?.total || 0),
+    customerStats: customerStatsRows.map(row => ({
+      customerId: row.customerId || '',
+      customerName: row.customerName || '未分配客户单位',
+      employeeCount: Number(row.employeeCount || 0),
+      activeCount: Number(row.activeCount || 0),
+      riskCount: Number(row.riskCount || 0)
+    })),
     list: rows.map(row => formatEmployeeRow(row))
   };
 }
@@ -792,7 +797,7 @@ async function getEmployeeDetail(companyId, employeeId, options = {}) {
     SELECT
       e.*, j.dept_id, j.customer_id, j.project_id, j.position_id, j.employment_type, j.fee_mode, j.work_type, j.hire_date,
       d.dept_name, cu.customer_name, p.position_name,
-      s.social_status, s.employer_insurance_status, s.employer_end_date,
+      s.social_status,
       rec.recruiter_name, rs.supplier_name AS recruitment_supplier_name,
       c.contract_no, c.sign_status, c.start_date AS contract_start_date, c.end_date AS contract_end_date,
       res.leave_date,
@@ -854,7 +859,11 @@ async function getEmployeeDetail(companyId, employeeId, options = {}) {
       companyId,
       employeeId
     }),
-    db.first('SELECT * FROM hr_social_security WHERE company_id = :companyId AND employee_id = :employeeId ORDER BY id DESC LIMIT 1', {
+    db.first(`SELECT id,social_status,social_city,social_base,fund_status,fund_base,
+                    start_month,stop_month,supplier_name,remark
+              FROM hr_social_security
+             WHERE company_id = :companyId AND employee_id = :employeeId
+             ORDER BY id DESC LIMIT 1`, {
       companyId,
       employeeId
     }),
@@ -918,12 +927,6 @@ async function getEmployeeDetail(companyId, employeeId, options = {}) {
           startMonth: socialSecurity.start_month || '',
           stopMonth: socialSecurity.stop_month || '',
           supplierName: socialSecurity.supplier_name || '',
-          employerInsuranceStatus: socialSecurity.employer_insurance_status || 0,
-          employerInsurer: socialSecurity.employer_insurer || '',
-          employerPolicyNo: socialSecurity.employer_policy_no || '',
-          employerStartDate: socialSecurity.employer_start_date || '',
-          employerEndDate: socialSecurity.employer_end_date || '',
-          employerInsuredAmount: socialSecurity.employer_insured_amount || 0,
           remark: socialSecurity.remark || ''
         }
       : null,
@@ -1478,15 +1481,9 @@ async function syncEmployeeToTalent(connection, {
 
 async function syncResignationCompletion(connection, companyId, resignationId, operatorId = 0) {
   const [[row]] = await connection.execute(
-    `SELECT r.*,e.id employee_id,e.name,
-            s.social_status,s.employer_insurance_status
+    `SELECT r.*,e.id employee_id,e.name
      FROM hr_resignation r
      JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
-     LEFT JOIN hr_social_security s ON s.id=(
-       SELECT s2.id FROM hr_social_security s2
-       WHERE s2.company_id=r.company_id AND s2.employee_id=r.employee_id
-       ORDER BY s2.id DESC LIMIT 1
-     )
      WHERE r.company_id=:companyId AND r.id=:resignationId LIMIT 1`,
     { companyId, resignationId }
   );
@@ -1496,28 +1493,21 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
   const handoverCount = ['badge_returned', 'tools_returned', 'dorm_cleared', 'attendance_confirmed']
     .filter(field => Number(row[field]) === 1).length;
   const handoverDone = true;
-  // 驻厂一键离职不再要求同步办理雇主险减保；保险台账由独立业务入口维护。
-  const insuranceDone = true;
 
   await connection.execute(
     'UPDATE hr_resignation SET handover_status=:handoverStatus,updated_at=NOW() WHERE company_id=:companyId AND id=:resignationId',
     { companyId, resignationId, handoverStatus: handoverDone ? 2 : 1 }
   );
-  for (const [taskType, done] of [
-    ['OFFBOARD', handoverDone],
-    ['INSURANCE_TERMINATION', insuranceDone]
-  ]) {
-    if (done) {
-      await connection.execute(
-        `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
-         WHERE company_id=:companyId AND source_type='RESIGNATION' AND source_id=:resignationId
-           AND task_type=:taskType AND task_status IN (0,1)`,
-        { companyId, resignationId, taskType, operatorId }
-      );
-    }
+  if (handoverDone) {
+    await connection.execute(
+      `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+       WHERE company_id=:companyId AND source_type='RESIGNATION' AND source_id=:resignationId
+         AND task_type='OFFBOARD' AND task_status IN (0,1)`,
+      { companyId, resignationId, operatorId }
+    );
   }
 
-  const completed = handoverDone && insuranceDone;
+  const completed = handoverDone;
   if (completed) {
     await connection.execute(
       `UPDATE hr_resignation SET handover_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
@@ -1565,47 +1555,7 @@ async function syncResignationCompletion(connection, companyId, resignationId, o
       { companyId, employeeId: row.employee_id }
     );
   }
-  return { employeeId: row.employee_id, resignationId, handoverDone, handoverCount, insuranceDone, completed };
-}
-
-async function terminateEmployerInsuranceForResignation(connection, {
-  companyId,
-  employeeId,
-  leaveDate,
-  terminateEmployerInsurance,
-  operatorId
-}) {
-  const [[insurance]] = await connection.execute(
-    `SELECT id,employer_insurance_status
-     FROM hr_social_security
-     WHERE company_id=:companyId AND employee_id=:employeeId
-     ORDER BY id DESC LIMIT 1`,
-    { companyId, employeeId }
-  );
-  const covered = Number(insurance?.employer_insurance_status || 0) === 1;
-  if (!covered) return { covered: false, terminated: false };
-  if (Number(terminateEmployerInsurance) !== 1) {
-    throw createError('该员工雇主险正在保障，请在办理离职中勾选“已减保”');
-  }
-
-  await connection.execute(
-    `UPDATE hr_social_security
-     SET employer_insurance_status=2,employer_end_date=:leaveDate,updated_at=NOW()
-     WHERE company_id=:companyId AND id=:socialId`,
-    { companyId, socialId: insurance.id, leaveDate }
-  );
-  await connection.execute(
-    `INSERT INTO hr_operation_log
-     (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-     VALUES (:companyId,:operatorId,'雇主险','employer_insurance',:socialId,'remove_on_resignation',:afterData)`,
-    {
-      companyId,
-      operatorId: operatorId || null,
-      socialId: insurance.id,
-      afterData: JSON.stringify({ employeeId, employerInsuranceAction: 'REMOVE', employerInsuranceStatus: 2, leaveDate })
-    }
-  );
-  return { covered: true, terminated: true };
+  return { employeeId: row.employee_id, resignationId, handoverDone, handoverCount, completed };
 }
 
 async function ensureInternalDepartment(connection, companyId) {
@@ -2560,79 +2510,8 @@ async function handleArrivalResult(companyId, employeeId, body, operatorId = 0, 
   });
 }
 
-async function confirmOnboardingCompliance(companyId, employeeId, body, operatorId = 0, user = null) {
-  throw createError('功能已停用', 410);
-  /* istanbul ignore next -- 保留历史实现以兼容审计与历史数据读取 */
-  return db.transaction(async connection => {
-    await assertEmployeeScope(companyId, employeeId, user, connection);
-    const [[employee]] = await connection.execute(
-      `SELECT id,name,employee_status FROM hr_employee
-       WHERE company_id=:companyId AND id=:employeeId AND deleted_at IS NULL LIMIT 1`,
-      { companyId, employeeId }
-    );
-    if (!employee) throw createError('员工不存在', 404);
-    if (Number(employee.employee_status) !== 2) throw createError('只有正常在职员工可以办理入职合规');
-
-    const contractDate = body.contractDate || today();
-    const insuranceStartDate = body.insuranceStartDate || today();
-    const contractNo = `HT${String(contractDate).replace(/-/g, '')}${employeeId}${String(Date.now()).slice(-6)}`;
-    const [contractResult] = await connection.execute(
-      `INSERT INTO hr_labor_contract
-       (company_id,employee_id,contract_no,contract_type,sign_status,sign_date,start_date,renewal_count)
-       VALUES (:companyId,:employeeId,:contractNo,2,1,:contractDate,:contractDate,0)`,
-      { companyId, employeeId, contractNo, contractDate }
-    );
-
-    const [[social]] = await connection.execute(
-      'SELECT id FROM hr_social_security WHERE company_id=:companyId AND employee_id=:employeeId ORDER BY id DESC LIMIT 1',
-      { companyId, employeeId }
-    );
-    if (social) {
-      await connection.execute(
-        `UPDATE hr_social_security SET employer_insurance_status=1,employer_start_date=:insuranceStartDate,
-           employer_end_date=NULL,remark=COALESCE(:remark,remark),updated_at=NOW()
-         WHERE company_id=:companyId AND id=:socialId`,
-        { companyId, socialId: social.id, insuranceStartDate, remark: body.remark || null }
-      );
-    } else {
-      await connection.execute(
-        `INSERT INTO hr_social_security
-         (company_id,employee_id,employer_insurance_status,employer_start_date,remark)
-         VALUES (:companyId,:employeeId,1,:insuranceStartDate,:remark)`,
-        { companyId, employeeId, insuranceStartDate, remark: body.remark || null }
-      );
-    }
-
-    await connection.execute(
-      `UPDATE hr_employee SET contract_status='SIGNED',insurance_status='ACTIVE',lifecycle_status='ACTIVE',updated_at=NOW()
-       WHERE company_id=:companyId AND id=:employeeId`,
-      { companyId, employeeId }
-    );
-    await connection.execute(
-      `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
-       WHERE company_id=:companyId AND employee_id=:employeeId
-         AND task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE') AND task_status IN (0,1)`,
-      { companyId, employeeId, operatorId: operatorId || null }
-    );
-    await connection.execute(
-      `UPDATE hr_risk_alert SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),
-         handle_remark='合同和雇主险已一键确认',updated_at=NOW()
-       WHERE company_id=:companyId AND employee_id=:employeeId AND risk_type IN (1,7) AND handle_status IN (0,1)`,
-      { companyId, employeeId, operatorId: operatorId || null }
-    );
-    await connection.execute(
-      `INSERT INTO hr_operation_log
-       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-       VALUES (:companyId,:operatorId,'入职合规','onboarding_compliance',:employeeId,'confirm',:afterData)`,
-      {
-        companyId,
-        operatorId: operatorId || null,
-        employeeId,
-        afterData: JSON.stringify({ contractId: contractResult.insertId, contractDate, insuranceStartDate, remark: body.remark || '' })
-      }
-    );
-    return { employeeId, contractId: contractResult.insertId, contractDate, insuranceStartDate };
-  });
+async function confirmOnboardingCompliance() {
+  throw createError('雇主险功能已停用', 410);
 }
 
 async function assertEmployeeExists(companyId, employeeId, connection = db.pool) {
@@ -2741,109 +2620,8 @@ async function createContract(companyId, employeeId, body, operatorId = 0, user 
   });
 }
 
-async function updateSocialSecurity(companyId, employeeId, body, operatorId = 0, user = null) {
-  throw createError('功能已停用', 410);
-  /* istanbul ignore next -- 历史雇主险数据仍由详情接口只读展示 */
-  return db.transaction(async connection => {
-    await assertEmployeeScope(companyId, employeeId, user, connection);
-    const employee = await assertEmployeeExists(companyId, employeeId, connection);
-    const requestedAction = String(body.employerInsuranceAction || '').trim().toUpperCase();
-    const legacyStatus = Number(body.employerInsuranceStatus || 0);
-    const employerInsuranceAction = requestedAction || (legacyStatus === 1 ? 'ADD' : legacyStatus === 2 ? 'REMOVE' : '');
-    if (!['ADD', 'REMOVE'].includes(employerInsuranceAction)) throw createError('请选择雇主险增保或减保');
-    const employerInsuranceStatus = employerInsuranceAction === 'ADD' ? 1 : 2;
-
-    const [[existing]] = await connection.execute(
-      'SELECT id FROM hr_social_security WHERE company_id=:companyId AND employee_id=:employeeId ORDER BY id DESC LIMIT 1',
-      { companyId, employeeId }
-    );
-
-    let socialId = existing?.id || 0;
-    if (existing) {
-      await connection.execute(
-        `UPDATE hr_social_security
-         SET employer_insurance_status=:employerInsuranceStatus,updated_at=NOW()
-         WHERE company_id=:companyId AND id=:socialId`,
-        { companyId, socialId, employerInsuranceStatus }
-      );
-    } else {
-      const [result] = await connection.execute(
-        `INSERT INTO hr_social_security
-         (company_id,employee_id,employer_insurance_status)
-         VALUES (:companyId,:employeeId,:employerInsuranceStatus)`,
-        { companyId, employeeId, employerInsuranceStatus }
-      );
-      socialId = result.insertId;
-    }
-
-    await connection.execute(
-      `INSERT INTO hr_operation_log
-       (company_id,operator_id,module_name,biz_type,biz_id,action_type,after_data)
-       VALUES (:companyId,:operatorId,'雇主险','employer_insurance',:socialId,:actionType,:afterData)`,
-      {
-        companyId,
-        operatorId,
-        socialId,
-        actionType: employerInsuranceAction === 'ADD' ? 'add' : 'remove',
-        afterData: JSON.stringify({ employeeId, employerInsuranceAction, employerInsuranceStatus })
-      }
-    );
-
-    const actionName = employerInsuranceAction === 'ADD' ? '增保' : '减保';
-    await noticeService.createNotice(connection, {
-      companyId,
-      employeeId,
-      title: `${employee.name}雇主险${actionName}已登记`,
-      category: '雇主险变动',
-      noticeType: employerInsuranceAction === 'ADD' ? 'success' : 'warning',
-      targetView: 'roster',
-      dedupeKey: `employer_insurance:${socialId}:${employerInsuranceAction}`
-    });
-
-    if (employerInsuranceAction === 'ADD') {
-      await connection.execute(
-        `UPDATE hr_employee SET insurance_status='ACTIVE',risk_level=1,updated_at=NOW()
-         WHERE company_id=:companyId AND id=:employeeId`,
-        { companyId, employeeId }
-      );
-      await connection.execute(
-        `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=NOW(),updated_at=NOW()
-         WHERE company_id=:companyId AND employee_id=:employeeId AND task_type='INSURANCE' AND task_status IN (0,1)`,
-        { companyId, employeeId, operatorId }
-      );
-      await connection.execute(
-        `UPDATE hr_risk_alert SET handle_status=2,handler_id=:operatorId,handle_time=NOW(),handle_remark='雇主险已增保',updated_at=NOW()
-         WHERE company_id=:companyId AND employee_id=:employeeId AND risk_type=7 AND handle_status IN (0,1)`,
-        { companyId, employeeId, operatorId }
-      );
-    } else {
-      await connection.execute(
-        `UPDATE hr_employee SET insurance_status='TERMINATED',updated_at=NOW()
-         WHERE company_id=:companyId AND id=:employeeId`,
-        { companyId, employeeId }
-      );
-      await connection.execute(
-        `UPDATE hr_work_task SET task_status=2,completed_by=:operatorId,completed_at=NOW(),updated_at=NOW()
-         WHERE company_id=:companyId AND employee_id=:employeeId AND task_type='INSURANCE_TERMINATION' AND task_status IN (0,1)`,
-        { companyId, employeeId, operatorId }
-      );
-      const [[resignation]] = await connection.execute(
-        'SELECT id FROM hr_resignation WHERE company_id=:companyId AND employee_id=:employeeId AND completed_at IS NULL ORDER BY id DESC LIMIT 1',
-        { companyId, employeeId }
-      );
-      if (resignation) await syncResignationCompletion(connection, companyId, resignation.id, operatorId);
-    }
-
-    await connection.execute(
-      `UPDATE hr_employee
-       SET lifecycle_status='ACTIVE',updated_at=NOW()
-       WHERE company_id=:companyId AND id=:employeeId AND employee_status=2
-         AND lifecycle_status='ONBOARDING' AND contract_status='SIGNED' AND insurance_status='ACTIVE'`,
-      { companyId, employeeId }
-    );
-
-    return { employeeId, socialId, employerInsuranceAction, employerInsuranceStatus };
-  });
+async function updateSocialSecurity() {
+  throw createError('雇主险功能已停用', 410);
 }
 
 
@@ -2927,7 +2705,7 @@ async function recordEmployeeExport(companyId, user, audit, details) {
 
 async function exportEmployeesCsv(companyId, query, user = null, audit = {}) {
   const rows = await listEmployees(companyId, { ...query, page: 1, pageSize: 2000 }, user, { maxPageSize: 2000 });
-  const header = ['姓名', '手机号', '客户单位', '岗位', '用工模式', '费用模式', '工资类型', '入职日期', '合同状态', '雇主险状态', '风险数', '员工状态'];
+  const header = ['姓名', '手机号', '客户单位', '岗位', '用工模式', '费用模式', '工资类型', '入职日期', '合同状态', '风险数', '员工状态'];
   const lines = [header.join(',')].concat(
     rows.list.map(row =>
       [
@@ -2940,7 +2718,6 @@ async function exportEmployeesCsv(companyId, query, user = null, audit = {}) {
         row.workTypeName,
         row.hireDate,
         row.contractStatusName,
-        row.employerInsuranceStatusName,
         row.riskCount,
         row.employeeStatusName
       ]
@@ -3059,41 +2836,6 @@ async function exportEmployeesExcel(companyId, query, user = null, audit = {}) {
     endDate: contract.end_date || ''
   }));
   styleWorksheet(contractSheet);
-
-  const socialRows = employeeIds.length ? await db.query(
-    `SELECT s.employee_id,s.employer_insurance_status,s.employer_insurer,s.employer_policy_no,
-            s.employer_start_date,s.employer_end_date,s.employer_insured_amount
-     FROM hr_social_security s
-     JOIN (
-       SELECT employee_id,MAX(id) id FROM hr_social_security
-       WHERE company_id=:companyId AND employee_id IN (${employeeIdSql}) GROUP BY employee_id
-     ) latest ON latest.id=s.id
-     WHERE s.company_id=:companyId
-     ORDER BY s.employee_id`,
-    employeeIdParams
-  ) : [];
-  const socialSheet = workbook.addWorksheet('雇主险信息');
-  socialSheet.columns = [
-    { header: '姓名', key: 'name', width: 12 },
-    { header: '雇主险状态', key: 'employerInsurance', width: 14 },
-    { header: '承保机构', key: 'employerInsurer', width: 18 },
-    { header: '保单号', key: 'employerPolicyNo', width: 22 },
-    { header: '生效日期', key: 'employerStartDate', width: 12 },
-    { header: '到期日期', key: 'employerEndDate', width: 12 },
-    { header: '保额', key: 'employerInsuredAmount', width: 16 }
-  ];
-  const employerStatuses = { 0: '未投保', 1: '保障中', 2: '已终止' };
-  socialRows.forEach(social => socialSheet.addRow({
-    name: safeExcelText(employeeNames.get(Number(social.employee_id)) || ''),
-    employerInsurance: employerStatuses[Number(social.employer_insurance_status)] || '未知',
-    employerInsurer: safeExcelText(social.employer_insurer),
-    employerPolicyNo: safeExcelText(social.employer_policy_no),
-    employerStartDate: social.employer_start_date || '',
-    employerEndDate: social.employer_end_date || '',
-    employerInsuredAmount: Number(social.employer_insured_amount || 0)
-  }));
-  styleWorksheet(socialSheet);
-  socialSheet.getColumn('employerInsuredAmount').numFmt = '#,##0.00';
 
   const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
   const fileSha256 = nodeCrypto.createHash('sha256').update(buffer).digest('hex');

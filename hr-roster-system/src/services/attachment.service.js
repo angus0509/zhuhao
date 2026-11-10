@@ -8,7 +8,6 @@ const { assertEmployeeScope } = require('./employee.service');
 const UPLOAD_ROOT = path.resolve(__dirname, '..', '..', 'uploads');
 const BUSINESS_TYPES = {
   contract: { table: 'hr_labor_contract', permission: 'contract:manage', label: '劳动合同' },
-  social: { table: 'hr_social_security', permission: 'social:manage', label: '保险材料' },
   certificate: { table: 'hr_employee_certificate', permission: 'cert:manage', label: '员工证件' },
   risk_case: { table: 'hr_risk_case', permission: 'risk:handle', label: '整改证据' }
 };

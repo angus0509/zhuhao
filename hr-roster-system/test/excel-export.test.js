@@ -14,7 +14,7 @@ const roster = read('public/js/views/roster.js');
 assert(service.includes("require('exceljs')"), '服务端未引入 ExcelJS');
 assert(service.includes("addWorksheet('基本信息')"), '缺少基本信息 Sheet');
 assert(service.includes("addWorksheet('合同信息')"), '缺少合同信息 Sheet');
-assert(service.includes("addWorksheet('雇主险信息')"), '缺少雇主险信息 Sheet');
+assert(!service.includes("addWorksheet('雇主险信息')"), 'XLSX 仍生成雇主险信息 Sheet');
 assert(service.includes("actionType: 'export_employee_xlsx'"), 'XLSX 导出未写独立审计日志');
 assert(service.includes('fileSha256'), 'XLSX 导出未记录文件摘要');
 assert(service.includes('safeExcelText'), 'XLSX 导出缺少公式注入防护');

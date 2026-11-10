@@ -32,7 +32,6 @@ const dictionaries = {
     accept: '接收',
     remove_on_resignation: '离职移除',
     employee_identity_and_bank: '更新身份与银行信息',
-    employer_insurance: '雇主险增减',
     employee_bind_code: '生成绑定码',
     employee_export: '导出员工',
     export_employee: '导出员工',

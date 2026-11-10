@@ -22,7 +22,9 @@ assertIncludes(service, 'assertEmployeeScope', '附件未复用员工数据范�
 const employeeService = read('src/services/employee.service.js');
 assertIncludes(employeeService, '  assertEmployeeScope,', '员工数据范围校验函数未导出，附件权限检查将无法执行');
 assertIncludes(service, "permission: 'contract:manage'", '合同附件未校验管理权限');
-assertIncludes(service, "permission: 'social:manage'", '保险附件未校验管理权限');
+if (/social:\s*\{|permission:\s*'social:manage'|label:\s*'保险材料'/.test(service)) {
+  throw new Error('附件服务仍允许新增或管理雇主险材料');
+}
 assertIncludes(service, "permission: 'cert:manage'", '证件附件未校验管理权限');
 assertIncludes(service, "permission: 'risk:handle'", '整改证据未校验处理权限');
 assertIncludes(service, "flag: 'wx'", '附件写入未阻止同名覆盖');

@@ -141,17 +141,6 @@ exports.onboard = asyncHandler(async (req, res) => {
   success(res, data, '入职确认成功');
 });
 
-exports.confirmOnboardingCompliance = asyncHandler(async (req, res) => {
-  const data = await employeeService.confirmOnboardingCompliance(
-    req.companyId,
-    Number(req.params.id),
-    req.body,
-    req.operatorId,
-    req.user
-  );
-  success(res, data, '合同和雇主险已确认办理');
-});
-
 exports.resign = asyncHandler(async (req, res) => {
   const data = await employeeService.resignEmployee(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
   success(res, data, '离职办理成功');
@@ -171,11 +160,6 @@ exports.updateResignationProgress = asyncHandler(async (req, res) => {
 exports.createContract = asyncHandler(async (req, res) => {
   const data = await employeeService.createContract(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
   success(res, data, '合同已登记');
-});
-
-exports.updateSocialSecurity = asyncHandler(async (req, res) => {
-  const data = await employeeService.updateSocialSecurity(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user);
-  success(res, data, '雇主险增减已保存');
 });
 
 exports.createCertificate = asyncHandler(async (req, res) => {

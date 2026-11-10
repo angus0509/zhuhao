@@ -29,8 +29,6 @@ db.query = async (sql, params) => {
       work_type: 1,
       hire_date: '2026-08-01',
       channel_source: '内部推荐',
-      social_status: 1,
-      employer_insurance_status: 1,
       contract_no: 'HT-001',
       sign_status: 1,
       contract_start_date: '2026-08-01',
@@ -39,9 +37,6 @@ db.query = async (sql, params) => {
   }
   if (sql.includes('FROM hr_labor_contract')) {
     return [{ employee_id: 9, contract_no: 'HT-001', contract_type: 1, sign_status: 1, start_date: '2026-08-01', end_date: '2027-07-31' }];
-  }
-  if (sql.includes('FROM hr_social_security s')) {
-    return [{ employee_id: 9, employer_insurance_status: 1, employer_insurer: '示例保险', employer_policy_no: 'POLICY-001', employer_start_date: '2026-08-01', employer_end_date: '2027-07-31', employer_insured_amount: '500000.00' }];
   }
   if (sql.includes('INSERT INTO hr_operation_log')) {
     auditParams = params;
@@ -59,7 +54,7 @@ db.query = async (sql, params) => {
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(result.buffer);
-    assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['基本信息', '合同信息', '雇主险信息']);
+    assert.deepEqual(workbook.worksheets.map(sheet => sheet.name), ['基本信息', '合同信息']);
     const base = workbook.getWorksheet('基本信息');
     assert.equal(base.getCell('A2').value, "'=测试员工", '危险公式首字符未转义');
     assert.equal(base.getCell('C2').value, '110101********1234', '身份证号未脱敏');
@@ -68,6 +63,12 @@ db.query = async (sql, params) => {
     assert.equal(auditParams.actionType, 'export_employee_xlsx');
     assert.ok(!auditParams.afterData.includes('110101199001011234'), '审计日志泄露完整身份证号');
     assert.ok(!auditParams.afterData.includes('PK'), '审计日志不应包含 XLSX 文件正文');
+
+    const csvResult = await employeeService.exportEmployeesCsv(1, {}, { id: 7, dataScope: 1 }, { operatorId: 7, ipAddress: '127.0.0.1' });
+    const [csvHeader] = csvResult.csv.replace(/^\uFEFF/, '').split('\n');
+    assert.equal(csvHeader, '姓名,手机号,客户单位,岗位,用工模式,费用模式,工资类型,入职日期,合同状态,风险数,员工状态');
+    assert.doesNotMatch(csvResult.csv, /雇主险|保障中|未投保/, 'CSV 仍导出雇主险信息');
+    assert.equal(auditParams.actionType, 'export_employee');
     console.log('excel-export-workbook-tests-ok');
   } finally {
     db.first = originalFirst;

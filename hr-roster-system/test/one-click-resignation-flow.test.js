@@ -14,7 +14,7 @@ assert.match(detailWxml, /一键办理离职/, '员工详情应提供一键办�
 assert.doesNotMatch(resignWxml, /已减保|雇主险减保/, '驻厂快速离职不应要求雇主险减保确认');
 assert.match(service, /sourceType:\s*'RESIGNED'/, '离职完成后必须回流人才库');
 assert.match(service, /ON DUPLICATE KEY UPDATE|SELECT[\s\S]*talent_candidate/i, '人才库回流必须具备幂等处理');
-const completionFunction = service.match(/async function syncResignationCompletion[\s\S]*?\n}\n\nasync function terminateEmployerInsuranceForResignation/)?.[0] || '';
+const completionFunction = service.match(/async function syncResignationCompletion[\s\S]*?\n}\n\nasync function ensureInternalDepartment/)?.[0] || '';
 assert.match(
   completionFunction,
   /UPDATE hr_work_task SET task_status=3[\s\S]*employee_id=:employeeId AND task_status IN \(0,1\)/,
