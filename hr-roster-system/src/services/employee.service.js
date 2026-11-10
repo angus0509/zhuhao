@@ -505,7 +505,7 @@ async function getSummary(companyId, user = null) {
     JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
     LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
     WHERE r.company_id = :companyId
-      AND r.risk_type IN (1, 7)
+      AND r.risk_type <> 7
       AND e.employee_status = 2
       AND e.lifecycle_status <> 'OFFBOARDING'
       AND e.deleted_at IS NULL

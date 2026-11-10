@@ -13,8 +13,8 @@ const workTasks = read('src/services/work-task.service.js');
 const notices = read('src/services/notice.service.js');
 const routes = read('src/routes/employee.routes.js');
 const contractPage = read('wechat-miniprogram/miniprogram/pages/employees/contract/index.js');
-const insurancePage = read('wechat-miniprogram/miniprogram/pages/employees/insurance/index.js');
 const compliancePage = read('wechat-miniprogram/miniprogram/pages/employees/compliance/index.js');
+const insurancePagePath = path.join(root, 'wechat-miniprogram/miniprogram/pages/employees/insurance/index.js');
 
 for (const fn of ['confirmOnboardingCompliance', 'updateSocialSecurity']) {
   const start = employeeService.indexOf(`async function ${fn}`);
@@ -39,9 +39,10 @@ assert.doesNotMatch(workTasks, /INSURANCE_TERMINATION|待办理雇主险|离职�
 assert.match(notices, /disabledLegacyNotice/, '通知服务缺少旧合同/雇主险通知拦截');
 assert.match(routes, /const featureDisabled = .*status\(410\)/, '旧接口未统一返回停用状态');
 assert.doesNotMatch(routes, /onboarding-compliance\/confirm'.*requireAllPermissions/, '旧合规接口仍执行权限业务处理');
-for (const [name, page] of [['合同', contractPage], ['雇主险', insurancePage], ['入职合规', compliancePage]]) {
+assert.equal(fs.existsSync(insurancePagePath), false, '已下线的小程序雇主险页面仍存在');
+for (const [name, page] of [['合同', contractPage], ['入职合规', compliancePage]]) {
   assert.match(page, /title: '功能已停用'/, `${name}页面未显示停用提示`);
-  assert.match(page, /content: '[^']*历史[^']*查看/, `${name}页面未引导查看历史数据`);
+  assert.match(page, /content: '[^']*已停用[^']*'/, `${name}页面未显示停用说明`);
 }
 
 console.log('disabled-contract-insurance-flow-tests-ok');

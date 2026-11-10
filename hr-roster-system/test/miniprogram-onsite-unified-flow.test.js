@@ -43,6 +43,6 @@ if (/请确认完成全部离职交接清单|handoverFields\.every/.test(service
 if (!service.includes("badgeReturned: Number(body.badgeReturned) === 1 ? 1 : 0")) throw new Error('后端未保存实际勾选的交接项');
 
 if (/INSURANCE_TERMINATION|goOnsiteTask|\/work-tasks/.test(homeJs)) throw new Error('工作台仍保留驻厂处理队列');
-if (!tasksJs.includes("item.taskType === 'INSURANCE_TERMINATION' && this.data.canResign")) throw new Error('待办中心减保事项未进入办理离职');
+if (/INSURANCE_TERMINATION|insuranceAction/.test(tasksJs)) throw new Error('待办中心仍保留已停用业务动作');
 
 console.log('miniprogram-onsite-unified-flow-tests-ok');

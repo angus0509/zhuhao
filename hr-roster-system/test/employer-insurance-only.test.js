@@ -21,14 +21,12 @@ assert.ok(!index.includes('name="socialStatus"'), 'Web 合规表单仍允许修�
 assert.ok(!index.includes('name="fundStatus"'), 'Web 合规表单仍允许修改公积金');
 assert.ok(!router.includes("insurance: '#insuranceView'"), '路由仍注册保险提示页面');
 assert.ok(!app.includes('async function loadInsurance('), '前端仍加载保险提示台账');
-assert.ok(roster.includes('Number(row.employerInsuranceStatus) !== 1'), '花名册缺口未仅按雇主险计算');
+assert.doesNotMatch(roster, /雇主险|employerInsurance|insuranceGapCount/, '花名册仍读取或展示雇主险');
 assert.ok(!dashboard.includes('renderCompliance('), '驾驶舱仍渲染已取消的合规面板');
-assert.ok(employeeService.includes("employerInsuranceAction === 'ADD' ? 1 : 2"), '后端未将增减动作映射为雇主险状态');
-assert.ok(employeeService.includes("'雇主险','employer_insurance'"), '雇主险增减未记录独立审计日志');
-assert.ok(employeeService.includes('const insuranceDone = true;'), '快速离职仍被雇主险台账状态阻塞');
+assert.doesNotMatch(employeeService, /employerInsuranceAction ===|const insuranceDone = true|addWorksheet\('雇主险信息'\)/, '员工服务仍执行雇主险写入、离职阻塞或导出');
 assert.ok(!riskService.includes('async function scanSocialSecurity('), '风险扫描仍生成社保异常');
-assert.ok(riskService.includes('s.employer_end_date IS NOT NULL AND s.employer_end_date<:current'), '雇主险有效性判断未按实际失效日期处理');
+assert.doesNotMatch(riskService, /scanEmployerInsurance|employer_end_date|employer_insurance_status/, '风险扫描仍读取雇主险台账');
+assert.doesNotMatch(portalService, /employerInsuranceRate|employerInsuranceCount|uninsuredCount/, '驾驶舱仍返回雇主险指标');
 assert.ok(!apiSmoke.includes("'/insurance/overview'"), '生产只读 smoke 仍访问已下线的保险提示接口');
-assert.ok(employeeService.includes("addWorksheet('雇主险信息')"), 'Excel 导出未切换为雇主险信息');
 
-console.log('employer-insurance-only-tests-ok');
+console.log('employer-insurance-retirement-tests-ok');

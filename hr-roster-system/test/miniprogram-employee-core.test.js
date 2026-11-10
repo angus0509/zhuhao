@@ -41,7 +41,7 @@ if (fs.existsSync(miniAppPath)) {
   if (taskJs.includes("request({ url: '/risk-alerts' })")) throw new Error('驻厂待办仍请求已下线的风险提醒');
   assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=0' })", '驻厂待办页未加载待处理事项');
   assertIncludes(taskJs, "request({ url: '/work-tasks?taskStatus=1' })", '驻厂待办页未加载处理中事项');
-  if (/CONTRACT|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs)) throw new Error('驻厂待办仍暴露合同、雇主险或入职合规流程');
+  if (/CONTRACT|INSURANCE|ONBOARDING_COMPLIANCE|employees\/compliance/.test(taskJs)) throw new Error('驻厂待办仍暴露合同、雇主险或入职合规流程');
   assertIncludes(taskJs, 'avatarText:', '驻厂事项未在 JS 中生成微信兼容的头像文字');
   if (taskWxml.includes('.slice(')) throw new Error('风险处理页 WXML 不应直接调用 JavaScript 方法');
   assertIncludes(taskWxml, 'bindtap="handleItem"', '具体风险事项缺少直接处理按钮');

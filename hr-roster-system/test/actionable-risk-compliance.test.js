@@ -49,33 +49,15 @@ const summaryRiskQuery = employeeService.slice(
   employeeService.indexOf('const risk = await db.first('),
   employeeService.indexOf('const unsigned = await db.first(')
 );
-assertIncludes(summaryRiskQuery, 'r.risk_type IN (1, 7)', '首页未处理风险统计口径未限定合同和雇主险');
+assertIncludes(summaryRiskQuery, 'r.risk_type <> 7', '首页未处理风险仍计入已停用的雇主险风险');
 assertIncludes(summaryRiskQuery, 'e.employee_status = 2', '首页未处理风险仍包含非在职员工');
 assertIncludes(summaryRiskQuery, "e.lifecycle_status <> 'OFFBOARDING'", '首页未处理风险仍包含离职交接员工');
 assertIncludes(summaryRiskQuery, 'e.deleted_at IS NULL', '首页未处理风险仍包含已删除员工');
 
 const operationsService = read('src/services/operations.service.js');
-assertIncludes(
-  operationsService,
-  ".filter(item => !['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'].includes(item.taskType))",
-  '今日待办仍重复显示合同和雇主险生命周期任务'
-);
-const complianceQueryBlock = operationsService.slice(
-  operationsService.indexOf('db.first(`SELECT COUNT(*) total FROM hr_employee e'),
-  operationsService.indexOf('db.first(`SELECT COUNT(*) total FROM salary_detail d')
-);
-const offboardingFilters = complianceQueryBlock.match(/e\.lifecycle_status <> 'OFFBOARDING'/g) || [];
-if (offboardingFilters.length < 2) throw new Error('合规待办统计仍包含离职交接员工');
-assertIncludes(
-  complianceQueryBlock,
-  '(es.employer_end_date IS NULL OR es.employer_end_date >= CURRENT_DATE())',
-  '合规待办未将已过保险终止日期的员工计入雇主险待办'
-);
+assertIncludes(operationsService, "t.task_type IN ('ARRIVAL','DOCUMENT','OFFBOARD','TRANSFER_ACCEPTANCE')", '今日待办未限制为仍启用的生命周期任务');
+if (/INSURANCE_TERMINATION|taskType:\s*'INSURANCE'|pendingInsurance|uninsuredCount/.test(operationsService)) {
+  throw new Error('今日待办或运营统计仍包含雇主险业务');
+}
 
-const complianceMigration = read('sql/migrate-onboarding-compliance-risk-20260810.mysql.sql');
-assertIncludes(complianceMigration, 'INSERT INTO hr_work_task', '历史员工合规迁移未补齐驻厂可见待办');
-assertIncludes(complianceMigration, "'EMPLOYEE_ONBOARDING'", '历史合规待办未使用统一入职业务来源');
-assertIncludes(complianceMigration, "t.task_type='CONTRACT'", '迁移未防止重复生成合同待办');
-assertIncludes(complianceMigration, "t.task_type='INSURANCE'", '迁移未防止重复生成雇主险待办');
-
-console.log('未处理风险和合规待办可点击、可关联、可直接办理检查通过。');
+console.log('未处理风险和生命周期待办可点击、可关联、可直接办理检查通过。');

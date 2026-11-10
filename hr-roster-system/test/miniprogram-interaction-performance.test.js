@@ -42,7 +42,7 @@ for (const file of ['home/index.js', 'advances/index.js', 'payroll/index.js']) {
   assertIncludes(source, 'shouldRefresh(', `${file} 切换显示时仍会无条件请求接口`);
 }
 
-for (const file of ['add', 'onboard', 'insurance', 'resign', 'contract', 'transfer', 'transfer-handle']) {
+for (const file of ['add', 'onboard', 'resign', 'contract', 'transfer', 'transfer-handle']) {
   const source = read(`wechat-miniprogram/miniprogram/pages/employees/${file}/index.js`);
   assertIncludes(source, 'markDirty(', `${file} 保存后未通知驻厂页刷新`);
 }

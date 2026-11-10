@@ -27,7 +27,7 @@ assert.match(
 );
 assert.match(
   workTaskService,
-  /t\.task_type IN \('OFFBOARD','INSURANCE_TERMINATION'\)[\s\S]*e\.lifecycle_status='OFFBOARDING'/,
+  /\(t\.task_type='OFFBOARD' AND e\.lifecycle_status='OFFBOARDING'\)/,
   '离职待办必须只对应正在办理离职的员工'
 );
 assert.match(
