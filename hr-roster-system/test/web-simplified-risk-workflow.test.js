@@ -47,7 +47,7 @@ for (const removedHtml of [
 for (const removedRiskUi of ['id="riskView"', 'id="riskStatusFilter"', 'id="riskTableBody"', 'id="riskDetailModal"', 'id="riskDetailContent"', '/js/core/risk-workbench.js']) {
   assert.equal(html.includes(removedRiskUi), false, `网页仍保留已下线风险页面：${removedRiskUi}`);
 }
-assert.equal(app.includes('/合同|雇主险|保险减员/'), true, '办公消息未过滤已取消流程的行动提示');
+assert.doesNotMatch(app, /雇主险|保险减员/, 'Web 仍保留雇主险消息过滤或展示逻辑');
 
 for (const removedScript of [
   'loadWorkTasks',

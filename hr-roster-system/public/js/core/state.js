@@ -21,6 +21,10 @@ const state = {
   sessionVersion: 0,
   bootstrap: null,
   employees: [],
+  employeePage: 1,
+  employeePageSize: 50,
+  employeeTotal: 0,
+  employeeCustomerStats: [],
   token: '',
   user: null,
   selectedEmployeeId: null,
@@ -149,6 +153,7 @@ function renderTableFailure(selector, colspan, title, error, retryView = '') {
 
 const sessionContentSelectors = [
   '#employeeTableBody',
+  '#rosterPagination',
   '#detailContent',
   '#clientCards',
   '#projectCards',
@@ -217,6 +222,10 @@ function clearSessionWorkspace() {
   Object.assign(state, {
     bootstrap: null,
     employees: [],
+    employeePage: 1,
+    employeePageSize: 50,
+    employeeTotal: 0,
+    employeeCustomerStats: [],
     token: '',
     user: null,
     selectedEmployeeId: null,

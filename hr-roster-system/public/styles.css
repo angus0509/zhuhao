@@ -797,6 +797,9 @@ button {
 .payroll-record-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; margin-top: 16px; color: #607985; font-size: 12px; }
 .payroll-record-pagination button { width: 36px; height: 36px; border: 1px solid #cbdbe2; border-radius: 6px; color: #0b6675; background: #fff; font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
 .payroll-record-pagination button:disabled { color: #9cabb2; background: #f2f5f6; cursor: not-allowed; }
+.roster-pagination { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 44px; margin-top: 14px; color: #607985; font-size: 12px; }
+.roster-pagination button { width: 36px; height: 36px; border: 1px solid #cbdbe2; border-radius: 6px; color: #0b6675; background: #fff; font: inherit; font-size: 22px; line-height: 1; cursor: pointer; }
+.roster-pagination button:disabled { color: #9cabb2; background: #f2f5f6; cursor: not-allowed; }
 .payroll-record-month { display: grid; grid-template-columns: 100px minmax(0,1fr); gap: 12px; }
 .payroll-record-month-head { padding: 13px 8px; border-top: 3px solid #0b7785; color: #173c4f; }
 .payroll-record-month-head strong,.payroll-record-month-head span { display: block; }

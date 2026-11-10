@@ -4,13 +4,22 @@ async function loadEmployees() {
   // 默认展示在职花名册；选择其他状态时切换为全量状态视图，避免筛选项可选但永远返回在职。
   const view = !status || status === '2' ? 'activeRoster' : '';
   const query = [getQueryString(), view ? `view=${view}` : ''].filter(Boolean).join('&');
+  const params = new URLSearchParams(query);
+  const pageSize = Math.max(1, Number(state.employeePageSize || 50));
+  params.set('page', String(Math.max(1, Number(state.employeePage || 1))));
+  params.set('pageSize', String(pageSize));
+  params.set('includeRosterStats', '1');
   $('#exportLink').href = `/api/export/employees.csv${query ? `?${query}` : ''}`;
   $('#exportXlsxLink').href = `/api/export/employees.xlsx${query ? `?${query}` : ''}`;
   const wrap = $('.main-panel .table-wrap');
   if (wrap) wrap.classList.add('loading');
   try {
-    const data = await apiAllPages('/api/employees', query);
+    const data = await api(`/api/employees?${params.toString()}`);
     state.employees = data.list || [];
+    state.employeePage = Math.max(1, Number(data.page || 1));
+    state.employeePageSize = Math.max(1, Number(data.pageSize || pageSize));
+    state.employeeTotal = Math.max(0, Number(data.total || 0));
+    state.employeeCustomerStats = Array.isArray(data.customerStats) ? data.customerStats : [];
     if (!state.employees.some(item => Number(item.id) === Number(state.selectedEmployeeId))) {
       state.selectedEmployeeId = null;
       state.selectedDetail = null;
@@ -18,9 +27,33 @@ async function loadEmployees() {
       $('#emptyDetail')?.classList.remove('hidden');
     }
     renderEmployees();
+    renderRosterPagination();
   } finally {
     if (wrap) wrap.classList.remove('loading');
   }
+}
+
+function renderRosterPagination() {
+  const pagination = $('#rosterPagination');
+  if (!pagination) return;
+  const total = Math.max(0, Number(state.employeeTotal || 0));
+  const pageSize = Math.max(1, Number(state.employeePageSize || 50));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(totalPages, Math.max(1, Number(state.employeePage || 1)));
+  pagination.innerHTML = total
+    ? `<button type="button" data-roster-page="${page - 1}" ${page <= 1 ? 'disabled' : ''} aria-label="上一页">‹</button><span>第 ${page} / ${totalPages} 页 · 共 ${total} 人</span><button type="button" data-roster-page="${page + 1}" ${page >= totalPages ? 'disabled' : ''} aria-label="下一页">›</button>`
+    : '';
+}
+
+async function goToRosterPage(page) {
+  const totalPages = Math.max(1, Math.ceil(Number(state.employeeTotal || 0) / Math.max(1, Number(state.employeePageSize || 50))));
+  const nextPage = Math.min(totalPages, Math.max(1, Number(page || 1)));
+  if (nextPage === Number(state.employeePage || 1)) return;
+  state.employeePage = nextPage;
+  state.selectedEmployeeId = null;
+  state.selectedDetail = null;
+  await loadEmployees();
+  $('#rosterPagination')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function exportEmployees(event, format = 'csv') {
@@ -163,9 +196,8 @@ function renderEmployees() {
   let rowIndex = 0;
   tbody.innerHTML = Array.from(groups.values()).map(group => {
     const active = group.rows.filter(row => Number(row.employeeStatus) === 2 && row.lifecycleStatus !== 'OFFBOARDING').length;
-    const insuranceGap = group.rows.filter(row => Number(row.employeeStatus) === 2 && Number(row.employerInsuranceStatus) !== 1).length;
     const risk = group.rows.reduce((sum, row) => sum + Number(row.riskCount || 0), 0);
-    const head = `<tr class="customer-group-row"><td colspan="${rosterVisibleColumnCount()}"><div><strong>${escapeHtml(group.name)}</strong><span>在职 ${active} 人</span><span class="${insuranceGap ? 'risk-text' : ''}">雇主险待增 ${insuranceGap}</span><span class="${risk ? 'risk-text' : ''}">风险 ${risk}</span></div></td></tr>`;
+    const head = `<tr class="customer-group-row"><td colspan="${rosterVisibleColumnCount()}"><div><strong>${escapeHtml(group.name)}</strong><span>在职 ${active} 人</span><span class="${risk ? 'risk-text' : ''}">风险 ${risk}</span></div></td></tr>`;
     return head + group.rows.map(row => renderRow(row, rowIndex++)).join('');
   }).join('');
   finalizeRosterTableRender();
@@ -174,16 +206,10 @@ function renderEmployees() {
 function renderCustomerRosterRail() {
   const rail = $('#customerRosterRail');
   if (!rail) return;
-  const groups = new Map();
-  state.employees.forEach(row => {
-    const key = row.customerId ? String(row.customerId) : 'unassigned';
-    if (!groups.has(key)) groups.set(key, { id: row.customerId || '', name: row.customerName || '未分配客户单位', rows: [] });
-    groups.get(key).rows.push(row);
-  });
-  rail.innerHTML = Array.from(groups.values()).map(group => {
-    const active = group.rows.filter(row => Number(row.employeeStatus) === 2 && row.lifecycleStatus !== 'OFFBOARDING').length;
-    const insuranceGap = group.rows.filter(row => Number(row.employeeStatus) === 2 && Number(row.employerInsuranceStatus) !== 1).length;
-    const risks = group.rows.reduce((sum, row) => sum + Number(row.riskCount || 0), 0);
-    return `<button class="customer-roster-card" type="button" data-customer-roster="${group.id}"><span>${escapeHtml(group.name)}</span><strong>${active}<small>人在职</small></strong><div><em class="${insuranceGap ? 'risk' : ''}">雇主险 ${insuranceGap}</em><em class="${risks ? 'risk' : ''}">风险 ${risks}</em></div></button>`;
+  const groups = Array.isArray(state.employeeCustomerStats) ? state.employeeCustomerStats : [];
+  rail.innerHTML = groups.map(group => {
+    const active = Number(group.activeCount || 0);
+    const risks = Number(group.riskCount || 0);
+    return `<button class="customer-roster-card" type="button" data-customer-roster="${group.customerId || ''}"><span>${escapeHtml(group.customerName || '未分配客户单位')}</span><strong>${active}<small>人在职</small></strong><div><em class="${risks ? 'risk' : ''}">风险 ${risks}</em></div></button>`;
   }).join('') || '<div class="customer-roster-empty">当前筛选条件下暂无客户员工</div>';
 }

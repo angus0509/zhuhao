@@ -14,13 +14,9 @@ assert.doesNotMatch(html, /id="riskView"|id="riskStatusFilter"|id="riskTableBody
 assert.doesNotMatch(operations, /ONBOARDING_COMPLIANCE: \['合同和雇主险待确认'/, '工作台仍配置已停用的合并合规待办');
 assert.match(
   operations,
-  /filter\(item => !\['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'\]\.includes\(item\.taskType\)\)/,
-  '工作台未从生命周期队列排除合同、雇主险和合规待办'
+  /t\.task_type IN \('ARRIVAL','DOCUMENT','OFFBOARD','TRANSFER_ACCEPTANCE'\)/,
+  '工作台未使用允许待办类型白名单'
 );
-assert.match(
-  operations,
-  /filter\(item => item\.taskType !== 'INSURANCE_TERMINATION'\)/,
-  '工作台未从生命周期队列排除离职减保待办'
-);
+assert.doesNotMatch(operations, /INSURANCE_TERMINATION|pendingInsurance|uninsuredCount/, '工作台仍查询或展示雇主险数据');
 
 console.log('web-simplified-onsite-flow-tests-ok');

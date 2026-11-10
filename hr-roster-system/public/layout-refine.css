@@ -979,7 +979,7 @@ body { overflow-x: hidden; }
   .batch-paste-head { align-items: flex-start; flex-direction: column; }
 }
 
-/* ===== 新员工入职合规：合同 + 雇主险 ===== */
+/* ===== 历史风险界面兼容样式 ===== */
 .metric-action {
   cursor: pointer;
   transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;

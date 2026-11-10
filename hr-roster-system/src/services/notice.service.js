@@ -2,6 +2,15 @@ const db = require('../db');
 const { employeeScope, projectScope } = require('../utils/data-scope');
 const { boundedLimit } = require('../utils/pagination');
 
+function isDisabledLegacyNotice(notice = {}) {
+  const category = String(notice.category || '');
+  const title = String(notice.title || '');
+  const dedupeKey = String(notice.dedupeKey || notice.dedupe_key || '');
+  return ['合同变更', '雇主险变动'].includes(category)
+    || /合同|雇主险|保险减员/.test(title)
+    || /^(risk:(contract_missing|contract_expire|social_missing|employer_insurance_missing):|contract:|employer_insurance:)/.test(dedupeKey);
+}
+
 // 业务通知必须与产生业务数据的事务共用 connection，避免业务成功但通知丢失。
 async function createNotice(connection, notice) {
   const executor = connection || db.pool;
@@ -16,8 +25,7 @@ async function createNotice(connection, notice) {
     dedupeKey: notice.dedupeKey ? String(notice.dedupeKey).trim() : null
   };
   // 合同/雇主险功能已停用：保留历史通知，但禁止任何新通知写入。
-  const disabledLegacyNotice = ['合同变更', '雇主险变动'].includes(payload.category)
-    || /^(risk:(contract_missing|contract_expire|social_missing|employer_insurance_missing):|contract:|employer_insurance:)/.test(payload.dedupeKey || '');
+  const disabledLegacyNotice = isDisabledLegacyNotice(payload);
   if (disabledLegacyNotice) return null;
   if (!payload.title) return null;
   const [result] = await executor.execute(
@@ -54,6 +62,10 @@ function formatNotice(row) {
   };
 }
 
+function formatActiveNotices(rows) {
+  return rows.filter(row => !isDisabledLegacyNotice(row)).map(formatNotice);
+}
+
 async function listNotices(companyId, user, limit = 20) {
   const safeLimit = boundedLimit(limit, 20, 50);
   const baseSelect = `SELECT n.id,n.title,n.category,n.notice_type noticeType,
@@ -64,7 +76,7 @@ async function listNotices(companyId, user, limit = 20) {
       `${baseSelect} WHERE n.company_id=:companyId ORDER BY n.created_at DESC,n.id DESC LIMIT :safeLimit`,
       { companyId, safeLimit }
     );
-    return rows.map(formatNotice);
+    return formatActiveNotices(rows);
   }
 
   const globalParams = { companyId, safeLimit };
@@ -97,6 +109,7 @@ async function listNotices(companyId, user, limit = 20) {
   ]);
 
   return [...globalRows, ...employeeRows, ...projectRows]
+    .filter(row => !isDisabledLegacyNotice(row))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)) || Number(b.id) - Number(a.id))
     .slice(0, safeLimit)
     .map(formatNotice);

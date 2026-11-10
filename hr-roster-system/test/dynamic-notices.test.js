@@ -37,4 +37,24 @@ const frontend = read('public/app.js');
 assertIncludes(frontend, "api('/api/notices')", '办公首页仍未读取动态通知接口');
 if (frontend.includes("title: '工资条发布必须执行复核'")) throw new Error('办公首页仍保留硬编码演示通知');
 
-console.log('动态通知、数据隔离与核心业务触发检查通过。');
+async function main() {
+  const db = require('../src/db');
+  const noticeServiceRuntime = require('../src/services/notice.service');
+  const originalQuery = db.query;
+  db.query = async () => [
+    { id: 1, title: '员工雇主险待增保', category: '风险提醒', createdAt: '2026-11-10 08:00:00' },
+    { id: 2, title: '工资条已发布', category: '工资条', createdAt: '2026-11-10 09:00:00' }
+  ];
+  try {
+    const rows = await noticeServiceRuntime.listNotices(1, { dataScope: 1 }, 20);
+    if (rows.length !== 1 || rows[0].id !== 2) throw new Error('历史雇主险通知仍会返回办公首页');
+  } finally {
+    db.query = originalQuery;
+  }
+  console.log('动态通知、数据隔离与核心业务触发检查通过。');
+}
+
+main().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

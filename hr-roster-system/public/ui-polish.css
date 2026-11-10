@@ -353,23 +353,6 @@ dialog[open] .modal-panel {
   background: inherit;
 }
 
-#socialModal .modal-panel {
-  width: min(440px, calc(100vw - 28px));
-}
-
-#socialModal .form-grid {
-  padding-block: 8px 18px;
-}
-
-#socialModal select[name="employerInsuranceAction"] {
-  min-height: 52px;
-  border-color: #80c7d4;
-  color: #0d5770;
-  background: linear-gradient(180deg, #fff, #eefafb);
-  font-size: 16px;
-  font-weight: 700;
-}
-
 .empty-state,
 .empty-detail,
 .mobile-emp-empty,

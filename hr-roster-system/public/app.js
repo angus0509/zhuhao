@@ -1438,6 +1438,7 @@ function openProjectRoster(projectId) {
   $('#customerSelect').value = String(project.customerId || '');
   updateRosterProjectOptions(project.id);
   $('#projectSelect').value = String(project.id);
+  state.employeePage = 1;
   loadEmployees().catch(error => toast(error.message, 'error'));
 }
 
@@ -1834,6 +1835,7 @@ function openRosterStatus(status) {
   switchView('roster');
   const select = $('#statusSelect');
   if (select) select.value = String(status ?? '');
+  state.employeePage = 1;
   return loadEmployees().catch(error => toast(error.message, 'error'));
 }
 
@@ -1866,7 +1868,6 @@ async function loadOffice() {
     // 兼容尚未提供独立公告接口的旧环境，办公中心仍可正常使用。
     if (!/接口不存在|404/.test(String(error?.message || ''))) throw error;
   }
-  notices = notices.filter(item => !/合同|雇主险|保险减员/.test(`${item.category || ''} ${item.title || ''}`));
   const workforce = data.workforce || {};
   const finance = data.finance || {};
   const delivery = data.delivery || {};
@@ -3099,11 +3100,13 @@ function bindEvents() {
 
   $('#filterForm').addEventListener('submit', event => {
     event.preventDefault();
+    state.employeePage = 1;
     loadEmployees().catch(error => toast(error.message, 'error'));
   });
 
   /* 关键词搜索防抖 */
   const debouncedSearch = debounce(() => {
+    state.employeePage = 1;
     loadEmployees().catch(error => toast(error.message, 'error'));
   }, 400);
   $('#keywordInput').addEventListener('input', debouncedSearch);
@@ -3523,7 +3526,13 @@ function bindEvents() {
     const customerRoster = event.target.closest('[data-customer-roster]');
     if (customerRoster) {
       $('#customerSelect').value = customerRoster.dataset.customerRoster;
+      state.employeePage = 1;
       loadEmployees().catch(error => toast(error.message, 'error'));
+      return;
+    }
+    const rosterPage = event.target.closest('[data-roster-page]');
+    if (rosterPage) {
+      goToRosterPage(Number(rosterPage.dataset.rosterPage)).catch(error => toast(error.message, 'error'));
       return;
     }
     const manageClientCard = event.target.closest('[data-manage-client]');

@@ -17,7 +17,8 @@ const snapshotService = require('../src/services/payroll-item-snapshot.service')
 const payslipService = require('../src/services/payslip.service');
 
 assertIncludes(api, "async function apiAllPages(path, query = '', pageSize = 200)", 'Web 缺少统一完整分页工具');
-assertIncludes(roster, "apiAllPages('/api/employees', query)", '桌面 Web 花名册未读取完整员工数据');
+assertIncludes(roster, 'api(`/api/employees?${params.toString()}`)', '桌面 Web 花名册未使用服务端分页接口');
+assertIncludes(roster, "params.set('pageSize', String(pageSize))", '桌面 Web 花名册未限制单页员工数量');
 assertIncludes(app, "apiAllPages('/api/employees', query)", '手机 Web 未使用与桌面端一致的员工接口');
 if (app.includes('/api/employees/mine')) throw new Error('手机 Web 仍只显示自己创建的员工');
 assertIncludes(app, "apiAllPages('/api/advances', month ?", 'Web 工资预支未按月份读取完整权限范围数据');
