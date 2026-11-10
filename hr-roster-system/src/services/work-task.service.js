@@ -4,11 +4,9 @@ const { workTaskScope } = require('../utils/data-scope');
 
 const TASK_TYPE_NAMES = {
   ARRIVAL: '待确认到岗',
-  INSURANCE: '待办理雇主险增保',
   CONTRACT: '待签劳动合同',
   DOCUMENT: '待补员工资料',
   OFFBOARD: '待完成离职交接',
-  INSURANCE_TERMINATION: '离职待雇主险减保',
   TRANSFER_ACCEPTANCE: '跨项目转岗待接收'
 };
 
@@ -62,9 +60,10 @@ async function listTasks(companyId, query, user) {
      LEFT JOIN crm_customer target_customer ON target_customer.id=target_project.customer_id AND target_customer.company_id=t.company_id
      WHERE t.company_id=:companyId
        AND t.task_type<>'PAYROLL_SETTLEMENT'
+       AND t.task_type IN ('ARRIVAL','OFFBOARD','DOCUMENT','TRANSFER_ACCEPTANCE')
        AND (
          (t.task_type='ARRIVAL' AND e.employee_status=1)
-         OR (t.task_type IN ('OFFBOARD','INSURANCE_TERMINATION') AND e.lifecycle_status='OFFBOARDING')
+         OR (t.task_type='OFFBOARD' AND e.lifecycle_status='OFFBOARDING')
          OR (t.task_type='DOCUMENT' AND e.employee_status IN (1,2,6))
          OR t.task_type='TRANSFER_ACCEPTANCE'
        )
@@ -90,7 +89,9 @@ async function getScopedTask(companyId, taskId, user) {
        WHERE j2.employee_id=e.id AND j2.company_id=e.company_id
        ORDER BY (j2.job_status=1) DESC,j2.id DESC LIMIT 1
      )
-     WHERE t.company_id=:companyId AND t.id=:taskId ${scope} LIMIT 1`,
+     WHERE t.company_id=:companyId AND t.id=:taskId
+       AND t.task_type IN ('ARRIVAL','OFFBOARD','DOCUMENT','TRANSFER_ACCEPTANCE')
+       ${scope} LIMIT 1`,
     params
   );
   if (!task) throw createError('待办不存在或无项目权限', 404);
@@ -115,7 +116,7 @@ async function completeTask(companyId, taskId, body, operatorId, user) {
     throw createError('该待办必须通过对应业务操作完成，不能直接勾选完成');
   }
   if (Number(task.risk_level) === 3) {
-    throw createError('高风险待办必须通过投保、退保或对应业务操作完成');
+    throw createError('高风险待办必须通过对应业务操作完成');
   }
   await db.transaction(async connection => {
     await connection.execute(

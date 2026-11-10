@@ -9,7 +9,7 @@ const { dictionaries } = require('../utils/dictionaries');
 
 const serviceTypeNames = { 1: '劳务派遣', 2: '岗位外包', 3: '灵活用工', 4: 'RPO招聘' };
 const employmentTypeNames = { 1: '全职', 2: '兼职', 3: '劳务', 4: '实习', 5: '外包', 6: '派遣' };
-const riskTypeNames = { 1: '未签合同', 2: '合同到期', 3: '社保异常', 4: '证件过期', 5: '特殊工种', 6: '离职流程', 7: '雇主险异常' };
+const riskTypeNames = { 1: '未签合同', 2: '合同到期', 3: '社保异常', 4: '证件过期', 5: '特殊工种', 6: '离职流程' };
 const clientRequestTypeNames = { 1: '员工增员', 2: '员工减员', 3: '资料补充', 4: '账单确认', 5: '发票事项', 6: '其他服务' };
 const clientRequestStatusNames = { 0: '待受理', 1: '处理中', 2: '待客户反馈', 3: '已完成' };
 
@@ -405,10 +405,7 @@ async function dashboard(companyId, user) {
         ${employeeScope(user, params, 'e', 'j')} GROUP BY j.employment_type`, params),
     db.first(`SELECT
       COUNT(*) activeTotal,
-      SUM(EXISTS(SELECT 1 FROM hr_labor_contract c WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1)) contractCount,
-      SUM(EXISTS(SELECT 1 FROM hr_social_security s WHERE s.company_id=e.company_id AND s.employee_id=e.id
-        AND s.id=(SELECT MAX(s2.id) FROM hr_social_security s2 WHERE s2.company_id=e.company_id AND s2.employee_id=e.id)
-        AND s.employer_insurance_status=1)) employerInsuranceCount
+      SUM(EXISTS(SELECT 1 FROM hr_labor_contract c WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1)) contractCount
       FROM hr_employee e
       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
       WHERE e.company_id=:companyId AND e.employee_status=2 AND e.deleted_at IS NULL
@@ -417,7 +414,7 @@ async function dashboard(companyId, user) {
       FROM hr_risk_alert r
       JOIN hr_employee e ON e.id=r.employee_id AND e.company_id=r.company_id
       LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
-      WHERE r.company_id=:companyId AND r.risk_type<>3 ${employeeScope(user, params, 'e', 'j')} GROUP BY r.risk_type`, params),
+      WHERE r.company_id=:companyId AND r.risk_type NOT IN (3,7) ${employeeScope(user, params, 'e', 'j')} GROUP BY r.risk_type`, params),
     db.query(`SELECT DATE_FORMAT(months.month_start,'%Y-%m') month,
       (SELECT COUNT(*) FROM hr_employee_job j
        JOIN hr_employee e ON e.id=j.employee_id AND e.company_id=j.company_id
@@ -459,7 +456,6 @@ async function dashboard(companyId, user) {
     supplierDistribution: suppliers.map(item => ({ name: item.name, value: Number(item.value || 0) })),
     compliance: {
       contractRate: active ? Math.round(Number(compliance.contractCount || 0) / active * 100) : 100,
-      employerInsuranceRate: active ? Math.round(Number(compliance.employerInsuranceCount || 0) / active * 100) : 100,
       specialCertRate: 100
     },
     riskByType: risks.map(item => ({ name: riskTypeNames[item.riskType] || '其他风险', unresolved: Number(item.unresolved || 0), closed: Number(item.closed || 0) })),

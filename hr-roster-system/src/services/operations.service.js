@@ -246,14 +246,6 @@ async function listProjects(companyId, query, user) {
               WHERE project_job.project_id = p.id AND project_job.job_status = 1
                 AND project_employee.employee_status = 2 AND project_employee.deleted_at IS NULL
               AND NOT EXISTS (SELECT 1 FROM hr_labor_contract lc WHERE lc.company_id=p.company_id AND lc.employee_id=project_employee.id AND lc.sign_status=1)) unsignedContractCount,
-            (SELECT COUNT(DISTINCT project_employee.id)
-              FROM hr_employee_job project_job
-              JOIN hr_employee project_employee ON project_employee.id=project_job.employee_id AND project_employee.company_id=project_job.company_id
-              WHERE project_job.project_id = p.id AND project_job.job_status = 1
-                AND project_employee.employee_status = 2 AND project_employee.deleted_at IS NULL
-              AND NOT EXISTS (SELECT 1 FROM hr_social_security ss WHERE ss.company_id=p.company_id AND ss.employee_id=project_employee.id
-                AND ss.id=(SELECT MAX(ss2.id) FROM hr_social_security ss2 WHERE ss2.company_id=p.company_id AND ss2.employee_id=project_employee.id)
-                AND ss.employer_insurance_status=1)) uninsuredCount,
             (SELECT COUNT(DISTINCT ra.id)
               FROM hr_employee_job project_job
               JOIN hr_employee project_employee ON project_employee.id=project_job.employee_id AND project_employee.company_id=project_job.company_id
@@ -273,7 +265,6 @@ async function listProjects(companyId, query, user) {
       ...item,
       onsiteCount: Number(item.onsiteCount || 0),
       unsignedContractCount: Number(item.unsignedContractCount || 0),
-      uninsuredCount: Number(item.uninsuredCount || 0),
       openRiskCount: Number(item.openRiskCount || 0),
       advanceOutstanding: Number(item.advanceOutstanding || 0),
       payrollNet: Number(item.payrollNet || 0)
@@ -2434,7 +2425,7 @@ async function operationsHome(companyId, user) {
   const params = { companyId };
   const employeeFilter = (alias = 'e', jobAlias = 'j') => employeeScope(user, params, alias, jobAlias);
   const projectFilter = projectScope(user, params, 'home_project');
-  const [workforce, talents, finance, pendingContracts, pendingInsurance, unsignedPayslips, activeProjects, onsiteEmployees, serviceRequests] = await Promise.all([
+  const [workforce, talents, finance, pendingContracts, unsignedPayslips, activeProjects, onsiteEmployees, serviceRequests] = await Promise.all([
     db.first(`SELECT COUNT(*) total,
       SUM(employee_status = 6) interview,
       SUM(employee_status = 1) pending_arrival,
@@ -2456,17 +2447,6 @@ async function operationsHome(companyId, user) {
       WHERE e.company_id = :companyId AND e.employee_status = 2 AND e.deleted_at IS NULL
       AND e.lifecycle_status <> 'OFFBOARDING'
       AND NOT EXISTS (SELECT 1 FROM hr_labor_contract c WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1)
-      ${employeeFilter('e', 'j')}`, params),
-    db.first(`SELECT COUNT(*) total FROM hr_employee e
-      LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
-      WHERE e.company_id = :companyId AND e.employee_status = 2 AND e.deleted_at IS NULL
-      AND e.lifecycle_status <> 'OFFBOARDING'
-      AND NOT EXISTS (
-        SELECT 1 FROM hr_social_security es
-        WHERE es.id=(SELECT es2.id FROM hr_social_security es2 WHERE es2.company_id=e.company_id AND es2.employee_id=e.id ORDER BY es2.id DESC LIMIT 1)
-          AND es.employer_insurance_status=1
-          AND (es.employer_end_date IS NULL OR es.employer_end_date >= CURRENT_DATE())
-      )
       ${employeeFilter('e', 'j')}`, params),
     db.first(`SELECT COUNT(*) total FROM salary_detail d JOIN salary_batch db_batch ON db_batch.id=d.batch_id AND db_batch.company_id=d.company_id
       LEFT JOIN labor_project d_project ON d_project.id=db_batch.project_id AND d_project.company_id=db_batch.company_id
@@ -2498,22 +2478,19 @@ async function operationsHome(companyId, user) {
      FROM hr_work_task t
      LEFT JOIN hr_employee e ON e.id=t.employee_id AND e.company_id=t.company_id
      LEFT JOIN hr_employee_job j ON j.employee_id=e.id AND j.company_id=e.company_id AND j.job_status=1
-     WHERE t.company_id=:companyId AND t.task_status IN (0,1) AND t.task_type<>'PAYROLL_SETTLEMENT'
+     WHERE t.company_id=:companyId AND t.task_status IN (0,1)
+       AND t.task_type IN ('ARRIVAL','DOCUMENT','OFFBOARD','TRANSFER_ACCEPTANCE')
        ${employeeScope(user, taskParams, 'e', 'j')}
      GROUP BY t.task_type ORDER BY MAX(t.risk_level) DESC,COUNT(*) DESC`,
     taskParams
   );
   const taskConfig = {
     ARRIVAL: ['待确认到岗', 'roster'],
-    INSURANCE: ['到岗待增雇主险', 'roster'],
     DOCUMENT: ['员工资料待补', 'roster'],
     OFFBOARD: ['离职交接待办', 'roster'],
-    INSURANCE_TERMINATION: ['离职待减雇主险', 'roster'],
     TRANSFER_ACCEPTANCE: ['跨项目转岗待接收', 'tasks']
   };
   const lifecycleTodos = lifecycleTasks
-    .filter(item => !['CONTRACT', 'INSURANCE', 'ONBOARDING_COMPLIANCE'].includes(item.taskType))
-    .filter(item => item.taskType !== 'INSURANCE_TERMINATION')
     .map(item => ({
     id: `lifecycle-${item.taskType}`,
     title: taskConfig[item.taskType]?.[0] || item.taskType,
@@ -2546,7 +2523,6 @@ async function operationsHome(companyId, user) {
     },
     compliance: {
       pendingContracts: Number(pendingContracts.total || 0),
-      pendingInsurance: Number(pendingInsurance.total || 0),
       unsignedPayslips: Number(unsignedPayslips.total || 0)
     },
     todos: [

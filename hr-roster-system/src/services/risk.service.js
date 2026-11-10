@@ -208,46 +208,6 @@ async function scanSpecialWorkCertificate(connection, companyId) {
   return created;
 }
 
-async function scanEmployerInsurance(connection, companyId, user = null) {
-  const current = today();
-  const params = { companyId, current };
-  const scope = employeeScope(user, params, 'scan_scope_e', 'scan_scope_j');
-  const [employees] = await connection.execute(
-    `SELECT scan_scope_e.id,scan_scope_e.name,s.id social_id,s.employer_insurance_status,s.employer_end_date
-     FROM hr_employee scan_scope_e
-     LEFT JOIN hr_employee_job scan_scope_j ON scan_scope_j.id=(
-       SELECT scan_scope_j2.id FROM hr_employee_job scan_scope_j2
-       WHERE scan_scope_j2.company_id=scan_scope_e.company_id
-         AND scan_scope_j2.employee_id=scan_scope_e.id
-       ORDER BY (scan_scope_j2.job_status=1) DESC,scan_scope_j2.id DESC LIMIT 1
-     )
-     LEFT JOIN hr_social_security s ON s.id=(
-       SELECT s2.id FROM hr_social_security s2
-       WHERE s2.company_id=scan_scope_e.company_id AND s2.employee_id=scan_scope_e.id ORDER BY s2.id DESC LIMIT 1
-     )
-     WHERE scan_scope_e.company_id=:companyId AND scan_scope_e.employee_status=2
-       AND scan_scope_e.lifecycle_status<>'OFFBOARDING' AND scan_scope_e.deleted_at IS NULL${scope}
-       AND (COALESCE(s.employer_insurance_status,0)<>1 OR (s.employer_end_date IS NOT NULL AND s.employer_end_date<:current))`,
-    params
-  );
-  let created = 0;
-  for (const employee of employees) {
-    const missing = Number(employee.employer_insurance_status || 0) !== 1;
-    const expired = !missing && employee.employer_end_date < current;
-    created += await createRiskIfNotExists(connection, {
-      companyId,
-      employeeId: employee.id,
-      riskType: 7,
-      riskLevel: 3,
-      riskTitle: missing ? '新员工雇主险未增保' : '员工雇主险已失效',
-      riskDesc: missing
-        ? `${employee.name}入职后尚未办理雇主险增保`
-        : `${employee.name}雇主险已于${employee.employer_end_date}失效，请重新增保`,
-      riskKey: `employer_insurance_missing:${employee.id}`
-    });
-  }
-  return created;
-}
 
 async function scanRisks(companyId, user = null) {
   return db.transaction(async connection => {
@@ -265,7 +225,7 @@ async function scanRisks(companyId, user = null) {
 
 async function listRisks(companyId, user = null) {
   const params = { companyId };
-  const where = ['r.company_id = :companyId', 'r.risk_type IN (1,7)', 'e.employee_status = 2', "e.lifecycle_status <> 'OFFBOARDING'"];
+  const where = ['r.company_id = :companyId', 'r.risk_type = 1', 'e.employee_status = 2', "e.lifecycle_status <> 'OFFBOARDING'"];
   applyDataScope(where, params, await resolveDataScope(companyId, user));
 
   const rows = await db.query(
@@ -273,12 +233,7 @@ async function listRisks(companyId, user = null) {
     SELECT r.*, e.name AS employee_name, e.employee_no,j.hire_date,j.project_id project_id,
       cu.customer_name,lp.project_name,p.position_name,
       EXISTS(SELECT 1 FROM hr_labor_contract c
-        WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1) AS contract_signed,
-      EXISTS(SELECT 1 FROM hr_social_security s
-        WHERE s.id=(SELECT s2.id FROM hr_social_security s2
-          WHERE s2.company_id=e.company_id AND s2.employee_id=e.id ORDER BY s2.id DESC LIMIT 1)
-        AND s.employer_insurance_status=1
-        AND (s.employer_end_date IS NULL OR s.employer_end_date>=CURRENT_DATE())) AS employer_insurance_active
+        WHERE c.company_id=e.company_id AND c.employee_id=e.id AND c.sign_status=1) AS contract_signed
     FROM hr_risk_alert r
     JOIN hr_employee e ON e.id = r.employee_id AND e.company_id = r.company_id
     LEFT JOIN hr_employee_job j ON j.employee_id = e.id AND j.company_id = e.company_id AND j.job_status = 1
@@ -293,8 +248,7 @@ async function listRisks(companyId, user = null) {
   return rows.map(row => ({
     ...formatRisk(row),
     hireDate: row.hire_date || '',
-    contractSigned: Boolean(row.contract_signed),
-    employerInsuranceActive: Boolean(row.employer_insurance_active)
+    contractSigned: Boolean(row.contract_signed)
   }));
 }
 

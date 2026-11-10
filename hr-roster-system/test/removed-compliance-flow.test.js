@@ -1,7 +1,8 @@
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 
-const root = '/Users/zhuhao/Documents/moluo/hr-roster-system';
+const root = path.resolve(__dirname, '..');
 const appConfig = JSON.parse(fs.readFileSync(`${root}/wechat-miniprogram/miniprogram/app.json`, 'utf8'));
 const detailWxml = fs.readFileSync(`${root}/wechat-miniprogram/miniprogram/pages/employees/detail/index.wxml`, 'utf8');
 const operations = fs.readFileSync(`${root}/src/services/operations.service.js`, 'utf8');
@@ -19,6 +20,6 @@ assert(!detailWxml.includes('劳动合同'), '员工详情仍显示劳动合同�
 assert(!detailWxml.includes('雇主责任险'), '员工详情仍显示雇主险模块');
 assert(!operations.includes("title: '劳动合同待签订'"), '工作台仍配置劳动合同待办');
 assert(!operations.includes("title: '雇主险待增保'"), '工作台仍配置雇主险待办');
-assert(!workTask.includes("t.task_type IN ('CONTRACT','INSURANCE','ONBOARDING_COMPLIANCE')"), '任务查询仍返回已取消的合规任务');
+assert(!/INSURANCE_TERMINATION|待办理雇主险|离职待雇主险/.test(workTask), '任务查询仍返回雇主险待办');
 
 console.log('removed-compliance-flow-tests-ok');

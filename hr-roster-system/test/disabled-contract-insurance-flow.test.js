@@ -16,12 +16,14 @@ const contractPage = read('wechat-miniprogram/miniprogram/pages/employees/contra
 const insurancePage = read('wechat-miniprogram/miniprogram/pages/employees/insurance/index.js');
 const compliancePage = read('wechat-miniprogram/miniprogram/pages/employees/compliance/index.js');
 
-for (const fn of ['confirmOnboardingCompliance', 'createContract', 'updateSocialSecurity']) {
+for (const fn of ['confirmOnboardingCompliance', 'updateSocialSecurity']) {
   const start = employeeService.indexOf(`async function ${fn}`);
   assert.ok(start >= 0, `${fn} 接口实现不存在`);
   const block = employeeService.slice(start, start + 220);
-  assert.match(block, /throw createError\('功能已停用', 410\)/, `${fn} 未统一返回功能已停用`);
+  assert.match(block, /throw createError\('雇主险功能已停用', 410\)/, `${fn} 未统一返回雇主险功能已停用`);
 }
+const createContractBlock = employeeService.slice(employeeService.indexOf('async function createContract'), employeeService.indexOf('async function createContract') + 220);
+assert.match(createContractBlock, /throw createError\('功能已停用', 410\)/, 'createContract 未保持合同功能停用状态');
 
 assert.match(riskService, /if \(\[1, 2, 3, 7\]\.includes\(Number\(risk\.riskType\)\)\) return 0;/, '合同/雇主险风险仍可被创建');
 const scanStart = riskService.indexOf('async function scanRisks');
@@ -32,9 +34,8 @@ assert.match(migration, /task_type IN \('CONTRACT', 'INSURANCE', 'ONBOARDING_COM
 assert.match(migration, /risk_type IN \(1, 2, 3, 7\)/, '旧合同/雇主险风险未关闭');
 assert.match(read('server.js'), /if \(\[1, 2, 3, 7\]\.includes\(Number\(risk\.riskType\)\)\) return false;/, '原型服务仍可生成旧风险通知');
 assert.match(deploy, /migrate-disable-contract-insurance-risk-20260831\.mysql\.sql/, '生产部署未执行停用迁移');
-assert.match(operations, /INSURANCE_TERMINATION/);
-assert.match(operations, /filter\(item => !\['CONTRACT', 'INSURANCE', 'INSURANCE_TERMINATION', 'ONBOARDING_COMPLIANCE'\]/, '工作台仍展示雇主险旧待办');
-assert.doesNotMatch(workTasks, /t\.task_type IN \('OFFBOARD','INSURANCE_TERMINATION'\)/, '待办列表仍展示旧雇主险减保任务');
+assert.doesNotMatch(operations, /INSURANCE_TERMINATION|pendingInsurance|uninsuredCount|employer_insurance_status/, '运营服务仍查询或展示雇主险');
+assert.doesNotMatch(workTasks, /INSURANCE_TERMINATION|待办理雇主险|离职待雇主险/, '待办服务仍暴露雇主险类型');
 assert.match(notices, /disabledLegacyNotice/, '通知服务缺少旧合同/雇主险通知拦截');
 assert.match(routes, /const featureDisabled = .*status\(410\)/, '旧接口未统一返回停用状态');
 assert.doesNotMatch(routes, /onboarding-compliance\/confirm'.*requireAllPermissions/, '旧合规接口仍执行权限业务处理');
