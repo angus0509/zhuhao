@@ -6,7 +6,11 @@ const { sensitiveLimiter, batchLimiter } = require('../middlewares/rate-limit.mi
 const router = express.Router();
 
 // 已认证用户访问历史合同/雇主险写接口时统一返回停用提示，不再进入权限与业务写入逻辑。
-const featureDisabled = (_req, res) => res.status(410).json({ code: 410, message: '功能已停用', data: null });
+const featureDisabled = (_req, res) => res.status(410).json({
+  code: 410,
+  message: '雇主险功能已停用',
+  data: null
+});
 
 router.use(requireAuth);
 
