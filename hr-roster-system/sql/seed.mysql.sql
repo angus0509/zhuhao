@@ -97,7 +97,7 @@ VALUES
 (10, '扫描风险', 'risk:scan', 2, 8, NULL, '/api/risk-alerts/scan', 22, 1),
 (11, '处理风险', 'risk:handle', 2, 8, NULL, '/api/risk-alerts/:id/handle', 23, 1),
 (12, '合同管理', 'contract:manage', 2, 1, NULL, '/api/employees/:id/contracts', 30, 1),
-(13, '雇主险增减', 'social:manage', 2, 1, NULL, '/api/employees/:id/social-security', 31, 1),
+(13, '雇主险增减（已停用）', 'social:manage', 2, 1, NULL, '/api/employees/:id/social-security', 31, 0),
 (14, '证件管理', 'cert:manage', 2, 1, NULL, '/api/employees/:id/certificates', 32, 1),
 (15, '系统管理', 'system:menu', 1, 0, '/system', NULL, 90, 1),
 (16, '角色权限管理', 'system:role', 2, 15, NULL, '/api/system/roles', 91, 1),
@@ -144,7 +144,7 @@ INSERT IGNORE INTO sys_role_permission (role_id, permission_id)
 SELECT 2, id FROM sys_permission
 WHERE permission_code IN (
   'employee:menu', 'employee:view', 'employee:create', 'employee:update', 'employee:transfer',
-  'employee:batch', 'employee:resign', 'employee:export', 'contract:manage', 'social:manage', 'cert:manage',
+  'employee:batch', 'employee:resign', 'employee:export', 'contract:manage', 'cert:manage',
   'employee:sensitive:view', 'risk:menu', 'risk:view', 'risk:scan', 'risk:handle',
   'customer:view', 'project:view', 'factory:view', 'factory:assign', 'blacklist:view',
   'advance:view', 'advance:approve', 'payroll:view', 'payroll:review',
@@ -156,7 +156,7 @@ INSERT IGNORE INTO sys_role_permission (role_id, permission_id)
 SELECT 3, id FROM sys_permission
 WHERE permission_code IN (
   'employee:menu', 'employee:view', 'employee:create', 'employee:batch', 'employee:update',
-  'employee:transfer', 'employee:resign', 'contract:manage', 'social:manage',
+  'employee:transfer', 'employee:resign', 'contract:manage',
   'employee:sensitive:view',
   'customer:view', 'customer:manage', 'project:view', 'project:manage',
   'factory:view', 'factory:manage', 'blacklist:view',

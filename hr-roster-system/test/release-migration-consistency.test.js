@@ -16,6 +16,31 @@ assert.doesNotMatch(migration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i, '停用菜�
 assert.match(migration, /permission_code IN \('insurance:menu', 'insurance:view'\)/, '迁移必须精确停用旧保险菜单权限');
 assert.match(migration, /status=0/, '迁移必须通过状态停用旧权限');
 
+const disableEmployerInsuranceMigrationPath = 'sql/migrate-disable-employer-insurance-module-20261110.mysql.sql';
+const disableEmployerInsuranceMigration = read(disableEmployerInsuranceMigrationPath);
+assert.ok(verify.includes(`"${disableEmployerInsuranceMigrationPath}"`), '发布包必须包含雇主险模块停用迁移');
+assert.match(verify, /M35="sql\/migrate-disable-employer-insurance-module-20261110\.mysql\.sql"/,
+  '雇主险模块停用迁移必须进入统一安全审计清单');
+assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${disableEmployerInsuranceMigrationPath}"`),
+  '部署脚本必须执行雇主险模块停用迁移');
+assert.match(disableEmployerInsuranceMigration, /permission_code\s*=\s*'social:manage'[\s\S]*?status\s*<>\s*0/i,
+  '迁移必须幂等停用雇主险权限');
+assert.match(disableEmployerInsuranceMigration, /task_type\s+IN\s*\('INSURANCE',\s*'INSURANCE_TERMINATION',\s*'ONBOARDING_COMPLIANCE'\)[\s\S]*?task_status\s+IN\s*\(0,\s*1\)/i,
+  '迁移必须仅关闭指定类型的开放待办');
+const retiredTaskUpdates = disableEmployerInsuranceMigration.match(/UPDATE hr_work_task[\s\S]*?;/gi) || [];
+assert.equal(retiredTaskUpdates.length, 2, '开放待办必须分两步归档，避免联合唯一键冲突');
+assert.match(retiredTaskUpdates[0], /source_type\s*=\s*'LEGACY_CLOSED'[\s\S]*?source_id\s*=\s*(?:t\.)?id/i,
+  '第一步必须为每条开放待办设置唯一归档来源');
+assert.doesNotMatch(retiredTaskUpdates[0], /task_status\s*=\s*3/i, '第一步不得同时修改唯一键中的状态');
+assert.match(retiredTaskUpdates[1], /task_status\s*=\s*3/i, '第二步必须关闭已归档待办');
+assert.match(retiredTaskUpdates[1], /source_type\s*=\s*'LEGACY_CLOSED'/i, '第二步只能关闭已分配归档来源的待办');
+assert.match(disableEmployerInsuranceMigration, /risk_type\s*=\s*7[\s\S]*?handle_status\s+IN\s*\(0,\s*1\)/i,
+  '迁移必须仅关闭开放的雇主险风险');
+assert.doesNotMatch(disableEmployerInsuranceMigration, /\b(?:DELETE|DROP|TRUNCATE)\b/i,
+  '雇主险模块停用迁移不得删除表或历史数据');
+assert.doesNotMatch(disableEmployerInsuranceMigration, /employer_insurance_status\s*=/i,
+  '雇主险模块停用迁移不得改写历史雇主险状态');
+
 // 防止驻厂客户/项目管理权限迁移再次从生产部署链路中遗漏。
 const onsitePermissionMigrationPath = 'sql/migrate-onsite-management-permissions-20260801.mysql.sql';
 assert.ok(

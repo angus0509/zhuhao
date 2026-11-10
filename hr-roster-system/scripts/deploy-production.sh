@@ -185,6 +185,7 @@ run_migration "$STAGE_DIR/sql/migrate-attendance-timekeeping-20260909.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-geofence-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-disable-employer-insurance-module-20261110.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"

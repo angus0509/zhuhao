@@ -90,7 +90,7 @@ function requireAllPermissions(permissionCodes) {
       return next(createError('员工账号不能访问管理功能', 403));
     }
     if (!required.every(code => req.user.permissions.includes(code))) {
-      return next(createError('缺少办理合同或雇主险的权限', 403));
+      return next(createError('无操作权限', 403));
     }
     next();
   };

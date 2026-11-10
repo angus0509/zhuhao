@@ -54,21 +54,25 @@ if (fs.existsSync(seedPath)) {
   }
   assert(seed.includes("'audit:view'"), '种子数据缺少操作日志权限');
 
-  // HR主管必须包含雇主险办理和操作日志查看权限
+  const retiredPermissionRow = seed.split('\n').find(line => line.includes("'social:manage'")) || '';
+  assert(/,\s*0\),?$/.test(retiredPermissionRow), '雇主险权限必须在新环境中保持停用');
+
+  // HR主管保留操作日志查看权限，但不再授予已停用业务权限
   const hrManagerStart = seed.indexOf("SELECT 2, id FROM sys_permission");
   const hrManagerEnd = seed.indexOf("SELECT 3, id FROM sys_permission");
   const hrManagerBlock = seed.slice(hrManagerStart, hrManagerEnd);
-  assert(hrManagerBlock.includes("'social:manage'"), 'HR主管缺少雇主险办理权限');
+  assert(!hrManagerBlock.includes("'social:manage'"), 'HR主管仍被授予已停用业务权限');
   assert(hrManagerBlock.includes("'audit:view'"), 'HR主管缺少 audit:view');
   assert(hrManagerBlock.includes("'factory:assign'"), 'HR主管缺少派遣驻厂权限');
 
-  // 驻厂人员需要现场调岗、离职和保险办理，但不能包含操作日志、预支审批和工资管理权限
+  // 驻厂人员需要现场调岗和离职，但不能包含已停用业务、操作日志、预支审批和工资管理权限
   const onsiteStart = seed.indexOf("SELECT 3, id FROM sys_permission");
   const onsiteEnd = seed.indexOf("SELECT 4, id FROM sys_permission");
   const onsiteBlock = seed.slice(onsiteStart, onsiteEnd);
-  for (const permissionCode of ["'employee:transfer'", "'employee:resign'", "'social:manage'"]) {
+  for (const permissionCode of ["'employee:transfer'", "'employee:resign'"]) {
     assert(onsiteBlock.includes(permissionCode), `驻厂人员初始化权限缺少：${permissionCode}`);
   }
+  assert(!onsiteBlock.includes("'social:manage'"), '驻厂人员仍被授予已停用业务权限');
   assert(!onsiteBlock.includes("'audit:view'"), '驻厂专员不应有 audit:view');
   assert(!onsiteBlock.includes("'advance:approve'"), '驻厂专员不应有 advance:approve');
   assert(!onsiteBlock.includes("'payroll:manage'"), '驻厂专员不应有 payroll:manage');

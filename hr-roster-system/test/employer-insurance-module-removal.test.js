@@ -24,6 +24,12 @@ const miniSources = [
 assert.equal(fs.existsSync(path.join(miniRoot, 'pages/employees/insurance/index.js')), false, '小程序雇主险页面仍存在');
 assert.doesNotMatch(miniSources, /employees\/insurance|employerInsurance|insuranceComplete|insuranceGapCount|social:manage|雇主险/, '小程序仍保留雇主险字段、权限或入口');
 
+const disableMigration = fs.readFileSync(path.join(root, 'sql/migrate-disable-employer-insurance-module-20261110.mysql.sql'), 'utf8');
+assert.match(disableMigration, /permission_code\s*=\s*'social:manage'/i, '停用迁移未锁定雇主险权限');
+assert.match(disableMigration, /task_type\s+IN\s*\('INSURANCE',\s*'INSURANCE_TERMINATION',\s*'ONBOARDING_COMPLIANCE'\)/i, '停用迁移未关闭历史开放事项');
+assert.match(disableMigration, /risk_type\s*=\s*7/i, '停用迁移未关闭历史开放风险');
+assert.doesNotMatch(disableMigration, /\b(?:DELETE|DROP|TRUNCATE)\b|employer_insurance_status\s*=/i, '停用迁移会删除或改写历史数据');
+
 const disabledRoutes = [
   '/employees/:id/onboarding-compliance/confirm',
   '/employees/:id/contracts',
