@@ -258,7 +258,7 @@ async function main() {
   assert.equal(uploads.length, 1, '重复点击只能上传一次');
   assert.equal(uploads[0].name, 'signature');
   assert.equal(uploads[0].formData.signedName, '张三');
-  assert.equal(uploads[0].formData.statementVersion, '2.0');
+  assert.equal(uploads[0].formData.statementVersion, '2.1');
   assert.equal(uploads[0].formData.challengeId, '1201');
   assert.equal(uploads[0].formData.challengeToken, 'a'.repeat(43));
   assert.equal(uploads[0].header.authorization, `Bearer ${employeeSession.token}`);
@@ -391,7 +391,10 @@ async function main() {
   assert.doesNotMatch(signWxml, /已保存的手写签名[\s\S]{0,120}\{\{signedName\}\}/,
     '已保存状态不能用系统字体姓名冒充手写签名');
   assert.match(signWxml, /规范手写.*signedName/, '签字区必须按档案姓名提示规范签写');
-  assert.match(signWxml, /不代表本人放弃/);
+  assert.match(signWxml, /公司已通过本系统向本人送达/);
+  assert.match(signWxml, /公司将按规定核查处理/);
+  assert.doesNotMatch(signWxml, /不等同于确认银行款项已实际到账/);
+  assert.doesNotMatch(signWxml, /不限制双方依法主张权利/);
   assert.doesNotMatch(signWxml, /金额无误|全部正确|已核对工资条内容/);
   assert.match(signWxml, /清除重签/);
   assert.match(signJs, /wx\.canvasToTempFilePath/);

@@ -144,18 +144,18 @@ async function main() {
   const harness = createHarness();
   const result = await harness.service.uploadMySignature(1, 901, file, {
     signedName: '张三',
-    statementVersion: '2.0',
+    statementVersion: '2.1',
     challengeId: 1201,
     challengeToken: 'a'.repeat(43)
   }, user, { ipAddress: '127.0.0.1', deviceInfo: 'test-device' });
   assert.equal(result.signatureId, 801);
   assert.equal(result.signedName, '张三');
-  assert.equal(result.statementVersion, '2.0');
+  assert.equal(result.statementVersion, '2.1');
   assert.equal(Object.hasOwn(result, 'challengeToken'), false);
   assert.equal(Object.hasOwn(result, 'signatureSha256'), false);
   assert.equal(harness.state.challengeConsumed, 1);
   assert.equal(harness.state.signatureInsert.challengeId, 1201);
-  assert.equal(harness.state.signatureInsert.statementVersion, '2.0');
+  assert.equal(harness.state.signatureInsert.statementVersion, '2.1');
   assert.deepEqual(harness.state.challengeContext, {
     companyId: 1,
     payslipId: 901,
@@ -183,7 +183,7 @@ async function main() {
     901,
     file,
     {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'a'.repeat(43)
     },
     user,
@@ -194,14 +194,14 @@ async function main() {
 
   await assert.rejects(
     () => createHarness({ foreign: true }).service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'a'.repeat(43)
     }, user, {}),
     /工资条不存在|本人/
   );
   await assert.rejects(
     () => harness.service.uploadMySignature(1, 901, { ...file, buffer: Buffer.from('fake') }, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'a'.repeat(43)
     }, user, {}),
     /PNG|签名/
@@ -225,10 +225,18 @@ async function main() {
     /声明版本/
   );
 
-  const malformedToken = 'raw-token-must-not-leak';
   await assert.rejects(
     () => createHarness().service.uploadMySignature(1, 901, file, {
       signedName: '张三', statementVersion: '2.0',
+      challengeId: 1201, challengeToken: 'a'.repeat(43)
+    }, user, {}),
+    /声明版本/
+  );
+
+  const malformedToken = 'raw-token-must-not-leak';
+  await assert.rejects(
+    () => createHarness().service.uploadMySignature(1, 901, file, {
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: malformedToken
     }, user, {}),
     error => /签收挑战无效/.test(error.message) && !error.message.includes(malformedToken)
@@ -237,7 +245,7 @@ async function main() {
   const invalidChallenge = createHarness({ challengeInvalid: true });
   await assert.rejects(
     () => invalidChallenge.service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'b'.repeat(43)
     }, user, {}),
     error => /签收挑战无效/.test(error.message) && !error.message.includes('b'.repeat(43))
@@ -253,7 +261,7 @@ async function main() {
   const cleanupFailure = createHarness({ challengeInvalid: true, unlinkFails: true });
   await assert.rejects(
     () => cleanupFailure.service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'z'.repeat(43)
     }, user, {}),
     /签收挑战无效/
@@ -272,7 +280,7 @@ async function main() {
   const expiredChallenge = createHarness({ challengeExpired: true });
   await assert.rejects(
     () => expiredChallenge.service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'c'.repeat(43)
     }, user, {}),
     error => /签收挑战.*失效/.test(error.message) && !error.message.includes('c'.repeat(43))
@@ -283,7 +291,7 @@ async function main() {
   const tamperedSnapshot = createHarness({ evidenceContentSha256: 'f'.repeat(64) });
   await assert.rejects(
     () => tamperedSnapshot.service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'd'.repeat(43)
     }, user, {}),
     /证据快照/
@@ -295,7 +303,7 @@ async function main() {
   const rollbackHarness = createHarness({ failSignatureInsert: true });
   await assert.rejects(
     () => rollbackHarness.service.uploadMySignature(1, 901, file, {
-      signedName: '张三', statementVersion: '2.0',
+      signedName: '张三', statementVersion: '2.1',
       challengeId: 1201, challengeToken: 'e'.repeat(43)
     }, user, {}),
     /insert failed/

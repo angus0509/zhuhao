@@ -45,7 +45,7 @@ function transactionHarness(options = {}) {
           signedAt: '2026-11-12 09:30:00',
           signatureStoragePath: 'company-1/payslip-signatures/signature.png',
           challengeId: 1201,
-          statementVersion: options.statementVersion || '2.0',
+          statementVersion: options.statementVersion || '2.1',
           consumedChallengeId: options.challengeConsumed === false ? null : 1201,
           evidenceReceiptNo: (options.receiptStatus ?? 1) === 2
             ? 'PSR-20261112-ABCDEF123456'
@@ -114,7 +114,7 @@ async function main() {
     assert.equal(success.state.logParams.contentSha256.length, 64);
     assert.equal(success.state.logParams.signatureSha256, '2'.repeat(64));
     assert.equal(success.state.logParams.challengeId, 1201);
-    assert.equal(success.state.logParams.statementVersion, '2.0');
+    assert.equal(success.state.logParams.statementVersion, '2.1');
     assert.equal(success.state.logParams.keyVersion, 'v1');
     assert.deepEqual(success.state.detailParams, {
       companyId: 1,
@@ -123,6 +123,15 @@ async function main() {
       signatureId: 801,
       userId: 501
     });
+
+    const historical = transactionHarness({ statementVersion: '2.0' });
+    db.transaction = historical.run;
+    const historicalAccepted = await service.receiptMyPayslip(1, 901, {
+      action: 'accept', confirmed: true, signatureId: 801
+    }, user, {});
+    assert.equal(historicalAccepted.receiptStatus, 2,
+      '历史 2.0 签名仍应能完成签收');
+    assert.equal(historical.state.logParams.statementVersion, '2.0');
 
     const foreign = transactionHarness({ foreignSignature: true });
     db.transaction = foreign.run;
@@ -162,7 +171,7 @@ async function main() {
     assert.equal(repeated.receiptUrl, '/api/me/payslips/901/evidence-receipt');
     assert.equal(duplicate.state.updates, 0);
     assert.equal(duplicate.state.logs, 0, '重复签收不得重复写证据日志');
-    assert.equal(receiptCreateCalls, 1, '重复签收不得重复生成电子回执');
+    assert.equal(receiptCreateCalls, 2, '重复签收不得重复生成电子回执');
 
     const rollback = transactionHarness();
     db.transaction = async handler => {

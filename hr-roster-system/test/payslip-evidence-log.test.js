@@ -96,7 +96,7 @@ async function main() {
     contentSha256: CONTENT_HASH,
     signatureSha256: SIGNATURE_HASH,
     challengeId: 1201,
-    statementVersion: '2.0'
+    statementVersion: '2.1'
   });
   assert.equal(second.previousEvidenceHash, first.evidenceHash);
   assert.equal(harness.state.rows[0].snapshot, undefined,
@@ -104,6 +104,26 @@ async function main() {
   const lockQuery = harness.state.queries.find(item => /SELECT id,evidence_hash/.test(item.sql));
   assert.match(lockQuery.sql, /ORDER BY id DESC LIMIT 1 FOR UPDATE/);
   assert.deepEqual(lockQuery.params, { companyId: 1, payslipId: 901, employeeId: 88 });
+
+  const historicalHarness = createHarness();
+  const historicalAccepted = await historicalHarness.service.appendEvidenceLog(
+    historicalHarness.connection,
+    {
+      companyId: 1,
+      payslipId: 902,
+      employeeId: 88,
+      userId: 501,
+      actionType: 'ACCEPT',
+      resultStatus: 2,
+      eventAt: new Date('2026-11-12T08:04:00.000Z'),
+      contentSha256: CONTENT_HASH,
+      signatureSha256: SIGNATURE_HASH,
+      challengeId: 1200,
+      statementVersion: '2.0'
+    }
+  );
+  assert.match(historicalAccepted.evidenceHash, /^[a-f0-9]{64}$/,
+    '历史 2.0 签名仍应能写入签收证据日志');
 
   const secretResolver = version => version === 'v1' ? EVIDENCE_SECRET : LEGACY_SECRET;
   const verified = verifyEvidenceRows(harness.state.rows, secretResolver);

@@ -7,6 +7,7 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-
 
 const {
   PAYSLIP_RECEIPT_STATEMENT_V2,
+  PAYSLIP_RECEIPT_STATEMENT_V2_1,
   createPayslipEvidenceReceiptService,
   renderReceiptPdf
 } = require('../src/services/payslip-evidence-receipt.service');
@@ -17,7 +18,7 @@ const signaturePng = Buffer.from(
   'base64'
 );
 
-function receiptContext() {
+function receiptContext(statementVersion = '2.1') {
   const evidenceSnapshot = {
     schemaVersion: '1.0',
     companyId: 1,
@@ -44,7 +45,7 @@ function receiptContext() {
     evidenceSnapshot,
     signedName: '张三',
     signedAt: '2026-11-12 09:30:00',
-    statementVersion: '2.0',
+    statementVersion,
     payslipContentSha256: hashPayslipEvidenceSnapshot(evidenceSnapshot),
     signatureSha256: crypto.createHash('sha256').update(signaturePng).digest('hex'),
     evidenceChainHead: '3'.repeat(64),
@@ -84,7 +85,7 @@ async function main() {
     renderReceiptPdf: async payload => {
       renderedPayload = payload;
       assert.equal(payload.companyName, '测试人力资源有限公司');
-      assert.equal(payload.statementText, PAYSLIP_RECEIPT_STATEMENT_V2);
+      assert.equal(payload.statementText, PAYSLIP_RECEIPT_STATEMENT_V2_1);
       assert.equal(payload.payslip.items.length, 3);
       assert.equal(payload.signedUserId, 501);
       assert.equal(payload.challengeId, 1201);
@@ -107,7 +108,7 @@ async function main() {
   assert.equal(state.insertParams.receiptSha256, created.receiptSha256);
   const payload = JSON.parse(state.insertParams.receiptPayload);
   assert.equal(payload.schemaVersion, '1.0');
-  assert.equal(payload.statementVersion, '2.0');
+  assert.equal(payload.statementVersion, '2.1');
   assert.equal(payload.payslip.items[2].name, '实发工资');
   assert.deepEqual(renderedPayload, payload, '数据库固定载荷必须与PDF渲染载荷完全一致');
   assert.deepEqual(Object.keys(renderedPayload).sort(), [
@@ -115,6 +116,28 @@ async function main() {
     'payslip', 'payslipContentSha256', 'receiptNo', 'schemaVersion', 'signatureSha256',
     'signedAt', 'signedName', 'signedUserId', 'statementText', 'statementVersion'
   ].sort());
+
+  let historicalPayload = null;
+  const historicalService = createPayslipEvidenceReceiptService({
+    fs: filesystem,
+    uploadRoot: '/safe/uploads',
+    now: () => new Date('2026-11-12T09:32:00+08:00'),
+    randomBytes: () => Buffer.from('LEGACY123456', 'ascii'),
+    renderReceiptPdf: async payloadValue => {
+      historicalPayload = payloadValue;
+      return Buffer.from('%PDF-1.7\nlegacy-receipt-test');
+    }
+  });
+  await historicalService.createReceipt({
+    async execute(sql) {
+      if (/FROM salary_evidence_receipt/.test(sql)) return [[]];
+      if (/INSERT INTO salary_evidence_receipt/.test(sql)) return [{ insertId: 7002, affectedRows: 1 }];
+      throw new Error(`Unexpected SQL: ${sql}`);
+    }
+  }, receiptContext('2.0'));
+  assert.equal(historicalPayload.statementVersion, '2.0');
+  assert.equal(historicalPayload.statementText, PAYSLIP_RECEIPT_STATEMENT_V2,
+    '历史 2.0 签名生成回执时必须保留原声明');
 
   const existingService = createPayslipEvidenceReceiptService({
     fs: {
@@ -211,8 +234,8 @@ async function main() {
     signedAt: '2026-11-12 09:30:00',
     signedUserId: 501,
     challengeId: 1201,
-    statementVersion: '2.0',
-    statementText: PAYSLIP_RECEIPT_STATEMENT_V2,
+    statementVersion: '2.1',
+    statementText: PAYSLIP_RECEIPT_STATEMENT_V2_1,
     payslipContentSha256: receiptContext().payslipContentSha256,
     signatureSha256: receiptContext().signatureSha256,
     evidenceChainHead: '3'.repeat(64),

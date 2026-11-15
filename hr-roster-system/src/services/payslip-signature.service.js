@@ -51,7 +51,7 @@ function createPayslipSignatureService(dependencies = {}) {
     const challengeId = Number(body.challengeId || 0);
     const challengeToken = String(body.challengeToken || '').trim();
     if (!signedName || signedName.length > 50) throw createError('请填写签名人姓名');
-    if (statementVersion !== '2.0') throw createError('签收声明版本无效，请刷新后重试');
+    if (statementVersion !== '2.1') throw createError('签收声明版本无效，请刷新后重试');
     if (!Number.isSafeInteger(challengeId) || challengeId <= 0
       || !/^[A-Za-z0-9_-]{43}$/.test(challengeToken)) {
       throw createError('签收挑战无效，请刷新后重试', 409, 'PAYSLIP_CHALLENGE_INVALID');

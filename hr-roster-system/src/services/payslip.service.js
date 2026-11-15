@@ -321,7 +321,7 @@ async function receiptMyPayslip(companyId, payslipId, body, user, requestMeta = 
       }
       contentSha256 = assertEvidenceSnapshot(row);
       if (!optionalEvidenceHash(row.signatureSha256)
-        || row.statementVersion !== '2.0'
+        || !['2.0', '2.1'].includes(row.statementVersion)
         || !Number.isSafeInteger(Number(row.challengeId))
         || Number(row.challengeId) <= 0
         || Number(row.consumedChallengeId || 0) !== Number(row.challengeId)) {

@@ -13,6 +13,13 @@ const PDF_FONT_PATH = path.resolve(__dirname, '..', 'assets', 'fonts', 'NotoSans
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const RECEIPT_NO_PATTERN = /^PSR-\d{8}-[A-Z0-9]{12}$/;
 const PAYSLIP_RECEIPT_STATEMENT_V2 = '本人确认已查看并收到本期工资条。本次签收仅证明工资条已送达本人，不代表本人放弃对工资计算、考勤、扣款及实际支付情况提出异议的权利。本人同意使用当前登录账号和本次手写签名完成电子签收。';
+const PAYSLIP_RECEIPT_STATEMENT_V2_1 = '公司已通过本系统向本人送达本期工资条。本人确认当前登录账号由本人使用，已查看工资条所展示的全部内容，并由本人完成手写签名和电子签收。系统记录的登录账号、签收时间、工资条内容摘要、签名文件及电子回执，可作为本次工资条送达和签收过程的留痕。本人如对工资计算、考勤、扣款或实际支付情况存在异议，应及时通过系统提交，公司将按规定核查处理。';
+
+function statementTextForVersion(version) {
+  if (version === '2.0') return PAYSLIP_RECEIPT_STATEMENT_V2;
+  if (version === '2.1') return PAYSLIP_RECEIPT_STATEMENT_V2_1;
+  throw createError('工资条签收声明版本无效，暂不能生成回执', 409);
+}
 const RECEIPT_DISCLAIMER = '本回执证明工资条送达和签收，不单独证明银行款项已实际到账。';
 
 function parseSnapshot(value) {
@@ -368,9 +375,8 @@ function createPayslipEvidenceReceiptService(dependencies = {}) {
       || hashPayslipEvidenceSnapshot(evidenceSnapshot) !== payslipContentSha256) {
       throw createError('工资条证据快照无效，暂不能生成回执', 409);
     }
-    if (String(context.statementVersion || '') !== '2.0') {
-      throw createError('工资条签收声明版本无效，暂不能生成回执', 409);
-    }
+    const statementVersion = String(context.statementVersion || '');
+    const statementText = statementTextForVersion(statementVersion);
 
     let signatureFile;
     try {
@@ -405,8 +411,8 @@ function createPayslipEvidenceReceiptService(dependencies = {}) {
       signedAt: context.signedAt,
       signedUserId: userId,
       challengeId,
-      statementVersion: '2.0',
-      statementText: PAYSLIP_RECEIPT_STATEMENT_V2,
+      statementVersion,
+      statementText,
       payslipContentSha256,
       signatureSha256,
       evidenceChainHead,
@@ -434,7 +440,7 @@ function createPayslipEvidenceReceiptService(dependencies = {}) {
           statement_version,payslip_content_sha256,signature_sha256,evidence_chain_head,
           receipt_payload,storage_path,receipt_sha256,generated_at,status,created_by)
          VALUES (:companyId,:payslipId,:employeeId,:signatureId,:challengeId,:receiptNo,
-          '2.0',:payslipContentSha256,:signatureSha256,:evidenceChainHead,
+          :statementVersion,:payslipContentSha256,:signatureSha256,:evidenceChainHead,
           :receiptPayload,:storagePath,:receiptSha256,:generatedAt,1,:userId)`,
         {
           companyId,
@@ -443,6 +449,7 @@ function createPayslipEvidenceReceiptService(dependencies = {}) {
           signatureId,
           challengeId,
           receiptNo,
+          statementVersion,
           payslipContentSha256,
           signatureSha256,
           evidenceChainHead,
@@ -547,5 +554,6 @@ module.exports = {
   createPayslipEvidenceReceiptService,
   renderReceiptPdf,
   PAYSLIP_RECEIPT_STATEMENT_V2,
+  PAYSLIP_RECEIPT_STATEMENT_V2_1,
   RECEIPT_DISCLAIMER
 };

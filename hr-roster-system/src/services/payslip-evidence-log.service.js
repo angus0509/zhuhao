@@ -181,7 +181,7 @@ function createPayslipEvidenceLogService(dependencies = {}) {
     if (!context.keyVersion || context.keyVersion.length > 20) throw createError('证据密钥版本无效');
     if (context.actionType === 'ACCEPT'
       && (!context.contentSha256 || !context.signatureSha256 || !context.challengeId
-        || context.statementVersion !== '2.0')) {
+        || !['2.0', '2.1'].includes(context.statementVersion))) {
       throw createError('签收证据不完整，不能写入证据日志', 409);
     }
 
