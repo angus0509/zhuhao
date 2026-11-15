@@ -6,10 +6,16 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const env = require('../src/config/env');
 const envSource = fs.readFileSync(path.join(root, 'src/config/env.js'), 'utf8');
+const productionCompose = fs.readFileSync(path.join(root, 'docker-compose.prod.yml'), 'utf8');
 
 assert.equal(env.payslipEvidence?.challengeTtlSeconds, 300);
 assert.equal(env.payslipEvidence?.keyVersion, 'v1');
 assert.match(envSource, /PAYSLIP_EVIDENCE_HMAC_SECRET/);
+assert.match(
+  productionCompose,
+  /PAYSLIP_EVIDENCE_HMAC_SECRET:\s*\$\{PAYSLIP_EVIDENCE_HMAC_SECRET:\?PAYSLIP_EVIDENCE_HMAC_SECRET未配置\}/,
+  '生产 Compose 必须将工资条证据链密钥透传给应用容器'
+);
 assert.doesNotMatch(envSource, /TENCENT_SMS_TEMPLATE_PAYSLIP_SIGN_CODE/);
 
 function runProductionValidation(secret) {
