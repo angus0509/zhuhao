@@ -768,10 +768,15 @@ CREATE TABLE salary_detail (
   source_row_no INT DEFAULT NULL COMMENT '原工资表行号',
   receipt_status TINYINT NOT NULL DEFAULT 0 COMMENT '0未发送 1待签收 2已签收 3拒签',
   receipt_at DATETIME DEFAULT NULL,
+  evidence_schema_version VARCHAR(20) DEFAULT NULL COMMENT '证据快照结构版本',
+  evidence_snapshot JSON DEFAULT NULL COMMENT '员工实际签收的工资条快照',
+  evidence_content_sha256 CHAR(64) DEFAULT NULL COMMENT '工资条快照SHA-256',
+  evidence_created_at DATETIME DEFAULT NULL COMMENT '证据快照生成时间',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_batch_employee (batch_id, employee_id),
-  INDEX idx_company_employee (company_id, employee_id)
+  INDEX idx_company_employee (company_id, employee_id),
+  INDEX idx_evidence_content_sha256 (company_id,evidence_content_sha256)
 ) COMMENT='工资明细及工资条签收';
 
 CREATE TABLE salary_receipt_log (
@@ -785,9 +790,16 @@ CREATE TABLE salary_receipt_log (
   ip_address VARCHAR(50) DEFAULT NULL COMMENT '客户端IP',
   user_agent VARCHAR(255) DEFAULT NULL COMMENT '设备及客户端标识',
   evidence_hash CHAR(64) NOT NULL COMMENT 'HMAC-SHA256证据摘要',
+  previous_evidence_hash CHAR(64) DEFAULT NULL COMMENT '上一条证据日志摘要',
+  payslip_content_sha256 CHAR(64) DEFAULT NULL COMMENT '工资条内容摘要',
+  signature_sha256 CHAR(64) DEFAULT NULL COMMENT '签名文件摘要',
+  challenge_id BIGINT DEFAULT NULL COMMENT '一次性签收挑战记录ID',
+  statement_version VARCHAR(20) DEFAULT NULL COMMENT '签收声明版本',
+  evidence_key_version VARCHAR(20) DEFAULT NULL COMMENT '证据HMAC密钥版本',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
   INDEX idx_company_employee (company_id, employee_id, created_at),
   INDEX idx_salary_detail (company_id, salary_detail_id, created_at),
+  KEY idx_evidence_chain (company_id,salary_detail_id,employee_id,id),
   INDEX idx_user_time (user_id, created_at)
 ) COMMENT='工资条查看与签收证据日志';
 
@@ -800,6 +812,7 @@ CREATE TABLE salary_signature (
   signature_sha256 CHAR(64) NOT NULL COMMENT '签名文件SHA-256',
   signed_name VARCHAR(50) NOT NULL COMMENT '签名人姓名',
   statement_version VARCHAR(20) NOT NULL DEFAULT '1.0' COMMENT '确认声明版本',
+  challenge_id BIGINT DEFAULT NULL COMMENT '一次性签收挑战记录ID',
   ip_address VARCHAR(50) DEFAULT NULL COMMENT '签名IP',
   device_info VARCHAR(255) DEFAULT NULL COMMENT '设备信息',
   signed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '签名时间',
@@ -810,8 +823,50 @@ CREATE TABLE salary_signature (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_salary_signature_active (company_id, active_salary_detail_id),
   INDEX idx_employee_time (company_id, employee_id, signed_at),
-  INDEX idx_attachment (company_id, attachment_id)
+  INDEX idx_attachment (company_id, attachment_id),
+  INDEX idx_challenge (company_id,challenge_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工工资条手写签名证据';
+
+CREATE TABLE salary_sign_challenge (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工资条一次性签收挑战ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  salary_detail_id BIGINT NOT NULL COMMENT '工资明细ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  user_id BIGINT NOT NULL COMMENT '员工账号ID',
+  challenge_hash CHAR(64) NOT NULL COMMENT '一次性挑战凭证HMAC摘要',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1有效 0作废',
+  expires_at DATETIME NOT NULL COMMENT '挑战失效时间',
+  consumed_at DATETIME DEFAULT NULL COMMENT '签名成功后消费时间',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_payslip_employee_time (company_id,salary_detail_id,employee_id,created_at),
+  KEY idx_expire (expires_at,consumed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资条一次性签收挑战';
+
+CREATE TABLE salary_evidence_receipt (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工资条电子回执ID',
+  company_id BIGINT NOT NULL COMMENT '企业ID',
+  salary_detail_id BIGINT NOT NULL COMMENT '工资明细ID',
+  employee_id BIGINT NOT NULL COMMENT '员工ID',
+  signature_id BIGINT NOT NULL COMMENT '手写签名ID',
+  challenge_id BIGINT NOT NULL COMMENT '一次性签收挑战ID',
+  receipt_no VARCHAR(50) NOT NULL COMMENT '电子回执编号',
+  statement_version VARCHAR(20) NOT NULL COMMENT '签收声明版本',
+  payslip_content_sha256 CHAR(64) NOT NULL COMMENT '工资条内容摘要',
+  signature_sha256 CHAR(64) NOT NULL COMMENT '签名文件摘要',
+  evidence_chain_head CHAR(64) NOT NULL COMMENT '证据日志链头',
+  receipt_payload JSON NOT NULL COMMENT '固定回执数据',
+  storage_path VARCHAR(500) NOT NULL COMMENT '企业私有相对存储路径',
+  receipt_sha256 CHAR(64) NOT NULL COMMENT 'PDF文件SHA-256',
+  generated_at DATETIME NOT NULL COMMENT '回执生成时间',
+  status TINYINT NOT NULL DEFAULT 1 COMMENT '1有效 0作废',
+  created_by BIGINT NOT NULL COMMENT '签收员工账号ID',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_salary_evidence_receipt_detail (company_id,salary_detail_id),
+  UNIQUE KEY uk_salary_evidence_receipt_no (receipt_no),
+  KEY idx_employee_time (company_id,employee_id,generated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资条电子签收回执';
 
 CREATE TABLE salary_dispute (
   id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工资异议ID',

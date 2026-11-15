@@ -77,6 +77,18 @@ exports.previewPayrollSignature = asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
   return res.sendFile(signature.absolutePath);
 });
+exports.downloadPayrollEvidenceReceipt = asyncHandler(async (req, res) => {
+  const receipt = await service.resolvePayrollEvidenceReceipt(
+    req.companyId,
+    Number(req.params.id),
+    req.user
+  );
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${receipt.receiptNo}.pdf"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Receipt-SHA256', receipt.receiptSha256);
+  return res.send(receipt.buffer);
+});
 exports.getPayrollSmsSummary = asyncHandler(async (req, res) => success(res, await service.getPayrollSmsSummary(req.companyId, Number(req.params.id), req.user)));
 exports.createPayrollSmsReminders = asyncHandler(async (req, res) => success(res, await service.createPayrollSmsReminders(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '催签任务已创建'));
 exports.retryPayrollSms = asyncHandler(async (req, res) => success(res, await service.retryPayrollSms(req.companyId, Number(req.params.id), req.body, req.operatorId, req.user), '补发任务已重置'));

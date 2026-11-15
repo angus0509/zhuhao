@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-characters';
+process.env.PAYSLIP_EVIDENCE_HMAC_SECRET = process.env.PAYSLIP_EVIDENCE_HMAC_SECRET
+  || 'test-evidence-secret-at-least-32-characters';
 
 const db = require('../src/db');
 const service = require('../src/services/payslip.service');
@@ -10,7 +12,7 @@ const payslipRouter = require('../src/routes/payslip.routes');
 const user = { id: 501, accountType: 'EMPLOYEE', employeeId: 88 };
 
 function createHarness(options = {}) {
-  const state = { inserts: 0, updates: 0, logs: 0, selectParams: null };
+  const state = { inserts: 0, updates: 0, logs: 0, selectParams: null, logParams: null };
   const connection = {
     async execute(sql, params = {}) {
       if (/FROM hr_employee/.test(sql)) return [[{ id: 88, name: '张三' }]];
@@ -21,7 +23,8 @@ function createHarness(options = {}) {
           receiptStatus: options.receiptStatus ?? 1,
           activeSignatureId: options.activeSignatureId || null,
           openDisputeId: options.openDisputeId || null,
-          existingReason: options.existingReason || null
+          existingReason: options.existingReason || null,
+          evidenceContentSha256: '1'.repeat(64)
         }]];
       }
       if (/INSERT INTO salary_dispute/.test(sql)) {
@@ -34,9 +37,11 @@ function createHarness(options = {}) {
       }
       if (/INSERT INTO salary_receipt_log/.test(sql)) {
         state.logs += 1;
+        state.logParams = params;
         assert.equal(params.actionType, 'DISPUTE');
         return [{ insertId: 1, affectedRows: 1 }];
       }
+      if (/SELECT id,evidence_hash evidenceHash/.test(sql)) return [[]];
       throw new Error(`Unexpected SQL: ${sql}`);
     }
   };
@@ -77,11 +82,14 @@ async function main() {
 
     const signed = createHarness({ receiptStatus: 2, activeSignatureId: 801 });
     db.transaction = signed.run;
-    await assert.rejects(
-      () => service.disputeMyPayslip(1, 901, { reason }, user, {}),
-      /已签收|不能.*异议/
-    );
-    assert.equal(signed.state.inserts, 0);
+    const signedDispute = await service.disputeMyPayslip(1, 901, { reason }, user, {});
+    assert.equal(signedDispute.disputeId, 701);
+    assert.equal(signed.state.inserts, 1);
+    assert.equal(signed.state.updates, 0,
+      '已签收工资条提出异议不得改写签收状态或签名');
+    assert.equal(signed.state.logs, 1);
+    assert.equal(signed.state.logParams.resultStatus, 2,
+      '签收后的异议日志必须保留已签收状态');
 
     const duplicate = createHarness({
       receiptStatus: 3,

@@ -33,6 +33,7 @@ router.get('/payroll/batches/:id/details', requirePermission('payroll:view'), co
 router.get('/payroll/batches/:id/delivery-export.csv', sensitiveLimiter, requirePermission('payroll:view'), controller.exportPayrollDelivery);
 router.get('/payroll/batches/:id/receipt-export.pdf', sensitiveLimiter, requirePermission('payroll:view'), controller.exportPayrollReceiptsPdf);
 router.get('/payroll/payslips/:id/signature', requirePermission('payroll:view'), controller.previewPayrollSignature);
+router.get('/payroll/payslips/:id/evidence-receipt', sensitiveLimiter, requirePermission('payroll:view'), controller.downloadPayrollEvidenceReceipt);
 router.get('/payroll/batches/:id/sms-summary', requirePermission('payroll:view'), controller.getPayrollSmsSummary);
 router.post('/payroll/batches/:id/sms-reminders', sensitiveLimiter, requirePermission('payroll:manage'), controller.createPayrollSmsReminders);
 router.post('/payroll/batches/:id/sms-retry', sensitiveLimiter, requirePermission('payroll:manage'), controller.retryPayrollSms);

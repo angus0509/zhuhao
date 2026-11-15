@@ -112,6 +112,16 @@ assert.match(payslipViewPolicyMigration, /view_once/);
 assert.match(payslipViewPolicyMigration, /view_expires_minutes/);
 assert.doesNotMatch(payslipViewPolicyMigration, /\bDELETE\b|\bTRUNCATE\b|\bDROP\b/i, '查看策略迁移不得删除历史数据');
 
+const payslipEvidenceMigrationPath = 'sql/migrate-payslip-evidence-chain-20261112.mysql.sql';
+const payslipEvidenceMigration = read(payslipEvidenceMigrationPath);
+assert.ok(verify.includes(`"${payslipEvidenceMigrationPath}"`), '发布包必须包含工资条证据链迁移');
+assert.match(verify, /M36="sql\/migrate-payslip-evidence-chain-20261112\.mysql\.sql"/,
+  '工资条证据链迁移必须进入统一安全审计清单');
+assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${payslipEvidenceMigrationPath}"`),
+  '部署脚本必须执行工资条证据链迁移');
+assert.doesNotMatch(payslipEvidenceMigration, /\b(?:DELETE|DROP|TRUNCATE)\b/i,
+  '工资条证据链迁移不得删除表或历史数据');
+
 for (const attendanceMigrationPath of [
   'sql/migrate-attendance-timekeeping-20260909.mysql.sql',
   'sql/migrate-attendance-geofence-20260915.mysql.sql',

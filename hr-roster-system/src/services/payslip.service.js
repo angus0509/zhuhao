@@ -1,9 +1,10 @@
-const crypto = require('crypto');
 const db = require('../db');
-const env = require('../config/env');
 const { createError } = require('../utils/response');
 const { paging } = require('../utils/pagination');
 const { isSensitiveLabel } = require('./payroll-item-snapshot.service');
+const { appendEvidenceLog } = require('./payslip-evidence-log.service');
+const { hashPayslipEvidenceSnapshot } = require('./payslip-evidence-snapshot.service');
+const evidenceReceiptService = require('./payslip-evidence-receipt.service');
 
 function employeeIdFromUser(user) {
   const employeeId = Number(user?.employeeId || 0);
@@ -29,6 +30,30 @@ function payslipDisplayStatus(row) {
   if (Number(row.openDisputeId || 0) > 0 || Number(row.receiptStatus) === 3) return '有异议';
   if (Number(row.receiptStatus) === 2) return '已签收';
   return Number(row.viewed || 0) === 1 ? '待签字' : '待查看';
+}
+
+function parseEvidenceSnapshot(value) {
+  if (value && typeof value === 'object') return value;
+  try {
+    return JSON.parse(String(value || ''));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function optionalEvidenceHash(value) {
+  const result = String(value || '').toLowerCase();
+  return /^[a-f0-9]{64}$/.test(result) ? result : null;
+}
+
+function assertEvidenceSnapshot(row) {
+  const snapshot = parseEvidenceSnapshot(row.evidenceSnapshot);
+  const contentSha256 = optionalEvidenceHash(row.evidenceContentSha256);
+  if (row.evidenceSchemaVersion !== '1.0' || snapshot?.schemaVersion !== '1.0'
+    || !contentSha256 || hashPayslipEvidenceSnapshot(snapshot) !== contentSha256) {
+    throw createError('工资条证据快照无效，暂不能签收', 409);
+  }
+  return contentSha256;
 }
 
 function parseDynamicItems(value) {
@@ -100,6 +125,10 @@ function formatPayslip(row) {
       signedName: row.signedName || '',
       signedAt: row.signedAt || null
     } : null,
+    evidenceReceipt: Number(row.receiptStatus) === 2 && row.evidenceReceiptNo ? {
+      receiptNo: row.evidenceReceiptNo,
+      receiptUrl: `/api/me/payslips/${Number(row.id)}/evidence-receipt`
+    } : null,
     openDispute: Number(row.openDisputeId || 0) > 0 ? {
       id: Number(row.openDisputeId),
       reason: row.disputeReason || '',
@@ -118,7 +147,7 @@ const DETAIL_SELECT = `
          d.overtime_15_amount overtime15Amount,d.overtime_20_amount overtime20Amount,d.overtime_30_amount overtime30Amount,
          d.gross_amount grossAmount,d.social_deduction socialDeduction,d.tax_deduction taxDeduction,
          d.advance_deduction advanceDeduction,d.other_deduction otherDeduction,d.net_amount netAmount,
-         d.item_snapshot itemSnapshot,
+         d.item_snapshot itemSnapshot,d.evidence_content_sha256 evidenceContentSha256,
          d.receipt_status receiptStatus,d.receipt_at receiptAt,
          (SELECT MAX(viewed_log_at.created_at) FROM salary_receipt_log viewed_log_at
           WHERE viewed_log_at.company_id=d.company_id AND viewed_log_at.salary_detail_id=d.id
@@ -129,6 +158,7 @@ const DETAIL_SELECT = `
              AND viewed_log.employee_id=d.employee_id AND viewed_log.action_type='VIEW'
          ) viewed,
          signature.id activeSignatureId,signature.signed_name signedName,signature.signed_at signedAt,
+         evidence_receipt.receipt_no evidenceReceiptNo,
          dispute.id openDisputeId,dispute.dispute_reason disputeReason,
          dispute.handle_status disputeHandleStatus,dispute.created_at disputeCreatedAt
   FROM salary_detail d
@@ -139,6 +169,9 @@ const DETAIL_SELECT = `
   LEFT JOIN hr_department dept ON dept.id=job.dept_id AND dept.company_id=emp.company_id
   LEFT JOIN salary_signature signature ON signature.company_id=d.company_id
     AND signature.salary_detail_id=d.id AND signature.employee_id=d.employee_id AND signature.status=1
+  LEFT JOIN salary_evidence_receipt evidence_receipt ON evidence_receipt.company_id=d.company_id
+    AND evidence_receipt.salary_detail_id=d.id AND evidence_receipt.employee_id=d.employee_id
+    AND evidence_receipt.status=1
   LEFT JOIN salary_dispute dispute ON dispute.company_id=d.company_id
     AND dispute.salary_detail_id=d.id AND dispute.employee_id=d.employee_id
     AND dispute.handle_status IN (0,1)
@@ -197,29 +230,6 @@ async function listMyPayslips(companyId, user, query = {}) {
   };
 }
 
-function evidenceHash({ companyId, payslipId, employeeId, userId, actionType, resultStatus, eventAt }) {
-  return crypto.createHmac('sha256', env.auth.jwtSecret)
-    .update([companyId, payslipId, employeeId, userId, actionType, resultStatus, eventAt.toISOString()].join('|'))
-    .digest('hex');
-}
-
-async function insertReceiptLog(connection, context) {
-  const eventAt = new Date();
-  const hash = evidenceHash({ ...context, eventAt });
-  await connection.execute(
-    `INSERT INTO salary_receipt_log
-     (company_id,salary_detail_id,employee_id,user_id,action_type,result_status,ip_address,user_agent,evidence_hash,created_at)
-     VALUES (:companyId,:payslipId,:employeeId,:userId,:actionType,:resultStatus,:ipAddress,:userAgent,:evidenceHash,:eventAt)`,
-    {
-      ...context,
-      ipAddress: String(context.ipAddress || '').slice(0, 50) || null,
-      userAgent: String(context.userAgent || '').slice(0, 255) || null,
-      evidenceHash: hash,
-      eventAt
-    }
-  );
-}
-
 async function getMyPayslip(companyId, payslipId, user, requestMeta = {}) {
   const employeeId = employeeIdFromUser(user);
   return db.transaction(async connection => {
@@ -239,13 +249,14 @@ async function getMyPayslip(companyId, payslipId, user, requestMeta = {}) {
       const expiresAt = new Date(row.firstViewedAt).getTime() + Number(row.viewExpiresMinutes) * 60000;
       if (Date.now() >= expiresAt) throw createError('该工资条已超过有效查看时间，如有疑问请联系薪资专员', 410);
     }
-    await insertReceiptLog(connection, {
+    await appendEvidenceLog(connection, {
       companyId,
       payslipId,
       employeeId,
       userId: Number(user.id),
       actionType: 'VIEW',
       resultStatus: Number(row.receiptStatus),
+      contentSha256: optionalEvidenceHash(row.evidenceContentSha256),
       ...requestMeta
     });
     return formatPayslip({ ...row, viewed: 1 });
@@ -264,27 +275,71 @@ async function receiptMyPayslip(companyId, payslipId, body, user, requestMeta = 
   }
   const targetStatus = action === 'accept' ? 2 : 3;
 
-  return db.transaction(async connection => {
+  let newReceiptStoragePath = null;
+  try {
+    return await db.transaction(async connection => {
     await assertActiveEmployee(companyId, employeeId, connection);
     const [[row]] = await connection.execute(
-      `SELECT d.id,d.receipt_status receiptStatus,signature.id signatureId
+      `SELECT d.id,d.receipt_status receiptStatus,company.company_name companyName,
+              d.evidence_schema_version evidenceSchemaVersion,
+              d.evidence_snapshot evidenceSnapshot,d.evidence_content_sha256 evidenceContentSha256,
+              signature.id signatureId,signature.signature_sha256 signatureSha256,
+              signature.signed_name signedName,signature.signed_at signedAt,
+              attachment.storage_path signatureStoragePath,
+              signature.challenge_id challengeId,signature.statement_version statementVersion,
+              challenge.id consumedChallengeId,
+              evidence_receipt.receipt_no evidenceReceiptNo,
+              evidence_receipt.storage_path evidenceReceiptStoragePath,
+              evidence_receipt.receipt_sha256 evidenceReceiptSha256
        FROM salary_detail d JOIN salary_batch b ON b.id=d.batch_id AND b.company_id=d.company_id
+       JOIN hr_company company ON company.id=d.company_id
        LEFT JOIN salary_signature signature ON signature.id=:signatureId
          AND signature.company_id=d.company_id AND signature.salary_detail_id=d.id
          AND signature.employee_id=d.employee_id AND signature.status=1
+       LEFT JOIN hr_attachment attachment ON attachment.id=signature.attachment_id
+         AND attachment.company_id=signature.company_id AND attachment.employee_id=signature.employee_id
+         AND attachment.biz_type='payslip_signature' AND attachment.biz_id=d.id AND attachment.status=1
+       LEFT JOIN salary_sign_challenge challenge ON challenge.id=signature.challenge_id
+         AND challenge.company_id=signature.company_id AND challenge.salary_detail_id=signature.salary_detail_id
+         AND challenge.employee_id=signature.employee_id AND challenge.user_id=:userId
+         AND challenge.status=0 AND challenge.consumed_at IS NOT NULL
+       LEFT JOIN salary_evidence_receipt evidence_receipt ON evidence_receipt.company_id=d.company_id
+         AND evidence_receipt.salary_detail_id=d.id AND evidence_receipt.employee_id=d.employee_id
+         AND evidence_receipt.status=1
        WHERE d.company_id=:companyId AND d.id=:payslipId AND d.employee_id=:employeeId
          AND b.batch_status=5 AND d.receipt_status IN (1,2,3) LIMIT 1 FOR UPDATE`,
-      { companyId, payslipId, employeeId, signatureId }
+      { companyId, payslipId, employeeId, signatureId, userId: Number(user.id) }
     );
     if (!row) throw createError('工资条不存在或无本人访问权限', 404);
     if (Number(row.receiptStatus) !== 1 && Number(row.receiptStatus) !== targetStatus) {
       throw createError('工资条已完成签收，不能变更签收结果');
     }
-    if (Number(row.receiptStatus) === targetStatus) {
-      return { payslipId, receiptStatus: targetStatus, receiptStatusName: receiptStatusName(targetStatus) };
+    let contentSha256 = optionalEvidenceHash(row.evidenceContentSha256);
+    if (action === 'accept') {
+      if (Number(row.signatureId || 0) !== signatureId) {
+        throw createError('手写签名不属于当前工资条或员工本人', 403);
+      }
+      contentSha256 = assertEvidenceSnapshot(row);
+      if (!optionalEvidenceHash(row.signatureSha256)
+        || row.statementVersion !== '2.0'
+        || !Number.isSafeInteger(Number(row.challengeId))
+        || Number(row.challengeId) <= 0
+        || Number(row.consumedChallengeId || 0) !== Number(row.challengeId)) {
+        throw createError('签收证据不完整，请重新签名后再试', 409);
+      }
     }
-    if (action === 'accept' && Number(row.signatureId || 0) !== signatureId) {
-      throw createError('手写签名不属于当前工资条或员工本人', 403);
+    if (Number(row.receiptStatus) === targetStatus) {
+      if (action === 'accept') {
+        if (!row.evidenceReceiptNo) throw createError('电子签收回执尚未生成，请联系管理员', 409);
+        return {
+          payslipId,
+          receiptStatus: targetStatus,
+          receiptStatusName: receiptStatusName(targetStatus),
+          receiptNo: row.evidenceReceiptNo,
+          receiptUrl: `/api/me/payslips/${payslipId}/evidence-receipt`
+        };
+      }
+      return { payslipId, receiptStatus: targetStatus, receiptStatusName: receiptStatusName(targetStatus) };
     }
     if (Number(row.receiptStatus) === 1) {
       await connection.execute(
@@ -292,18 +347,64 @@ async function receiptMyPayslip(companyId, payslipId, body, user, requestMeta = 
          WHERE company_id=:companyId AND id=:payslipId AND employee_id=:employeeId AND receipt_status=1`,
         { companyId, payslipId, employeeId, targetStatus }
       );
-      await insertReceiptLog(connection, {
+      const evidenceLog = await appendEvidenceLog(connection, {
         companyId,
         payslipId,
         employeeId,
         userId: Number(user.id),
         actionType: action === 'accept' ? 'ACCEPT' : 'REJECT',
         resultStatus: targetStatus,
+        contentSha256,
+        signatureSha256: action === 'accept' ? row.signatureSha256 : null,
+        challengeId: action === 'accept' ? Number(row.challengeId) : null,
+        statementVersion: action === 'accept' ? row.statementVersion : null,
         ...requestMeta
       });
+      if (action === 'accept') {
+        const receipt = await evidenceReceiptService.createReceipt(connection, {
+          companyId,
+          companyName: row.companyName,
+          payslipId,
+          employeeId,
+          userId: Number(user.id),
+          signatureId,
+          challengeId: Number(row.challengeId),
+          evidenceSnapshot: row.evidenceSnapshot,
+          signedName: row.signedName,
+          signedAt: row.signedAt,
+          statementVersion: row.statementVersion,
+          payslipContentSha256: contentSha256,
+          signatureSha256: row.signatureSha256,
+          evidenceChainHead: evidenceLog.evidenceHash,
+          signatureStoragePath: row.signatureStoragePath
+        });
+        if (receipt.created) newReceiptStoragePath = receipt.storagePath;
+        return {
+          payslipId,
+          receiptStatus: targetStatus,
+          receiptStatusName: receiptStatusName(targetStatus),
+          receiptNo: receipt.receiptNo,
+          receiptUrl: `/api/me/payslips/${payslipId}/evidence-receipt`
+        };
+      }
     }
     return { payslipId, receiptStatus: targetStatus, receiptStatusName: receiptStatusName(targetStatus) };
-  });
+    });
+  } catch (error) {
+    if (newReceiptStoragePath) {
+      try {
+        await evidenceReceiptService.removeReceiptFile(newReceiptStoragePath);
+      } catch (cleanupError) {
+        console.error(`[payslip-evidence-receipt-cleanup] ${JSON.stringify({
+          event: 'PAYSLIP_RECEIPT_FILE_CLEANUP_FAILED',
+          companyId: Number(companyId),
+          payslipId: Number(payslipId),
+          errorCode: String(cleanupError?.code || '').slice(0, 50)
+        })}`);
+      }
+    }
+    throw error;
+  }
 }
 
 async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = {}) {
@@ -314,7 +415,8 @@ async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = 
   return db.transaction(async connection => {
     await assertActiveEmployee(companyId, employeeId, connection);
     const [[row]] = await connection.execute(
-      `SELECT d.id,d.receipt_status receiptStatus,signature.id activeSignatureId,
+      `SELECT d.id,d.receipt_status receiptStatus,d.evidence_content_sha256 evidenceContentSha256,
+              signature.id activeSignatureId,
               dispute.id openDisputeId,dispute.dispute_reason existingReason
        FROM salary_detail d
        JOIN salary_batch b ON b.id=d.batch_id AND b.company_id=d.company_id AND b.batch_status=5
@@ -328,9 +430,6 @@ async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = 
       { companyId, payslipId, employeeId }
     );
     if (!row) throw createError('工资条不存在或无本人访问权限', 404);
-    if (Number(row.receiptStatus) === 2 || Number(row.activeSignatureId || 0) > 0) {
-      throw createError('工资条已签收，不能再提交异议');
-    }
     if (Number(row.openDisputeId || 0) > 0) {
       if (String(row.existingReason || '').trim() === reason) {
         return {
@@ -341,6 +440,9 @@ async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = 
       }
       throw createError('该工资条已有待处理异议');
     }
+    if (Number(row.receiptStatus) !== 2 && Number(row.activeSignatureId || 0) > 0) {
+      throw createError('工资条已完成签名，不能直接提交异议');
+    }
 
     const [insertResult] = await connection.execute(
       `INSERT INTO salary_dispute
@@ -348,7 +450,7 @@ async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = 
        VALUES (:companyId,:payslipId,:employeeId,:reason,0)`,
       { companyId, payslipId, employeeId, reason }
     );
-    if (Number(row.receiptStatus) !== 3) {
+    if (Number(row.receiptStatus) === 1) {
       await connection.execute(
         `UPDATE salary_detail SET receipt_status=3,receipt_at=NOW(),updated_at=NOW()
          WHERE company_id=:companyId AND id=:payslipId AND employee_id=:employeeId
@@ -356,13 +458,15 @@ async function disputeMyPayslip(companyId, payslipId, body, user, requestMeta = 
         { companyId, payslipId, employeeId }
       );
     }
-    await insertReceiptLog(connection, {
+    const disputeResultStatus = Number(row.receiptStatus) === 2 ? 2 : 3;
+    await appendEvidenceLog(connection, {
       companyId,
       payslipId,
       employeeId,
       userId: Number(user.id),
       actionType: 'DISPUTE',
-      resultStatus: 3,
+      resultStatus: disputeResultStatus,
+      contentSha256: optionalEvidenceHash(row.evidenceContentSha256),
       ...requestMeta
     });
     return {

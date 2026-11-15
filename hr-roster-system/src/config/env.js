@@ -65,6 +65,11 @@ const env = {
     maxDailySends: 10,
     maxHourlyIpRequests: 20,
     maxAttempts: 5
+  },
+  payslipEvidence: {
+    hmacSecret: process.env.PAYSLIP_EVIDENCE_HMAC_SECRET || '',
+    keyVersion: 'v1',
+    challengeTtlSeconds: 5 * 60
   }
 };
 
@@ -89,6 +94,9 @@ function assertProductionSecurityConfig() {
   }
   if (Buffer.byteLength(env.employeeBinding.hmacSecret, 'utf8') < 32) {
     errors.push('EMPLOYEE_BIND_HMAC_SECRET 必须为至少32字节的随机字符串');
+  }
+  if (Buffer.byteLength(env.payslipEvidence.hmacSecret, 'utf8') < 32) {
+    errors.push('PAYSLIP_EVIDENCE_HMAC_SECRET 必须为至少32字节的随机字符串');
   }
   if (env.tencentSms.enabled) {
     if (!env.wechatMini.urlScheme) errors.push('WECHAT_MINIPROGRAM_URL_SCHEME 未配置');

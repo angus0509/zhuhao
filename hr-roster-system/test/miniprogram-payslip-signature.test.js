@@ -63,8 +63,12 @@ async function main() {
   const toasts = [];
   const navigations = [];
   const canvasCalls = [];
+  const events = [];
   let uploadMode = 'success';
   let receiptMode = 'success';
+  let challengeMode = 'success';
+  let challengeIssueCount = 0;
+  let challengeExpiredDelivered = false;
   const detailPayload = {
     id: 31,
     salaryMonth: '2026-08',
@@ -98,6 +102,26 @@ async function main() {
     },
     request(options) {
       requests.push(options);
+      events.push(['request', options.url]);
+      if (options.url.endsWith('/sign-challenge')) {
+        challengeIssueCount += 1;
+        if (challengeMode === 'failure') {
+          options.success({ statusCode: 503, data: { code: 503, message: '签收挑战生成失败，请重试' } });
+          return;
+        }
+        options.success({
+          statusCode: 200,
+          data: {
+            code: 0,
+            data: {
+              challengeId: 1200 + challengeIssueCount,
+              challengeToken: 'a'.repeat(43),
+              expiresIn: 300
+            }
+          }
+        });
+        return;
+      }
       if (options.url.endsWith('/receipt') && receiptMode === 'failure') {
         options.success({ statusCode: 409, data: { code: 409, message: '签收状态更新失败' } });
         return;
@@ -105,12 +129,31 @@ async function main() {
       const data = options.url.endsWith('/dispute')
         ? { disputeId: 88, handleStatus: 0, handleStatusName: '待处理' }
         : options.url.endsWith('/receipt')
-          ? { payslipId: 31, receiptStatus: 2, receiptStatusName: '已签收' }
+          ? {
+              payslipId: 31,
+              receiptStatus: 2,
+              receiptStatusName: '已签收',
+              receiptNo: 'PSR-20261115-ABCDEF123456',
+              receiptUrl: '/api/me/payslips/31/evidence-receipt'
+            }
           : detailPayload;
       options.success({ statusCode: 200, data: { code: 0, data } });
     },
     uploadFile(options) {
       uploads.push(options);
+      events.push(['upload', options.url]);
+      if (uploadMode === 'challenge-expired-once' && !challengeExpiredDelivered) {
+        challengeExpiredDelivered = true;
+        options.success({
+          statusCode: 409,
+          data: JSON.stringify({
+            code: 409,
+            businessCode: 'PAYSLIP_CHALLENGE_EXPIRED',
+            message: '签收挑战已失效，请刷新后重试'
+          })
+        });
+        return;
+      }
       if (uploadMode === 'domain') {
         options.fail({ errMsg: 'uploadFile:fail url not in domain list' });
         return;
@@ -191,7 +234,7 @@ async function main() {
   unconfirmed.onTouchStart({ touches: [{ x: 10, y: 10 }] });
   unconfirmed.onTouchMove({ touches: [{ x: 30, y: 30 }] });
   await unconfirmed.submitSignature();
-  assert.match(toasts.at(-1), /核对/);
+  assert.match(toasts.at(-1), /电子签收声明/);
 
   const casual = instantiatePage(signConfig);
   casual.onLoad({ id: '31' });
@@ -215,12 +258,45 @@ async function main() {
   assert.equal(uploads.length, 1, '重复点击只能上传一次');
   assert.equal(uploads[0].name, 'signature');
   assert.equal(uploads[0].formData.signedName, '张三');
+  assert.equal(uploads[0].formData.statementVersion, '2.0');
+  assert.equal(uploads[0].formData.challengeId, '1201');
+  assert.equal(uploads[0].formData.challengeToken, 'a'.repeat(43));
   assert.equal(uploads[0].header.authorization, `Bearer ${employeeSession.token}`);
   assert.doesNotMatch(uploads[0].url, new RegExp(employeeSession.token));
   const receiptRequest = requests.find(item => item.url.endsWith('/me/payslips/31/receipt'));
   assert.ok(receiptRequest, '签名上传后必须确认签收');
   assert.deepEqual(receiptRequest.data, { action: 'accept', confirmed: true, signatureId: 801 });
+  assert.equal(receiptRequest.url.includes('challengeToken'), false);
+  assert.equal(Object.hasOwn(success.data, 'challengeToken'), false);
+  assert.equal(Object.hasOwn(success.data, 'challengeId'), false);
+  assert.equal(success._signChallengeToken, null);
+  assert.equal(success._signChallengeId, null);
   assert.equal(navigations.at(-1), 'back');
+
+  uploadMode = 'challenge-expired-once';
+  challengeExpiredDelivered = false;
+  const refreshStartUploads = uploads.length;
+  const refreshStartChallenges = requests.filter(item => item.url.endsWith('/sign-challenge')).length;
+  const refreshStartEvents = events.length;
+  const refreshedChallenge = instantiatePage(signConfig);
+  refreshedChallenge.onLoad({ id: '31' });
+  await flushPromises();
+  drawValidSignature(refreshedChallenge);
+  refreshedChallenge.toggleConfirmed();
+  await refreshedChallenge.submitSignature();
+  await flushPromises();
+  assert.equal(uploads.length - refreshStartUploads, 2, '挑战过期只能自动刷新后重试一次');
+  assert.equal(
+    requests.filter(item => item.url.endsWith('/sign-challenge')).length - refreshStartChallenges,
+    2,
+    '挑战过期必须申请一次新挑战'
+  );
+  assert.deepEqual(
+    events.slice(refreshStartEvents).filter(item => /sign-challenge|\/signature$/.test(item[1])).map(item => item[0]),
+    ['request', 'upload', 'request', 'upload']
+  );
+  assert.equal(refreshedChallenge._signChallengeToken, null);
+  assert.equal(refreshedChallenge._signChallengeId, null);
 
   uploadMode = 'failure';
   const uploadFailure = instantiatePage(signConfig);
@@ -234,6 +310,22 @@ async function main() {
   assert.equal(requests.filter(item => item.url.endsWith('/receipt')).length, beforeFailedReceipt);
   assert.equal(uploadFailure.data.submitting, false);
   assert.match(toasts.at(-1), /上传|网络/);
+
+  uploadMode = 'success';
+  challengeMode = 'failure';
+  const challengeFailure = instantiatePage(signConfig);
+  challengeFailure.onLoad({ id: '31' });
+  await flushPromises();
+  drawValidSignature(challengeFailure);
+  challengeFailure.toggleConfirmed();
+  const uploadsBeforeChallengeFailure = uploads.length;
+  await challengeFailure.submitSignature();
+  await flushPromises();
+  assert.equal(uploads.length, uploadsBeforeChallengeFailure, '挑战申请失败不得上传签名');
+  assert.equal(challengeFailure.data.hasInk, true, '挑战申请失败必须保留已画签名');
+  assert.equal(challengeFailure._signChallengeToken, null);
+  assert.match(toasts.at(-1), /挑战/);
+  challengeMode = 'success';
 
   uploadMode = 'domain';
   const domainFailure = instantiatePage(signConfig);
@@ -299,12 +391,15 @@ async function main() {
   assert.doesNotMatch(signWxml, /已保存的手写签名[\s\S]{0,120}\{\{signedName\}\}/,
     '已保存状态不能用系统字体姓名冒充手写签名');
   assert.match(signWxml, /规范手写.*signedName/, '签字区必须按档案姓名提示规范签写');
-  assert.match(signWxml, /本人已核对工资条内容/);
+  assert.match(signWxml, /不代表本人放弃/);
+  assert.doesNotMatch(signWxml, /金额无误|全部正确|已核对工资条内容/);
   assert.match(signWxml, /清除重签/);
   assert.match(signJs, /wx\.canvasToTempFilePath/);
   assert.match(signJs, /wx\.uploadFile/);
   assert.match(signJs, /fileType:\s*'png'/);
+  assert.match(signJs, /\/sign-challenge/);
   assert.doesNotMatch(signJs + signWxml, /employeeId=.*\{|token=.*\{|console\.(?:log|info|debug)/i);
+  assert.doesNotMatch(signJs, /setStorageSync\([^)]*challenge|console\.(?:log|info|debug)[^\n]*challenge/i);
   assert.match(signWxss, /min-height:\s*96rpx/);
 
   console.log('miniprogram-payslip-signature-tests-ok');

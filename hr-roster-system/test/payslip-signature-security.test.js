@@ -37,6 +37,8 @@ assert.match(signatureService, /mode:\s*0o600/,
   '签名文件必须使用仅属主可读写权限');
 assert.match(signatureService, /signatureSha256/,
   '签名文件必须保存不可抵赖校验值');
+assert.doesNotMatch(signatureService, /challengeToken[^\n]*(?:console|logger)|(?:console|logger)[^\n]*challengeToken/,
+  '原始签收挑战不得写入日志');
 assert.doesNotMatch(controller, /storagePath|absolutePath|relativePath/,
   '签名接口响应层不能暴露服务器存储路径');
 

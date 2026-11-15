@@ -31,6 +31,19 @@ async function main() {
       if (/SELECT b\.id/.test(sql)) {
         return [[{ id: 61, project_id: 16, batch_status: batchStatus, total_net: 4460, salary_month: '2026-08' }]];
       }
+      if (/SELECT d\.id salaryDetailId/.test(sql)) {
+        return [[{
+          companyId: 1,
+          salaryDetailId: 91,
+          salaryMonth: '2026-08',
+          employeeId: 81,
+          employeeName: '测试员工',
+          customerName: '测试客户',
+          projectName: '测试项目',
+          itemSnapshot: [{ label: '实发工资', value: '4460', category: 'summary', sortOrder: 1 }],
+          evidenceSnapshot: null
+        }]];
+      }
       return [{ affectedRows: 1 }];
     }
   });

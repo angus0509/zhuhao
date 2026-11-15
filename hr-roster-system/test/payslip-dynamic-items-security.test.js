@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-characters';
+process.env.PAYSLIP_EVIDENCE_HMAC_SECRET = process.env.PAYSLIP_EVIDENCE_HMAC_SECRET
+  || 'test-evidence-secret-at-least-32-characters';
 
 const db = require('../src/db');
 const service = require('../src/services/payslip.service');
@@ -74,6 +76,7 @@ async function main() {
             itemSnapshot: [{ label: '银行卡号', value: '6222020000000000', category: 'display', sortOrder: 1 }]
           }]];
         }
+        if (/SELECT id,evidence_hash evidenceHash/.test(sql)) return [[]];
         if (/INSERT INTO salary_receipt_log/.test(sql)) return [{ affectedRows: 1 }];
         throw new Error(`Unexpected SQL: ${sql}`);
       }

@@ -48,6 +48,7 @@ function runProductionValidation(overrides = {}) {
       WECHAT_MINIPROGRAM_APPID: 'wx-test-app-id',
       WECHAT_MINIPROGRAM_SECRET: 'wechat-app-secret-value',
       EMPLOYEE_BIND_HMAC_SECRET: 'employee-bind-hmac-secret-32-bytes',
+      PAYSLIP_EVIDENCE_HMAC_SECRET: 'payslip-evidence-hmac-secret-32-bytes',
       ...overrides
     }
   });

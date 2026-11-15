@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 
 process.env.NODE_ENV = 'test';
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret-at-least-32-characters';
+process.env.PAYSLIP_EVIDENCE_HMAC_SECRET = process.env.PAYSLIP_EVIDENCE_HMAC_SECRET
+  || 'test-evidence-secret-at-least-32-characters';
 
 const db = require('../src/db');
 const service = require('../src/services/payslip.service');
@@ -67,6 +69,7 @@ async function main() {
       page: 2, pageSize: 1, total: 2
     });
     assert.equal(list.list[0].displayStatus, '待查看');
+    assert.equal(list.list[0].evidenceReceipt, null);
     assert.equal(Object.hasOwn(list.list[0], 'employeeId'), false);
 
     db.first = async (sql, params) => {
@@ -96,6 +99,25 @@ async function main() {
       pageSize: '20'
     });
     assert.equal(monthList.total, 1);
+
+    db.first = async () => ({ total: 1 });
+    db.query = async sql => {
+      assert.match(sql, /salary_evidence_receipt/);
+      return [{
+        id: 902,
+        salaryMonth: '2026-09',
+        batchNo: 'PAY-2026-09',
+        receiptStatus: 2,
+        evidenceReceiptNo: 'PSR-20261112-ABCDEF123456'
+      }];
+    };
+    const signedList = await service.listMyPayslips(1, employeeUser, { page: 1, pageSize: 20 });
+    assert.deepEqual(signedList.list[0].evidenceReceipt, {
+      receiptNo: 'PSR-20261112-ABCDEF123456',
+      receiptUrl: '/api/me/payslips/902/evidence-receipt'
+    });
+    assert.equal(Object.hasOwn(signedList.list[0].evidenceReceipt, 'storagePath'), false);
+
     await assert.rejects(
       () => service.listMyPayslips(1, employeeUser, { month: '2026-13' }),
       /工资月份格式/
@@ -116,9 +138,11 @@ async function main() {
             receiptStatus: 1,
             viewed: 0,
             openDisputeId: null,
-            activeSignatureId: null
+            activeSignatureId: null,
+            evidenceContentSha256: '1'.repeat(64)
           }]];
         }
+        if (/SELECT id,evidence_hash evidenceHash/.test(sql)) return [[]];
         if (/INSERT INTO salary_receipt_log/.test(sql)) return [{ insertId: 1, affectedRows: 1 }];
         throw new Error(`Unexpected SQL: ${sql}`);
       }
@@ -129,6 +153,11 @@ async function main() {
     });
     assert.equal(detail.displayStatus, '待签字', '查看详情写入 VIEW 后应进入待签字状态');
     assert.equal(executed.some(item => /action_type/.test(item.sql) && item.params.actionType === 'VIEW'), true);
+    const viewLog = executed.find(item => /INSERT INTO salary_receipt_log/.test(item.sql));
+    assert.equal(viewLog.params.contentSha256, '1'.repeat(64));
+    assert.equal(viewLog.params.signatureSha256, null);
+    assert.equal(viewLog.params.keyVersion, 'v1');
+    assert.equal(Object.hasOwn(viewLog.params, 'evidenceSnapshot'), false);
     const detailQuery = executed.find(item => /FROM salary_detail d/.test(item.sql));
     assert.deepEqual(detailQuery.params, { companyId: 1, payslipId: 901, employeeId: 88 });
   } finally {

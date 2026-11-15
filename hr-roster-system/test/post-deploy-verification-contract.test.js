@@ -6,6 +6,38 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.resolve(__dirname, '../scripts/post-deploy-verify.sh'), 'utf8');
 const deploySource = fs.readFileSync(path.resolve(__dirname, '../scripts/deploy-production.sh'), 'utf8');
+const envExample = fs.readFileSync(path.resolve(__dirname, '../.env.example'), 'utf8');
+const envProductionExample = fs.readFileSync(path.resolve(__dirname, '../.env.production.example'), 'utf8');
+const packageJson = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8'));
+
+assert.match(envExample, /^PAYSLIP_EVIDENCE_HMAC_SECRET=$/m,
+  '开发环境示例必须声明空的工资条证据链密钥');
+assert.match(envProductionExample, /^PAYSLIP_EVIDENCE_HMAC_SECRET=$/m,
+  '生产环境示例必须声明空的工资条证据链密钥');
+assert.doesNotMatch(envProductionExample, /^TENCENT_SMS_TEMPLATE_PAYSLIP_SIGN_CODE=/m,
+  '工资条证据链不得重新引入签收短信验证码模板');
+assert.ok(
+  deploySource.includes(': "${PAYSLIP_EVIDENCE_HMAC_SECRET:?生产环境缺少PAYSLIP_EVIDENCE_HMAC_SECRET}"'),
+  '生产部署必须在执行迁移前确认工资条证据链密钥已配置'
+);
+assert.match(deploySource, /#PAYSLIP_EVIDENCE_HMAC_SECRET\}" -ge 32/,
+  '生产部署必须在执行迁移前拒绝少于32字符的工资条证据链密钥'
+);
+for (const testFile of [
+  'payslip-evidence-snapshot.test.js',
+  'payslip-evidence-schema.test.js',
+  'payroll-evidence-publication.test.js',
+  'payslip-evidence-backfill.test.js',
+  'payslip-evidence-config.test.js',
+  'payslip-sign-challenge.test.js',
+  'payslip-evidence-log.test.js',
+  'payslip-evidence-receipt.test.js',
+  'payroll-evidence-receipt-access.test.js',
+  'miniprogram-payslip-evidence-receipt.test.js'
+]) {
+  assert.match(packageJson.scripts.check, new RegExp(`node test/${testFile.replaceAll('.', '\\.')}`),
+    `npm run check 未包含 ${testFile}`);
+}
 
 assert.match(source, /SECONDARY_BASE_URL/, '上线后验证必须覆盖主域名和 www 域名');
 assert.match(source, /HEALTH_STATUS/, '健康检查必须使用 HTTP 状态码判断');

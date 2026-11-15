@@ -97,11 +97,13 @@ set +a
 : "${WECHAT_MINIPROGRAM_SECRET:?生产环境缺少WECHAT_MINIPROGRAM_SECRET}"
 : "${WECHAT_MINIPROGRAM_URL_SCHEME:?生产环境缺少WECHAT_MINIPROGRAM_URL_SCHEME}"
 : "${EMPLOYEE_BIND_HMAC_SECRET:?生产环境缺少EMPLOYEE_BIND_HMAC_SECRET}"
+: "${PAYSLIP_EVIDENCE_HMAC_SECRET:?生产环境缺少PAYSLIP_EVIDENCE_HMAC_SECRET}"
 test "${#JWT_SECRET}" -ge 32 || { echo "JWT_SECRET长度不能少于32字符" >&2; exit 1; }
 test "${#DATA_ENCRYPT_KEY}" -eq 32 || { echo "DATA_ENCRYPT_KEY必须为32字符" >&2; exit 1; }
 test "${#DATA_ENCRYPT_IV}" -eq 16 || { echo "DATA_ENCRYPT_IV必须为16字符" >&2; exit 1; }
 test "${#WECHAT_MINIPROGRAM_SECRET}" -eq 32 || { echo "WECHAT_MINIPROGRAM_SECRET必须为32字符" >&2; exit 1; }
 test "${#EMPLOYEE_BIND_HMAC_SECRET}" -ge 32 || { echo "EMPLOYEE_BIND_HMAC_SECRET长度不能少于32字符" >&2; exit 1; }
+test "${#PAYSLIP_EVIDENCE_HMAC_SECRET}" -ge 32 || { echo "PAYSLIP_EVIDENCE_HMAC_SECRET长度不能少于32字符" >&2; exit 1; }
 
 if [ "${TENCENT_SMS_ENABLED:-false}" = "true" ]; then
   : "${TENCENT_SMS_PAYSLIP_URL_LINK:?短信启用时缺少小程序URL Link}"
@@ -186,6 +188,7 @@ run_migration "$STAGE_DIR/sql/migrate-attendance-geofence-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-disable-employer-insurance-module-20261110.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-payslip-evidence-chain-20261112.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"

@@ -17,6 +17,11 @@ const officialNotificationService = require('./official-notification.service').c
 const appEnv = require('../config/env');
 const payrollImportProfileService = require('./payroll-import-profile.service');
 const { normalizeItemSnapshot } = require('./payroll-item-snapshot.service');
+const {
+  buildPayslipEvidenceSnapshot,
+  hashPayslipEvidenceSnapshot
+} = require('./payslip-evidence-snapshot.service');
+const evidenceReceiptService = require('./payslip-evidence-receipt.service');
 
 const MANAGED_ROLE_SQL = systemService.MANAGED_ROLE_CODES.map(code => `'${code}'`).join(',');
 
@@ -2054,7 +2059,66 @@ async function updatePayrollViewPolicy(companyId, batchId, body = {}, operatorId
   });
 }
 
+async function createEvidenceSnapshotsForBatch(connection, { companyId, batchId, onlyPending = false }) {
+  const [rows] = await connection.execute(
+    `SELECT d.id salaryDetailId,d.company_id companyId,d.employee_id employeeId,
+            b.salary_month salaryMonth,e.name employeeName,
+            c.customer_name customerName,p.project_name projectName,
+            d.item_snapshot itemSnapshot,d.evidence_schema_version evidenceSchemaVersion,
+            d.evidence_snapshot evidenceSnapshot,d.evidence_content_sha256 evidenceContentSha256
+     FROM salary_detail d
+     JOIN salary_batch b ON b.id=d.batch_id AND b.company_id=d.company_id
+     JOIN hr_employee e ON e.id=d.employee_id AND e.company_id=d.company_id
+     LEFT JOIN labor_project p ON p.id=b.project_id AND p.company_id=b.company_id
+     LEFT JOIN crm_customer c ON c.id=p.customer_id AND c.company_id=p.company_id
+     WHERE d.company_id=:companyId AND d.batch_id=:batchId
+       ${onlyPending ? 'AND b.batch_status=5 AND d.receipt_status=1' : ''}
+     ORDER BY d.id
+     FOR UPDATE`,
+    { companyId, batchId }
+  );
+  for (const row of rows.filter(item => item.evidenceSnapshot != null)) {
+    let snapshot = row.evidenceSnapshot;
+    if (typeof snapshot === 'string') {
+      try {
+        snapshot = JSON.parse(snapshot);
+      } catch (_error) {
+        throw createError('已有工资条证据快照不完整，请联系管理员处理', 409);
+      }
+    }
+    const contentHash = String(row.evidenceContentSha256 || '').toLowerCase();
+    if (row.evidenceSchemaVersion !== '1.0' || snapshot?.schemaVersion !== '1.0' || !/^[a-f0-9]{64}$/.test(contentHash)) {
+      throw createError('已有工资条证据快照不完整，请联系管理员处理', 409);
+    }
+    if (hashPayslipEvidenceSnapshot(snapshot) !== contentHash) {
+      throw createError('已有工资条证据快照摘要不一致，请联系管理员处理', 409);
+    }
+  }
+  const pending = rows.filter(row => row.evidenceSnapshot == null).map(row => {
+    const snapshot = buildPayslipEvidenceSnapshot(row);
+    return {
+      salaryDetailId: Number(row.salaryDetailId),
+      evidenceSnapshot: JSON.stringify(snapshot),
+      evidenceContentSha256: hashPayslipEvidenceSnapshot(snapshot)
+    };
+  });
+  if (!rows.length && !onlyPending) throw createError('工资批次没有可发布明细');
+
+  for (const item of pending) {
+    const [updateResult] = await connection.execute(
+      `UPDATE salary_detail
+       SET evidence_schema_version='1.0',evidence_snapshot=:evidenceSnapshot,
+           evidence_content_sha256=:evidenceContentSha256,evidence_created_at=NOW(),updated_at=NOW()
+       WHERE company_id=:companyId AND id=:salaryDetailId AND evidence_snapshot IS NULL`,
+      { companyId, ...item }
+    );
+    if (!updateResult.affectedRows) throw createError('工资条证据快照状态已变化，请重试', 409);
+  }
+  return { count: pending.length };
+}
+
 async function finalizePayrollPublication(connection, { companyId, batchId, batch, operatorId, fromStatus, actionType }) {
+    await createEvidenceSnapshotsForBatch(connection, { companyId, batchId });
     const [updateResult] = await connection.execute(
       `UPDATE salary_batch SET batch_status=5,paid_at=NOW(),updated_at=NOW()
        WHERE company_id=:companyId AND id=:batchId AND batch_status=:fromStatus`,
@@ -2573,13 +2637,20 @@ async function createSystemUser(companyId, body) {
   });
 }
 
+async function resolvePayrollEvidenceReceipt(companyId, payslipId, user) {
+  return evidenceReceiptService.resolvePayrollReceipt(companyId, payslipId, user);
+}
+
 module.exports = {
   listCustomers, createCustomer, getCustomerDetail, updateCustomerPortfolio,
   listProjects, createProject, listFactoryStaff, createFactoryStaff,
   listBlacklist, createBlacklist, createBlacklistBatch, listAdvances, createAdvance, approveAdvance, payAdvance,
   payrollOverview, listPayrollDisputes, handlePayrollDispute, getPayrollBatchDetail, exportPayrollBatchCsv, exportPayrollReceiptPdf, previewPayrollBatch,
+  resolvePayrollEvidenceReceipt,
   createPayrollBatch, updatePayrollViewPolicy, normalizePayslipViewPolicy, submitPayrollBatch, reviewPayrollBatch, publishPayrollBatch, withdrawPayrollBatch, deletePayrollBatch,
   getPayrollSmsSummary, createPayrollSmsReminders, retryPayrollSms,
   operationsHome, listNotices, permissionOverview, createSystemUser,
-  managerMobileOverview, managerMobilePayslipStatus
+  managerMobileOverview, managerMobilePayslipStatus,
+  createEvidenceSnapshotsForBatch,
+  _testing: { finalizePayrollPublication }
 };
