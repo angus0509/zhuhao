@@ -20,8 +20,6 @@ function statementTextForVersion(version) {
   if (version === '2.1') return PAYSLIP_RECEIPT_STATEMENT_V2_1;
   throw createError('工资条签收声明版本无效，暂不能生成回执', 409);
 }
-const RECEIPT_DISCLAIMER = '本回执证明工资条送达和签收，不单独证明银行款项已实际到账。';
-
 function parseSnapshot(value) {
   if (value && typeof value === 'object') return value;
   try {
@@ -310,29 +308,6 @@ async function renderReceiptPdf(payload, signatureBuffer, dependencies = {}) {
   drawLabelValue('签名文件 SHA-256', payload.signatureSha256, { labelWidth: 126, size: 7.5, lineHeight: 11 });
   drawLabelValue('证据链头 HMAC', payload.evidenceChainHead, { labelWidth: 126, size: 7.5, lineHeight: 11 });
 
-  ensureSpace(56);
-  y -= 8;
-  const disclaimerLines = wrapText(font, payload.disclaimer, 9, CONTENT_WIDTH - 24);
-  const boxHeight = disclaimerLines.length * 14 + 20;
-  page.drawRectangle({
-    x: MARGIN,
-    y: y - boxHeight + 8,
-    width: CONTENT_WIDTH,
-    height: boxHeight,
-    color: rgb(0.95, 0.97, 0.99),
-    borderColor: COLOR_LINE,
-    borderWidth: 0.7
-  });
-  disclaimerLines.forEach((line, index) => {
-    page.drawText(line, {
-      x: MARGIN + 12,
-      y: y - 8 - index * 14,
-      size: 9,
-      font,
-      color: COLOR_TEXT
-    });
-  });
-
   return Buffer.from(await pdfDoc.save({ useObjectStreams: false }));
 }
 
@@ -415,8 +390,7 @@ function createPayslipEvidenceReceiptService(dependencies = {}) {
       statementText,
       payslipContentSha256,
       signatureSha256,
-      evidenceChainHead,
-      disclaimer: RECEIPT_DISCLAIMER
+      evidenceChainHead
     };
     const pdf = await renderPdf(payload, signatureBuffer);
     const receiptSha256 = crypto.createHash('sha256').update(pdf).digest('hex');
@@ -554,6 +528,5 @@ module.exports = {
   createPayslipEvidenceReceiptService,
   renderReceiptPdf,
   PAYSLIP_RECEIPT_STATEMENT_V2,
-  PAYSLIP_RECEIPT_STATEMENT_V2_1,
-  RECEIPT_DISCLAIMER
+  PAYSLIP_RECEIPT_STATEMENT_V2_1
 };

@@ -90,7 +90,8 @@ async function main() {
       assert.equal(payload.signedUserId, 501);
       assert.equal(payload.challengeId, 1201);
       assert.equal(payload.evidenceChainHead, '3'.repeat(64));
-      assert.equal(payload.disclaimer, '本回执证明工资条送达和签收，不单独证明银行款项已实际到账。');
+      assert.equal(Object.hasOwn(payload, 'disclaimer'), false,
+        '新回执载荷不得再包含未实际到账说明');
       assert.equal(Object.hasOwn(payload, 'receiptSha256'), false, 'PDF正文不得包含自身摘要');
       return pdfBytes;
     }
@@ -112,7 +113,7 @@ async function main() {
   assert.equal(payload.payslip.items[2].name, '实发工资');
   assert.deepEqual(renderedPayload, payload, '数据库固定载荷必须与PDF渲染载荷完全一致');
   assert.deepEqual(Object.keys(renderedPayload).sort(), [
-    'challengeId', 'companyName', 'disclaimer', 'evidenceChainHead', 'generatedAt',
+    'challengeId', 'companyName', 'evidenceChainHead', 'generatedAt',
     'payslip', 'payslipContentSha256', 'receiptNo', 'schemaVersion', 'signatureSha256',
     'signedAt', 'signedName', 'signedUserId', 'statementText', 'statementVersion'
   ].sort());
@@ -238,8 +239,7 @@ async function main() {
     statementText: PAYSLIP_RECEIPT_STATEMENT_V2_1,
     payslipContentSha256: receiptContext().payslipContentSha256,
     signatureSha256: receiptContext().signatureSha256,
-    evidenceChainHead: '3'.repeat(64),
-    disclaimer: '本回执证明工资条送达和签收，不单独证明银行款项已实际到账。'
+    evidenceChainHead: '3'.repeat(64)
   };
   const rendered = await renderReceiptPdf(realPayload, signaturePng);
   assert.equal(rendered.subarray(0, 5).toString(), '%PDF-');
