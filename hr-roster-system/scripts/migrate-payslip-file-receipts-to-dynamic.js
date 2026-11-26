@@ -15,13 +15,18 @@ function parsePayload(value) {
 }
 
 function buildDynamicPayload(row, migratedAt) {
+  const original = parsePayload(row.receiptPayload);
   return {
-    ...parsePayload(row.receiptPayload),
+    ...original,
+    generatedAt: row.receiptGeneratedAt || original.generatedAt,
+    signedAt: row.signatureSignedAt || original.signedAt,
     storageMigration: {
       schemaVersion: '1.0',
       from: 'FILE',
       storagePath: String(row.storagePath || ''),
       receiptSha256: String(row.receiptSha256 || '').toLowerCase(),
+      originalGeneratedAt: original.generatedAt || null,
+      originalSignedAt: original.signedAt || null,
       migratedAt: migratedAt.toISOString()
     }
   };
@@ -43,12 +48,15 @@ async function runMigration(options = {}) {
   const now = options.now || (() => new Date());
   const apply = options.apply === true;
   const rows = await database.query(
-    `SELECT id,company_id companyId,salary_detail_id payslipId,
+    `SELECT r.id,r.company_id companyId,r.salary_detail_id payslipId,
             receipt_payload receiptPayload,storage_path storagePath,
-            receipt_sha256 receiptSha256
-     FROM salary_evidence_receipt
-     WHERE storage_mode='FILE' AND status=1
-     ORDER BY id`
+            receipt_sha256 receiptSha256,r.generated_at receiptGeneratedAt,
+            signature.signed_at signatureSignedAt
+     FROM salary_evidence_receipt r
+     JOIN salary_signature signature ON signature.id=r.signature_id
+       AND signature.company_id=r.company_id AND signature.status=1
+     WHERE r.storage_mode='FILE' AND r.status=1
+     ORDER BY r.id`
   );
   const result = { scanned: rows.length, converted: 0, deleted: 0 };
 

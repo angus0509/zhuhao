@@ -3,8 +3,12 @@ const { runMigration, buildDynamicPayload, payloadHmac, parseArgs } = require('.
 
 const row = {
   id: 9, companyId: 7, payslipId: 31,
-  receiptPayload: JSON.stringify({ schemaVersion: '1.0', receiptNo: 'PSR-20261115-ABCDEF123456' }),
-  storagePath: 'company-7/payslip-receipts/receipt.pdf', receiptSha256: 'a'.repeat(64)
+  receiptPayload: JSON.stringify({
+    schemaVersion: '1.0', receiptNo: 'PSR-20261115-ABCDEF123456',
+    generatedAt: '2026-11-15T01:30:00.499Z', signedAt: '2026-11-15 09:29:57'
+  }),
+  storagePath: 'company-7/payslip-receipts/receipt.pdf', receiptSha256: 'a'.repeat(64),
+  receiptGeneratedAt: '2026-11-15 09:30:01', signatureSignedAt: '2026-11-15 09:29:58'
 };
 const secret = 's'.repeat(32);
 
@@ -12,7 +16,7 @@ function harness(options = {}) {
   const calls = { updates: [], rollbacks: [], resolves: 0, deletes: [] };
   const database = {
     async query(sql, params) {
-      if (/WHERE storage_mode='FILE'/.test(sql)) return [row];
+      if (/WHERE r\.storage_mode='FILE'/.test(sql)) return [row];
       calls.rollbacks.push({ sql, params });
       return { affectedRows: 1 };
     },
@@ -43,8 +47,11 @@ async function main() {
   const payload = buildDynamicPayload(row, migratedAt);
   assert.deepEqual(payload.storageMigration, {
     schemaVersion: '1.0', from: 'FILE', storagePath: row.storagePath,
-    receiptSha256: row.receiptSha256, migratedAt: migratedAt.toISOString()
+    receiptSha256: row.receiptSha256, originalGeneratedAt: '2026-11-15T01:30:00.499Z',
+    originalSignedAt: '2026-11-15 09:29:57', migratedAt: migratedAt.toISOString()
   });
+  assert.equal(payload.generatedAt, row.receiptGeneratedAt);
+  assert.equal(payload.signedAt, row.signatureSignedAt);
   assert.match(payloadHmac(secret, payload), /^[a-f0-9]{64}$/);
 
   const dryRun = harness();
