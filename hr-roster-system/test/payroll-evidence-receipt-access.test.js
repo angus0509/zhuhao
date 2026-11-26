@@ -17,6 +17,7 @@ async function main() {
         queries.push({ sql, params });
         return {
           receiptNo: 'PSR-20261112-ABCDEF123456',
+          storageMode: 'FILE',
           storagePath: 'company-1/payslip-receipts/receipt.pdf',
           receiptSha256: sha256
         };
@@ -40,6 +41,7 @@ async function main() {
   assert.deepEqual(queries[0].params, { companyId: 1, payslipId: 901, employeeId: 88 });
   assert.match(queries[0].sql, /d\.employee_id=:employeeId/);
   assert.match(queries[0].sql, /r\.company_id=d\.company_id/);
+  assert.match(queries[0].sql, /r\.storage_mode storageMode/);
 
   await assert.rejects(
     () => service.resolveEmployeeReceipt(1, 901, { id: 9, accountType: 'MANAGER' }),
@@ -79,6 +81,7 @@ async function main() {
       async first() {
         return {
           receiptNo: 'PSR-20261112-ABCDEF123456',
+          storageMode: 'FILE',
           storagePath: 'company-1/payslip-receipts/receipt.pdf',
           receiptSha256: 'f'.repeat(64)
         };
@@ -102,6 +105,7 @@ async function main() {
       async first() {
         return {
           receiptNo: 'PSR-20261112-ABCDEF123456',
+          storageMode: 'FILE',
           storagePath: '../secret.pdf',
           receiptSha256: sha256
         };
@@ -125,6 +129,7 @@ async function main() {
       async first() {
         return {
           receiptNo: 'PSR-20261112-ABCDEF123456',
+          storageMode: 'FILE',
           storagePath: 'company-2/payslip-receipts/receipt.pdf',
           receiptSha256: sha256
         };
@@ -148,6 +153,7 @@ async function main() {
       async first() {
         return {
           receiptNo: 'PSR-20261112-ABCDEF123456',
+          storageMode: 'FILE',
           storagePath: 'company-1/payslip-receipts/receipt.pdf',
           receiptSha256: sha256
         };

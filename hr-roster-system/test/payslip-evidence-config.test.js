@@ -9,7 +9,7 @@ const envSource = fs.readFileSync(path.join(root, 'src/config/env.js'), 'utf8');
 const productionCompose = fs.readFileSync(path.join(root, 'docker-compose.prod.yml'), 'utf8');
 
 assert.equal(env.payslipEvidence?.challengeTtlSeconds, 300);
-assert.equal(env.payslipEvidence?.keyVersion, 'v1');
+assert.equal(env.payslipEvidence?.keyVersion, 'v2');
 assert.match(envSource, /PAYSLIP_EVIDENCE_HMAC_SECRET/);
 assert.match(
   productionCompose,

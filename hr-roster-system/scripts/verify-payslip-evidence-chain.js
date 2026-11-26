@@ -30,14 +30,15 @@ async function run(options = {}) {
             action_type actionType,result_status resultStatus,evidence_hash evidenceHash,
             previous_evidence_hash previousEvidenceHash,payslip_content_sha256 payslipContentSha256,
             signature_sha256 signatureSha256,challenge_id challengeId,statement_version statementVersion,
-            evidence_key_version evidenceKeyVersion,created_at createdAt
+            evidence_key_version evidenceKeyVersion,ip_address ipAddress,user_agent userAgent,
+            created_at createdAt
      FROM salary_receipt_log
      WHERE company_id=:companyId AND salary_detail_id=:payslipId
      ORDER BY id ASC`,
     { companyId, payslipId }
   );
   const secretResolver = options.secretResolver || (version => (
-    version === env.payslipEvidence.keyVersion
+    ['v1', 'v2', env.payslipEvidence.keyVersion].includes(version)
       ? env.payslipEvidence.hmacSecret
       : version == null ? env.auth.jwtSecret : ''
   ));

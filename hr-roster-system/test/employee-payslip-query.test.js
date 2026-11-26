@@ -156,7 +156,7 @@ async function main() {
     const viewLog = executed.find(item => /INSERT INTO salary_receipt_log/.test(item.sql));
     assert.equal(viewLog.params.contentSha256, '1'.repeat(64));
     assert.equal(viewLog.params.signatureSha256, null);
-    assert.equal(viewLog.params.keyVersion, 'v1');
+    assert.equal(viewLog.params.keyVersion, 'v2');
     assert.equal(Object.hasOwn(viewLog.params, 'evidenceSnapshot'), false);
     const detailQuery = executed.find(item => /FROM salary_detail d/.test(item.sql));
     assert.deepEqual(detailQuery.params, { companyId: 1, payslipId: 901, employeeId: 88 });

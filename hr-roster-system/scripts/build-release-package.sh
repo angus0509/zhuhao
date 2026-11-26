@@ -25,7 +25,7 @@ trap cleanup_package EXIT
 PACKAGE_FILE_LIST="$(mktemp)"
 {
   printf '%s\n' package.json package-lock.json Dockerfile docker-compose.prod.yml README.md DEVELOPMENT_PLAN.md REUSE_GUIDE.md server.js .env.example .env.production.example
-  find public src sql scripts deploy test -type f -print
+  find public src sql scripts deploy test -type f ! -name '*.bak-*' -print
 } > "$PACKAGE_FILE_LIST"
 COPYFILE_DISABLE=1 tar --no-xattrs --no-acls --no-fflags --no-mac-metadata \
   --exclude='uploads' -c --use-compress-program='gzip -1' -f "$PACKAGE_FILE" -T "$PACKAGE_FILE_LIST"
@@ -54,6 +54,10 @@ fi
 
 # ---- 安全检查 3：无敏感 env 文件 ----
 TAR_LIST="$(tar tzf "$PACKAGE_FILE")"
+if echo "$TAR_LIST" | grep -E '(^|/)\.?.*\.bak-[^/]*$' >/dev/null; then
+  echo "错误: 发布包包含 .bak-* 备份文件" >&2
+  exit 1
+fi
 SENSITIVE_ENV="$(echo "$TAR_LIST" | grep '\.env' || true)"
 if [ -n "$SENSITIVE_ENV" ]; then
   while IFS= read -r line; do

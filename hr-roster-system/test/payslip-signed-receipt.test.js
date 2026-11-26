@@ -82,8 +82,9 @@ async function main() {
       assert.equal(context.userId, 501);
       return {
         receiptNo: 'PSR-20261112-ABCDEF123456',
-        storagePath: 'company-1/payslip-receipts/receipt.pdf',
-        receiptSha256: '4'.repeat(64),
+        storageMode: 'DYNAMIC',
+        storagePath: null,
+        receiptSha256: null,
         created: true
       };
     };
@@ -115,7 +116,7 @@ async function main() {
     assert.equal(success.state.logParams.signatureSha256, '2'.repeat(64));
     assert.equal(success.state.logParams.challengeId, 1201);
     assert.equal(success.state.logParams.statementVersion, '2.1');
-    assert.equal(success.state.logParams.keyVersion, 'v1');
+    assert.equal(success.state.logParams.keyVersion, 'v2');
     assert.deepEqual(success.state.detailParams, {
       companyId: 1,
       payslipId: 901,
@@ -186,8 +187,8 @@ async function main() {
     );
     assert.deepEqual(
       removedReceiptFiles,
-      ['company-1/payslip-receipts/receipt.pdf'],
-      '事务失败只能清理本次新生成的电子回执文件'
+      [],
+      '动态回执不生成文件，事务失败时不得执行文件清理'
     );
   } finally {
     db.transaction = originalTransaction;

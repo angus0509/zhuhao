@@ -25,7 +25,7 @@ function normalizeEventAt(value = new Date()) {
   return result;
 }
 
-function newEvidencePayload(context) {
+function v1EvidencePayload(context) {
   return [
     context.companyId,
     context.payslipId,
@@ -41,6 +41,26 @@ function newEvidencePayload(context) {
     context.previousEvidenceHash || '',
     context.keyVersion
   ].join('|');
+}
+
+function v2EvidencePayload(context) {
+  return `payslip-evidence-log:v2|${JSON.stringify([
+    context.companyId,
+    context.payslipId,
+    context.employeeId,
+    context.userId,
+    context.actionType,
+    context.resultStatus,
+    context.eventAt.toISOString(),
+    context.contentSha256 || '',
+    context.signatureSha256 || '',
+    context.challengeId || '',
+    context.statementVersion || '',
+    context.previousEvidenceHash || '',
+    context.keyVersion,
+    context.ipAddress || '',
+    context.userAgent || ''
+  ])}`;
 }
 
 function legacyEvidencePayload(context) {
@@ -59,11 +79,18 @@ function hmac(secret, payload) {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex');
 }
 
+function hashesEqual(left, right) {
+  const normalizedLeft = String(left || '').toLowerCase();
+  const normalizedRight = String(right || '').toLowerCase();
+  if (!HASH_PATTERN.test(normalizedLeft) || !HASH_PATTERN.test(normalizedRight)) return false;
+  return crypto.timingSafeEqual(Buffer.from(normalizedLeft, 'hex'), Buffer.from(normalizedRight, 'hex'));
+}
+
 function verifyLegacyHash(secret, context, storedHash) {
   const eventAt = new Date(context.eventAt);
   for (let millisecond = 0; millisecond < 1000; millisecond += 1) {
     eventAt.setMilliseconds(millisecond);
-    if (hmac(secret, legacyEvidencePayload({ ...context, eventAt })) === storedHash) return true;
+    if (hashesEqual(hmac(secret, legacyEvidencePayload({ ...context, eventAt })), storedHash)) return true;
   }
   return false;
 }
@@ -86,7 +113,9 @@ function verificationContext(row) {
     challengeId: rowValue(row, 'challengeId', 'challenge_id'),
     statementVersion: rowValue(row, 'statementVersion', 'statement_version'),
     previousEvidenceHash: rowValue(row, 'previousEvidenceHash', 'previous_evidence_hash'),
-    keyVersion: rowValue(row, 'evidenceKeyVersion', 'evidence_key_version')
+    keyVersion: rowValue(row, 'evidenceKeyVersion', 'evidence_key_version'),
+    ipAddress: String(rowValue(row, 'ipAddress', 'ip_address') || ''),
+    userAgent: String(rowValue(row, 'userAgent', 'user_agent') || '')
   };
 }
 
@@ -137,9 +166,16 @@ function verifyEvidenceRows(rows, secretResolver) {
     if (Buffer.byteLength(secret, 'utf8') < 32) {
       errors.push({ index, id, code: 'SECRET_UNAVAILABLE' });
     } else {
-      const validHash = keyVersion
-        ? hmac(secret, newEvidencePayload({ ...context, keyVersion })) === storedHash
-        : verifyLegacyHash(secret, context, storedHash);
+      let validHash = false;
+      if (!keyVersion) {
+        validHash = verifyLegacyHash(secret, context, storedHash);
+      } else if (keyVersion === 'v1') {
+        validHash = hashesEqual(hmac(secret, v1EvidencePayload({ ...context, keyVersion })), storedHash);
+      } else if (keyVersion === 'v2') {
+        validHash = hashesEqual(hmac(secret, v2EvidencePayload({ ...context, keyVersion })), storedHash);
+      } else {
+        errors.push({ index, id, code: 'KEY_VERSION_UNSUPPORTED' });
+      }
       if (!validHash) errors.push({ index, id, code: 'HASH_MISMATCH' });
     }
     previousHash = storedHash;
@@ -174,11 +210,13 @@ function createPayslipEvidenceLogService(dependencies = {}) {
       signatureSha256: optionalHash(input.signatureSha256, '签名摘要无效'),
       challengeId: input.challengeId == null ? null : positiveInteger(input.challengeId, '签收挑战无效'),
       statementVersion: String(input.statementVersion || '').trim() || null,
-      keyVersion: String(input.keyVersion || defaultKeyVersion || '').trim()
+      keyVersion: String(input.keyVersion || defaultKeyVersion || '').trim(),
+      ipAddress: String(input.ipAddress || '').slice(0, 50) || null,
+      userAgent: String(input.userAgent || '').slice(0, 255) || null
     };
     if (!ACTION_TYPES.has(context.actionType)) throw createError('证据日志操作类型无效');
     if (!Number.isInteger(context.resultStatus)) throw createError('证据日志结果状态无效');
-    if (!context.keyVersion || context.keyVersion.length > 20) throw createError('证据密钥版本无效');
+    if (!['v1', 'v2'].includes(context.keyVersion)) throw createError('证据密钥版本无效');
     if (context.actionType === 'ACCEPT'
       && (!context.contentSha256 || !context.signatureSha256 || !context.challengeId
         || !['2.0', '2.1'].includes(context.statementVersion))) {
@@ -200,10 +238,11 @@ function createPayslipEvidenceLogService(dependencies = {}) {
     if (previousEvidenceHash && !HASH_PATTERN.test(previousEvidenceHash)) {
       throw createError('上一条工资条证据日志无效，暂不能继续操作', 409);
     }
-    const evidenceHash = hmac(evidenceSecret, newEvidencePayload({
-      ...context,
-      previousEvidenceHash
-    }));
+    const payloadContext = { ...context, previousEvidenceHash };
+    const evidenceHash = hmac(
+      evidenceSecret,
+      context.keyVersion === 'v2' ? v2EvidencePayload(payloadContext) : v1EvidencePayload(payloadContext)
+    );
     const [insertResult] = await connection.execute(
       `INSERT INTO salary_receipt_log
        (company_id,salary_detail_id,employee_id,user_id,action_type,result_status,
@@ -214,8 +253,8 @@ function createPayslipEvidenceLogService(dependencies = {}) {
         :signatureSha256,:challengeId,:statementVersion,:keyVersion,:eventAt)`,
       {
         ...context,
-        ipAddress: String(input.ipAddress || '').slice(0, 50) || null,
-        userAgent: String(input.userAgent || '').slice(0, 255) || null,
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
         previousEvidenceHash,
         evidenceHash
       }
