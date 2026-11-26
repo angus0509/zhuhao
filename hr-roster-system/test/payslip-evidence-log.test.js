@@ -231,6 +231,21 @@ async function main() {
   assert.equal(verifyEvidenceRows([legacy], secretResolver).valid, true,
     '历史日志必须兼容数据库DATETIME丢失毫秒后的旧JWT哈希验真');
 
+  const roundedLegacy = {
+    ...legacy,
+    id: 11,
+    createdAt: new Date('2026-10-01T08:00:01.000Z'),
+    evidenceHash: legacyHash({ ...legacy, createdAt: legacyOriginalEventAt })
+  };
+  assert.equal(verifyEvidenceRows([roundedLegacy], secretResolver).valid, true,
+    '历史日志必须兼容MySQL将大于等于500毫秒进位到下一秒');
+  const outsideRoundedWindow = {
+    ...roundedLegacy,
+    createdAt: new Date('2026-10-01T08:00:02.000Z')
+  };
+  assert.equal(verifyEvidenceRows([outsideRoundedWindow], secretResolver).valid, false,
+    '历史日志兼容窗口不得超过前一秒');
+
   const empty = verifyEvidenceRows([], secretResolver);
   assert.equal(empty.valid, false, '没有证据日志时不能报告链验证通过');
   assert.equal(empty.errors.some(error => error.code === 'NO_EVIDENCE_ROWS'), true);
