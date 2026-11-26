@@ -189,6 +189,7 @@ run_migration "$STAGE_DIR/sql/migrate-web-project-attendance-20260915.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-disable-employer-insurance-module-20261110.mysql.sql"
 run_migration "$STAGE_DIR/sql/migrate-payslip-evidence-chain-20261112.mysql.sql"
+run_migration "$STAGE_DIR/sql/migrate-payslip-dynamic-receipt-20261126.mysql.sql"
 
 mysql_scalar() {
   local sql="$1"
@@ -228,6 +229,15 @@ test "$RECRUITMENT_CHANNEL_READY" = "2" || { echo "招聘渠道台账迁移不�
 
 PAYSLIP_RECEIPT_LOG_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_receipt_log'")"
 test "$PAYSLIP_RECEIPT_LOG_READY" = "1" || { echo "工资条签收证据表迁移不完整" >&2; exit 1; }
+
+DYNAMIC_RECEIPT_COLUMN_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='salary_evidence_receipt' AND COLUMN_NAME IN ('receipt_payload_hmac','receipt_payload_key_version','storage_mode')")"
+test "$DYNAMIC_RECEIPT_COLUMN_READY" = "3" || { echo "动态工资条回执字段迁移不完整" >&2; exit 1; }
+
+DYNAMIC_RECEIPT_CHECK_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='hr_roster' AND TABLE_NAME='salary_evidence_receipt' AND CONSTRAINT_TYPE='CHECK' AND CONSTRAINT_NAME IN ('chk_salary_evidence_receipt_storage','chk_salary_evidence_receipt_dynamic_hmac','chk_salary_evidence_receipt_dynamic_key')")"
+test "$DYNAMIC_RECEIPT_CHECK_READY" = "3" || { echo "动态工资条回执约束迁移不完整" >&2; exit 1; }
+
+DYNAMIC_RECEIPT_CHECK_CLAUSE_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA='hr_roster' AND ((CONSTRAINT_NAME='chk_salary_evidence_receipt_storage' AND CHECK_CLAUSE LIKE '%storage_mode%' AND CHECK_CLAUSE LIKE '%storage_path%' AND CHECK_CLAUSE LIKE '%receipt_sha256%' AND CHECK_CLAUSE LIKE '%FILE%' AND CHECK_CLAUSE LIKE '%DYNAMIC%') OR (CONSTRAINT_NAME='chk_salary_evidence_receipt_dynamic_hmac' AND CHECK_CLAUSE LIKE '%storage_mode%' AND CHECK_CLAUSE LIKE '%receipt_payload_hmac%' AND CHECK_CLAUSE LIKE '%DYNAMIC%') OR (CONSTRAINT_NAME='chk_salary_evidence_receipt_dynamic_key' AND CHECK_CLAUSE LIKE '%storage_mode%' AND CHECK_CLAUSE LIKE '%receipt_payload_key_version%' AND CHECK_CLAUSE LIKE '%DYNAMIC%'))")"
+test "$DYNAMIC_RECEIPT_CHECK_CLAUSE_READY" = "3" || { echo "动态工资条回执约束表达式异常" >&2; exit 1; }
 
 TOKEN_VERSION_READY="$(mysql_scalar "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='hr_roster' AND TABLE_NAME='sys_user' AND COLUMN_NAME='token_version'")"
 test "$TOKEN_VERSION_READY" = "1" || { echo "账号Token版本字段迁移不完整" >&2; exit 1; }

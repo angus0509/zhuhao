@@ -33,6 +33,13 @@ function main() {
     '{"a":{"c":3,"d":4},"b":2}',
     '对象键必须递归排序，保证不同插入顺序得到相同字节'
   );
+  const protoPayload = JSON.parse('{"a":1,"__proto__":{"tampered":true}}');
+  assert.notEqual(
+    canonicalStringify(protoPayload),
+    canonicalStringify({ a: 1 }),
+    'canonical JSON必须把__proto__作为普通自有键纳入摘要'
+  );
+  assert.match(canonicalStringify(protoPayload), /"__proto__"/);
 
   const snapshot = buildPayslipEvidenceSnapshot(baseRow());
   assert.deepEqual(snapshot, {

@@ -59,6 +59,13 @@ if [ -n "$ABSOLUTE" ]; then
   PRE_EXTRACT_PASS=false
 fi
 
+BAK_FILES="$(tar tzf "$ARCHIVE" | grep -E '(^|/)\.?.*\.bak-[^/]*$' || true)"
+if [ -n "$BAK_FILES" ]; then
+  echo "  失败: tar 包含 .bak-* 备份文件" >&2
+  echo "$BAK_FILES" >&2
+  PRE_EXTRACT_PASS=false
+fi
+
 if [ "$PRE_EXTRACT_PASS" != true ]; then
   echo ""
   echo "========================================"
@@ -147,6 +154,7 @@ REQUIRED=(
   "sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
   "sql/migrate-disable-employer-insurance-module-20261110.mysql.sql"
   "sql/migrate-payslip-evidence-chain-20261112.mysql.sql"
+  "sql/migrate-payslip-dynamic-receipt-20261126.mysql.sql"
 )
 for f in "${REQUIRED[@]}"; do
   if [ ! -f "$WORKDIR/$f" ]; then
@@ -290,8 +298,9 @@ M33="sql/migrate-web-project-attendance-20260915.mysql.sql"
 M34="sql/migrate-attendance-hourly-wage-20260916.mysql.sql"
 M35="sql/migrate-disable-employer-insurance-module-20261110.mysql.sql"
 M36="sql/migrate-payslip-evidence-chain-20261112.mysql.sql"
+M37="sql/migrate-payslip-dynamic-receipt-20261126.mysql.sql"
 
-for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19" "$M20" "$M21" "$M22" "$M23" "$M24" "$M25" "$M26" "$M27" "$M28" "$M29" "$M30" "$M31" "$M32" "$M33" "$M34" "$M35" "$M36"; do
+for mp in "$M1" "$M2" "$M3" "$M4" "$M5" "$M6" "$M7" "$M8A" "$M8" "$M9" "$M10" "$M11" "$M12" "$M13" "$M14" "$M15" "$M16" "$M17" "$M18" "$M19" "$M20" "$M21" "$M22" "$M23" "$M24" "$M25" "$M26" "$M27" "$M28" "$M29" "$M30" "$M31" "$M32" "$M33" "$M34" "$M35" "$M36" "$M37"; do
   if [ ! -f "$WORKDIR/$mp" ]; then continue; fi
   content="$(cat "$WORKDIR/$mp")"
 

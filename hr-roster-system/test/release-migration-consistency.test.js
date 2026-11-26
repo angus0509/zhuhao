@@ -122,6 +122,29 @@ assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${payslipEvidenceMigrationP
 assert.doesNotMatch(payslipEvidenceMigration, /\b(?:DELETE|DROP|TRUNCATE)\b/i,
   '工资条证据链迁移不得删除表或历史数据');
 
+const dynamicReceiptMigrationPath = 'sql/migrate-payslip-dynamic-receipt-20261126.mysql.sql';
+assert.ok(fs.existsSync(path.join(root, dynamicReceiptMigrationPath)), '发布源码必须包含动态回执迁移');
+const dynamicReceiptMigration = read(dynamicReceiptMigrationPath);
+assert.ok(verify.includes(`"${dynamicReceiptMigrationPath}"`),
+  '发布包验收必须要求动态回执迁移文件存在');
+assert.match(verify, /M37="sql\/migrate-payslip-dynamic-receipt-20261126\.mysql\.sql"/,
+  '动态回执迁移必须进入统一安全审计清单');
+assert.ok(deploy.includes(`run_migration "$STAGE_DIR/${dynamicReceiptMigrationPath}"`),
+  '部署脚本必须执行动态回执迁移');
+assert.match(deploy, /DYNAMIC_RECEIPT_COLUMN_READY=.*receipt_payload_hmac.*receipt_payload_key_version.*storage_mode/s,
+  '部署后必须核验动态回执字段');
+assert.match(deploy, /DYNAMIC_RECEIPT_CHECK_READY=.*chk_salary_evidence_receipt_storage.*chk_salary_evidence_receipt_dynamic_hmac.*chk_salary_evidence_receipt_dynamic_key/s,
+  '部署后必须核验动态回执CHECK约束');
+assert.match(deploy, /DYNAMIC_RECEIPT_CHECK_CLAUSE_READY=.*CHECK_CONSTRAINTS.*CHECK_CLAUSE/s,
+  '部署后必须核验动态回执CHECK表达式，不能只看同名约束');
+assert.match(
+  deploy,
+  /run_migration "\$STAGE_DIR\/sql\/migrate-payslip-evidence-chain-20261112\.mysql\.sql"\s+run_migration "\$STAGE_DIR\/sql\/migrate-payslip-dynamic-receipt-20261126\.mysql\.sql"/,
+  '动态回执迁移必须紧跟工资条证据链迁移'
+);
+assert.doesNotMatch(dynamicReceiptMigration, /\b(?:DELETE|DROP|TRUNCATE)\b/i,
+  '动态回执迁移不得删除表或历史数据');
+
 for (const attendanceMigrationPath of [
   'sql/migrate-attendance-timekeeping-20260909.mysql.sql',
   'sql/migrate-attendance-geofence-20260915.mysql.sql',

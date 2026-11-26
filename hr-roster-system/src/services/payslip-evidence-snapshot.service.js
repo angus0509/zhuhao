@@ -14,7 +14,7 @@ function canonicalize(value) {
       const item = value[key];
       if (item !== undefined) result[key] = canonicalize(item);
       return result;
-    }, {});
+    }, Object.create(null));
   }
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw createError('工资条证据快照包含无效数字');

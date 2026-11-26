@@ -68,7 +68,7 @@ const env = {
   },
   payslipEvidence: {
     hmacSecret: process.env.PAYSLIP_EVIDENCE_HMAC_SECRET || '',
-    keyVersion: 'v1',
+    keyVersion: 'v2',
     challengeTtlSeconds: 5 * 60
   }
 };

@@ -14,7 +14,7 @@ const LEGACY_SECRET = 'test-legacy-jwt-secret-at-least-32-bytes';
 const CONTENT_HASH = '1'.repeat(64);
 const SIGNATURE_HASH = '2'.repeat(64);
 
-function createHarness() {
+function createHarness(keyVersion = 'v2') {
   const state = { rows: [], queries: [] };
   const connection = {
     async execute(sql, params = {}) {
@@ -39,6 +39,8 @@ function createHarness() {
           challengeId: params.challengeId,
           statementVersion: params.statementVersion,
           evidenceKeyVersion: params.keyVersion,
+          ipAddress: params.ipAddress,
+          userAgent: params.userAgent,
           createdAt: params.eventAt
         };
         state.rows.push(row);
@@ -49,7 +51,7 @@ function createHarness() {
   };
   const service = createPayslipEvidenceLogService({
     evidenceSecret: EVIDENCE_SECRET,
-    keyVersion: 'v1'
+    keyVersion
   });
   return { state, connection, service };
 }
@@ -125,7 +127,21 @@ async function main() {
   assert.match(historicalAccepted.evidenceHash, /^[a-f0-9]{64}$/,
     '历史 2.0 签名仍应能写入签收证据日志');
 
-  const secretResolver = version => version === 'v1' ? EVIDENCE_SECRET : LEGACY_SECRET;
+  const v1Harness = createHarness('v1');
+  await v1Harness.service.appendEvidenceLog(v1Harness.connection, {
+    companyId: 1,
+    payslipId: 900,
+    employeeId: 88,
+    userId: 501,
+    actionType: 'VIEW',
+    resultStatus: 1,
+    eventAt: new Date('2026-11-11T08:00:00.000Z'),
+    contentSha256: CONTENT_HASH,
+    ipAddress: '127.0.0.1',
+    userAgent: 'legacy-v1-device'
+  });
+
+  const secretResolver = version => ['v1', 'v2'].includes(version) ? EVIDENCE_SECRET : LEGACY_SECRET;
   const verified = verifyEvidenceRows(harness.state.rows, secretResolver);
   assert.deepEqual(verified, {
     valid: true,
@@ -133,12 +149,46 @@ async function main() {
     errors: [],
     chainHead: second.evidenceHash
   });
+  assert.equal(verifyEvidenceRows(v1Harness.state.rows, secretResolver).valid, true,
+    '升级v2后必须继续验证历史v1证据日志');
 
   const tampered = structuredClone(harness.state.rows);
   tampered[0].resultStatus = 9;
   const tamperedResult = verifyEvidenceRows(tampered, secretResolver);
   assert.equal(tamperedResult.valid, false);
   assert.equal(tamperedResult.errors.some(error => error.code === 'HASH_MISMATCH'), true);
+
+  const tamperedSource = structuredClone(harness.state.rows);
+  tamperedSource[0].ipAddress = '203.0.113.99';
+  const tamperedSourceResult = verifyEvidenceRows(tamperedSource, secretResolver);
+  assert.equal(tamperedSourceResult.valid, false,
+    'v2证据日志必须保护IP和设备信息，篡改来源后不得通过');
+  assert.equal(tamperedSourceResult.errors.some(error => error.code === 'HASH_MISMATCH'), true);
+
+  const boundaryA = createHarness();
+  const boundaryB = createHarness();
+  const boundaryInput = {
+    companyId: 1,
+    payslipId: 903,
+    employeeId: 88,
+    userId: 501,
+    actionType: 'VIEW',
+    resultStatus: 1,
+    eventAt: new Date('2026-11-12T08:10:00.000Z'),
+    contentSha256: CONTENT_HASH
+  };
+  const boundaryHashA = await boundaryA.service.appendEvidenceLog(boundaryA.connection, {
+    ...boundaryInput,
+    ipAddress: '1.2.3.4|foo',
+    userAgent: 'bar'
+  });
+  const boundaryHashB = await boundaryB.service.appendEvidenceLog(boundaryB.connection, {
+    ...boundaryInput,
+    ipAddress: '1.2.3.4',
+    userAgent: 'foo|bar'
+  });
+  assert.notEqual(boundaryHashA.evidenceHash, boundaryHashB.evidenceHash,
+    'v2载荷编码必须区分包含分隔符的IP和User-Agent字段边界');
 
   const missing = verifyEvidenceRows([harness.state.rows[1]], secretResolver);
   assert.equal(missing.valid, false);

@@ -856,8 +856,11 @@ CREATE TABLE salary_evidence_receipt (
   signature_sha256 CHAR(64) NOT NULL COMMENT '签名文件摘要',
   evidence_chain_head CHAR(64) NOT NULL COMMENT '证据日志链头',
   receipt_payload JSON NOT NULL COMMENT '固定回执数据',
-  storage_path VARCHAR(500) NOT NULL COMMENT '企业私有相对存储路径',
-  receipt_sha256 CHAR(64) NOT NULL COMMENT 'PDF文件SHA-256',
+  receipt_payload_hmac CHAR(64) NULL COMMENT '动态回执固定载荷HMAC-SHA256',
+  receipt_payload_key_version VARCHAR(20) NULL COMMENT '动态回执载荷HMAC密钥版本',
+  storage_mode VARCHAR(20) NOT NULL DEFAULT 'FILE' COMMENT 'FILE历史文件 DYNAMIC动态生成',
+  storage_path VARCHAR(500) NULL COMMENT 'FILE模式企业私有相对存储路径',
+  receipt_sha256 CHAR(64) NULL COMMENT 'FILE模式PDF文件SHA-256',
   generated_at DATETIME NOT NULL COMMENT '回执生成时间',
   status TINYINT NOT NULL DEFAULT 1 COMMENT '1有效 0作废',
   created_by BIGINT NOT NULL COMMENT '签收员工账号ID',
@@ -865,7 +868,10 @@ CREATE TABLE salary_evidence_receipt (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_salary_evidence_receipt_detail (company_id,salary_detail_id),
   UNIQUE KEY uk_salary_evidence_receipt_no (receipt_no),
-  KEY idx_employee_time (company_id,employee_id,generated_at)
+  KEY idx_employee_time (company_id,employee_id,generated_at),
+  CONSTRAINT chk_salary_evidence_receipt_storage CHECK ((storage_mode = 'FILE' AND storage_path IS NOT NULL AND receipt_sha256 IS NOT NULL) OR (storage_mode = 'DYNAMIC' AND storage_path IS NULL AND receipt_sha256 IS NULL)),
+  CONSTRAINT chk_salary_evidence_receipt_dynamic_hmac CHECK (storage_mode <> 'DYNAMIC' OR receipt_payload_hmac IS NOT NULL),
+  CONSTRAINT chk_salary_evidence_receipt_dynamic_key CHECK (storage_mode <> 'DYNAMIC' OR receipt_payload_key_version IS NOT NULL)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资条电子签收回执';
 
 CREATE TABLE salary_dispute (
