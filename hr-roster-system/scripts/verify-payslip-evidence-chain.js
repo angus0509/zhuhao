@@ -55,13 +55,27 @@ async function run(options = {}) {
   return result.valid ? 0 : 1;
 }
 
+async function runCli(options = {}) {
+  const runner = options.runner || run;
+  const pool = options.pool || db.pool;
+  const processRef = options.processRef || process;
+  const errorOutput = options.errorOutput || console.error;
+  let code = 1;
+  try {
+    code = await runner(options.runOptions);
+  } catch (_) {
+    errorOutput(JSON.stringify({ valid: false, checked: 0, errors: [{ code: 'VERIFY_FAILED' }] }));
+  } finally {
+    await pool.end();
+  }
+  processRef.exitCode = code;
+  return code;
+}
+
 if (require.main === module) {
-  run().then(code => {
-    process.exitCode = code;
-  }).catch(() => {
-    console.error(JSON.stringify({ valid: false, checked: 0, errors: [{ code: 'VERIFY_FAILED' }] }));
+  runCli().catch(() => {
     process.exitCode = 1;
   });
 }
 
-module.exports = { run };
+module.exports = { run, runCli };

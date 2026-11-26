@@ -7,7 +7,7 @@ const {
   createPayslipEvidenceLogService,
   verifyEvidenceRows
 } = require('../src/services/payslip-evidence-log.service');
-const { run } = require('../scripts/verify-payslip-evidence-chain');
+const { run, runCli } = require('../scripts/verify-payslip-evidence-chain');
 
 const EVIDENCE_SECRET = 'test-evidence-chain-secret-at-least-32-bytes';
 const LEGACY_SECRET = 'test-legacy-jwt-secret-at-least-32-bytes';
@@ -272,6 +272,18 @@ async function main() {
   assert.equal(cliPayload.valid, true);
   assert.equal(cliPayload.chainHead, second.evidenceHash);
   assert.doesNotMatch(cliOutput[0], /实发工资|4800|itemSnapshot|evidenceSnapshot/);
+
+  const cliLifecycle = { exitCode: null, poolClosed: 0 };
+  const lifecycleCode = await runCli({
+    runner: async () => 0,
+    pool: { end: async () => { cliLifecycle.poolClosed += 1; } },
+    processRef: cliLifecycle,
+    errorOutput: () => {}
+  });
+  assert.equal(lifecycleCode, 0);
+  assert.equal(cliLifecycle.exitCode, 0);
+  assert.equal(cliLifecycle.poolClosed, 1,
+    '证据链诊断CLI执行后必须关闭数据库连接池');
 
   const invalidCode = await run({
     argv: ['--company-id', '1', '--payslip-id', '901'],
