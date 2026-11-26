@@ -39,8 +39,10 @@ function harness(options = {}) {
 }
 
 async function main() {
-  assert.deepEqual(parseArgs([]), { apply: false });
-  assert.deepEqual(parseArgs(['--apply']), { apply: true });
+  assert.deepEqual(parseArgs([]), { apply: false, continueOnError: false });
+  assert.deepEqual(parseArgs(['--apply', '--continue-on-error']), {
+    apply: true, continueOnError: true
+  });
   assert.throws(() => parseArgs(['--force']), /未知参数/);
 
   const migratedAt = new Date('2026-11-26T09:30:00.000Z');
@@ -56,14 +58,16 @@ async function main() {
 
   const dryRun = harness();
   assert.deepEqual(await runMigration({ db: dryRun.database, receiptService: dryRun.service,
-    secret, now: () => migratedAt }), { scanned: 1, converted: 0, deleted: 0 });
+    secret, now: () => migratedAt }), { scanned: 1, converted: 0, deleted: 0, failed: 0 });
   assert.equal(dryRun.calls.resolves, 1);
   assert.equal(dryRun.calls.updates.length, 0);
   assert.equal(dryRun.calls.deletes.length, 0);
 
   const apply = harness();
   assert.deepEqual(await runMigration({ db: apply.database, receiptService: apply.service,
-    secret, now: () => migratedAt, apply: true }), { scanned: 1, converted: 1, deleted: 1 });
+    secret, now: () => migratedAt, apply: true }), {
+    scanned: 1, converted: 1, deleted: 1, failed: 0
+  });
   assert.equal(apply.calls.resolves, 2);
   assert.equal(apply.calls.updates.length, 1);
   assert.match(apply.calls.updates[0].sql, /storage_mode='DYNAMIC'/);
@@ -75,6 +79,18 @@ async function main() {
   assert.equal(rollback.calls.rollbacks.length, 1);
   assert.match(rollback.calls.rollbacks[0].sql, /storage_mode='FILE'/);
   assert.equal(rollback.calls.deletes.length, 0);
+
+  const continueAfterFailure = harness({ failDynamic: true });
+  assert.deepEqual(await runMigration({
+    db: continueAfterFailure.database,
+    receiptService: continueAfterFailure.service,
+    secret,
+    now: () => migratedAt,
+    apply: true,
+    continueOnError: true
+  }), { scanned: 1, converted: 0, deleted: 0, failed: 1 });
+  assert.equal(continueAfterFailure.calls.rollbacks.length, 1);
+  assert.equal(continueAfterFailure.calls.deletes.length, 0);
   console.log('payslip-file-receipt-migration-tests-ok');
 }
 

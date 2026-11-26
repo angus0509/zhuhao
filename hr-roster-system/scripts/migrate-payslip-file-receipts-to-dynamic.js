@@ -47,6 +47,7 @@ async function runMigration(options = {}) {
   const secret = options.secret ?? env.payslipEvidence.hmacSecret;
   const now = options.now || (() => new Date());
   const apply = options.apply === true;
+  const continueOnError = options.continueOnError === true;
   const rows = await database.query(
     `SELECT r.id,r.company_id companyId,r.salary_detail_id payslipId,
             receipt_payload receiptPayload,storage_path storagePath,
@@ -58,7 +59,7 @@ async function runMigration(options = {}) {
      WHERE r.storage_mode='FILE' AND r.status=1
      ORDER BY r.id`
   );
-  const result = { scanned: rows.length, converted: 0, deleted: 0 };
+  const result = { scanned: rows.length, converted: 0, deleted: 0, failed: 0 };
 
   for (const row of rows) {
     const adminUser = { id: 0, companyId: Number(row.companyId), dataScope: 1 };
@@ -111,6 +112,8 @@ async function runMigration(options = {}) {
           receiptPayloadHmac: hmac
         }
       );
+      result.failed += 1;
+      if (continueOnError) continue;
       throw error;
     }
     result.converted += 1;
@@ -121,9 +124,13 @@ async function runMigration(options = {}) {
 }
 
 function parseArgs(argv) {
-  const unknown = argv.filter(item => item !== '--apply');
+  const allowed = new Set(['--apply', '--continue-on-error']);
+  const unknown = argv.filter(item => !allowed.has(item));
   if (unknown.length) throw new Error(`未知参数: ${unknown.join(', ')}`);
-  return { apply: argv.includes('--apply') };
+  return {
+    apply: argv.includes('--apply'),
+    continueOnError: argv.includes('--continue-on-error')
+  };
 }
 
 if (require.main === module) {
