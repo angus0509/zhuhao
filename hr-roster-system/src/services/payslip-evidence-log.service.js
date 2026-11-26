@@ -87,10 +87,13 @@ function hashesEqual(left, right) {
 }
 
 function verifyLegacyHash(secret, context, storedHash) {
-  const eventAt = new Date(context.eventAt);
-  for (let millisecond = 0; millisecond < 1000; millisecond += 1) {
-    eventAt.setMilliseconds(millisecond);
-    if (hashesEqual(hmac(secret, legacyEvidencePayload({ ...context, eventAt })), storedHash)) return true;
+  const storedEventAt = new Date(context.eventAt);
+  for (const secondOffset of [0, -1]) {
+    const eventAt = new Date(storedEventAt.getTime() + secondOffset * 1000);
+    for (let millisecond = 0; millisecond < 1000; millisecond += 1) {
+      eventAt.setMilliseconds(millisecond);
+      if (hashesEqual(hmac(secret, legacyEvidencePayload({ ...context, eventAt })), storedHash)) return true;
+    }
   }
   return false;
 }
