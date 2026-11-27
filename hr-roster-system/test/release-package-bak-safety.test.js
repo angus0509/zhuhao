@@ -87,6 +87,68 @@ try {
   fs.rmSync(backupRoot, { recursive: true, force: true });
 }
 
+function runDailyBackup(failDump) {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'daily-attachment-retention-'));
+  try {
+    const projectDir = path.join(fixtureRoot, 'project');
+    const backupDir = path.join(fixtureRoot, 'backups');
+    const fakeBin = path.join(fixtureRoot, 'bin');
+    fs.mkdirSync(path.join(projectDir, 'uploads'), { recursive: true });
+    fs.mkdirSync(path.join(projectDir, 'scripts'));
+    fs.mkdirSync(backupDir);
+    fs.mkdirSync(fakeBin);
+    fs.copyFileSync(
+      path.join(root, 'scripts/rotate-attachment-backups.sh'),
+      path.join(projectDir, 'scripts/rotate-attachment-backups.sh')
+    );
+    fs.writeFileSync(path.join(projectDir, '.env.production'), 'MYSQL_ROOT_PASSWORD=test-only-password\n');
+    fs.writeFileSync(path.join(projectDir, 'uploads', 'marker.txt'), 'current upload');
+    const fakeDocker = path.join(fakeBin, 'docker');
+    fs.writeFileSync(fakeDocker,
+      '#!/bin/sh\n[ "$FAKE_DUMP_FAIL" != 1 ] || exit 7\nprintf "%s\\n" "-- Table structure for table fixture" "CREATE TABLE fixture (id INT);"\n');
+    fs.chmodSync(fakeDocker, 0o755);
+
+    const oldAttachment = path.join(backupDir, 'attachments-20261125-000000.tar.gz');
+    const unrelatedBackup = path.join(backupDir, 'code-backup-20261125-000000.tar.gz');
+    createTarArchive(oldAttachment, 'old attachment');
+    createTarArchive(unrelatedBackup, 'old code');
+
+    const run = spawnSync(path.join(root, 'scripts/backup-mysql.sh'), [], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        PROJECT_DIR: projectDir,
+        BACKUP_DIR: backupDir,
+        MYSQL_CONTAINER: 'fixture-mysql',
+        FAKE_DUMP_FAIL: failDump ? '1' : '0'
+      }
+    });
+    const attachments = fs.readdirSync(backupDir).filter(name => /^attachments-.*\.tar\.gz$/.test(name));
+    if (failDump) {
+      assert.notEqual(run.status, 0, '数据库导出失败时每日备份必须失败');
+      assert.deepEqual(attachments, ['attachments-20261125-000000.tar.gz'],
+        '数据库导出失败时不得删除旧附件备份');
+    } else {
+      assert.equal(run.status, 0, `每日备份应成功: ${run.stdout}\n${run.stderr}`);
+      assert.equal(attachments.length, 1, '每日备份成功后只保留最新一份附件包');
+      assert.notEqual(attachments[0], 'attachments-20261125-000000.tar.gz',
+        '每日备份成功后必须删除旧附件包');
+      assert.equal(fs.existsSync(unrelatedBackup), true, '每日轮换不得删除代码备份');
+      const dbBackups = fs.readdirSync(backupDir).filter(name => /^hr_roster-.*\.sql\.gz$/.test(name));
+      assert.equal(dbBackups.length, 1, '每日数据库备份仍须保留');
+      execFileSync('gzip', ['-t', path.join(backupDir, dbBackups[0])]);
+      execFileSync('tar', ['tzf', path.join(backupDir, attachments[0])]);
+    }
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+runDailyBackup(false);
+runDailyBackup(true);
+
 const deploySource = fs.readFileSync(path.join(root, 'scripts/deploy-production.sh'), 'utf8');
 const healthGateIndex = deploySource.indexOf('if [ "$HEALTH_OK" != true ]');
 const rotationIndex = deploySource.indexOf('rotate-attachment-backups.sh');
