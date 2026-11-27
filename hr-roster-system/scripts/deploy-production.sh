@@ -345,5 +345,10 @@ if [ "$HEALTH_OK" != true ]; then
   exit 1
 fi
 
+# 只有应用健康上线后才轮换附件备份；轮换失败不改变已完成的部署结果。
+if ! bash "$PROJECT_DIR/scripts/rotate-attachment-backups.sh" "$BACKUP_DIR" "$ATTACHMENT_BACKUP"; then
+  echo "警告: 附件备份轮换失败，请人工核查；本次及历史备份均不作进一步处理" >&2
+fi
+
 echo "部署完成，数据库和代码备份位于: $BACKUP_DIR"
 echo "请让已有用户重新登录，并人工验证四角色菜单和数据范围。"
