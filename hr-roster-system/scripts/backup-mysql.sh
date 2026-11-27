@@ -1,5 +1,6 @@
-#!/bin/sh
-set -eu
+#!/bin/bash
+set -euo pipefail
+umask 077
 
 PROJECT_DIR=${PROJECT_DIR:-/opt/moluo-hr}
 BACKUP_DIR=${BACKUP_DIR:-/opt/moluo-backups}
@@ -41,7 +42,8 @@ mv "$ATTACHMENT_TEMP" "$ATTACHMENT_BACKUP"
 chmod 600 "$ATTACHMENT_BACKUP"
 tar tzf "$ATTACHMENT_BACKUP" >/dev/null
 
-find "$BACKUP_DIR" -type f -name 'attachments-*.tar.gz' -mtime +14 -delete
+# 新附件包通过完整性检查后，复用部署轮换规则，仅保留最新一份。
+bash "$PROJECT_DIR/scripts/rotate-attachment-backups.sh" "$BACKUP_DIR" "$ATTACHMENT_BACKUP"
 
 echo "$BACKUP_FILE"
 echo "$ATTACHMENT_BACKUP"
